@@ -52,13 +52,15 @@ fn is_year(s: &str) -> bool {
 
 fn two_digit_month(s: &str) -> Option<String> {
     let trimmed = s.trim();
-    if trimmed.len() == 2 && trimmed.chars().all(|c| c.is_ascii_digit()) {
-        return Some(trimmed.to_string());
+    if !(1..=2).contains(&trimmed.len()) || !trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return None;
     }
-    if trimmed.len() == 1 && trimmed.chars().all(|c| c.is_ascii_digit()) {
-        return Some(format!("0{trimmed}"));
+    let month: u8 = trimmed.parse().ok()?;
+    if (1..=12).contains(&month) {
+        Some(format!("{month:02}"))
+    } else {
+        None
     }
-    None
 }
 
 pub(crate) fn month_to_number(month: &str) -> Option<&'static str> {
@@ -124,6 +126,14 @@ mod tests {
     fn unrecognized_passes_through_verbatim() {
         assert_eq!(normalize("Q1 2022"), "Q1 2022");
         assert_eq!(normalize("Spring 2020"), "Spring 2020");
+    }
+
+    #[test]
+    fn out_of_range_month_passes_through_verbatim() {
+        // Month 0 and 13 are not valid; normalize should not produce YYYY-MM.
+        assert_eq!(normalize("2022-0"), "2022-0");
+        assert_eq!(normalize("2022-13"), "2022-13");
+        assert_eq!(normalize("2022/00"), "2022/00");
     }
 
     #[test]

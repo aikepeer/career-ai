@@ -26,6 +26,9 @@ pub enum ProfileError {
     #[error("linkedin export missing required file: {0}")]
     LinkedInMissingFile(String),
 
+    #[error("linkedin export schema changed — missing required column: {0}")]
+    LinkedInMissingColumn(String),
+
     #[error("schema validation failed: {0}")]
     Validation(String),
 }
