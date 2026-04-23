@@ -48,7 +48,7 @@ fn xml_to_text(xml: &str) -> std::result::Result<String, quick_xml::Error> {
             Event::Text(e) if in_text => {
                 out.push_str(&e.unescape()?);
             }
-            Event::Empty(e) if local_name(e.name().as_ref()) == b"br" => {
+            Event::Empty(e) | Event::Start(e) if local_name(e.name().as_ref()) == b"br" => {
                 out.push('\n');
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"p" => {

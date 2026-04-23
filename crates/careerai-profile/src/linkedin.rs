@@ -11,6 +11,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::dates;
 use crate::error::{ProfileError, Result};
 use crate::schema::{Education, Experience, Links, Personal, Profile, Project, Skills};
 
@@ -105,9 +106,19 @@ struct ProfileCsvRow {
 
 fn read_profile_csv<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<ProfileCsvRow> {
     let rows: Vec<ProfileCsvRow> = try_read_csv(archive, &["Profile.csv"])?;
-    rows.into_iter()
+    let row = rows
+        .into_iter()
         .next()
-        .ok_or_else(|| ProfileError::LinkedInMissingFile("Profile.csv (empty)".to_string()))
+        .ok_or_else(|| ProfileError::LinkedInMissingFile("Profile.csv (empty)".to_string()))?;
+    // Defensive: serde_default = empty string when the header doesn't match.
+    // Catch the LinkedIn-renamed-a-column case here instead of failing late at
+    // schema validation with a vague "name is required" message.
+    if join_name(&row.first_name, &row.last_name).is_empty() {
+        return Err(ProfileError::LinkedInMissingFile(
+            "Profile.csv: no `First Name`/`Last Name` columns".to_string(),
+        ));
+    }
+    Ok(row)
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,12 +145,8 @@ fn read_positions<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Ve
             title: r.title,
             company: r.company_name,
             location: r.location,
-            start: normalize_linkedin_date(&r.started_on),
-            end: if r.finished_on.trim().is_empty() {
-                "present".to_string()
-            } else {
-                normalize_linkedin_date(&r.finished_on)
-            },
+            start: dates::normalize(&r.started_on),
+            end: dates::normalize_end(&r.finished_on),
             bullets: split_description(&r.description),
         })
         .collect())
@@ -164,8 +171,8 @@ fn read_education<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Ve
         .map(|r| Education {
             degree: r.degree_name,
             institution: r.school_name,
-            start: normalize_linkedin_date(&r.start_date),
-            end: normalize_linkedin_date(&r.end_date),
+            start: dates::normalize(&r.start_date),
+            end: dates::normalize(&r.end_date),
         })
         .collect())
 }
@@ -219,46 +226,6 @@ fn split_description(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// LinkedIn exports dates as `"Feb 2022"`, `"2020"`, or empty. Normalize to
-/// `YYYY-MM` / `YYYY` / `""` so downstream code has a predictable format.
-fn normalize_linkedin_date(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    match parts.as_slice() {
-        [year] if year.len() == 4 => (*year).to_string(),
-        [month, year] if year.len() == 4 => {
-            if let Some(mm) = month_to_number(month) {
-                format!("{year}-{mm}")
-            } else {
-                (*year).to_string()
-            }
-        }
-        _ => trimmed.to_string(),
-    }
-}
-
-fn month_to_number(month: &str) -> Option<&'static str> {
-    let lower = month.to_lowercase();
-    match lower.get(..3)? {
-        "jan" => Some("01"),
-        "feb" => Some("02"),
-        "mar" => Some("03"),
-        "apr" => Some("04"),
-        "may" => Some("05"),
-        "jun" => Some("06"),
-        "jul" => Some("07"),
-        "aug" => Some("08"),
-        "sep" => Some("09"),
-        "oct" => Some("10"),
-        "nov" => Some("11"),
-        "dec" => Some("12"),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -279,14 +246,6 @@ mod tests {
             zw.finish().unwrap();
         }
         buf
-    }
-
-    #[test]
-    fn normalizes_linkedin_dates() {
-        assert_eq!(normalize_linkedin_date("Feb 2022"), "2022-02");
-        assert_eq!(normalize_linkedin_date("2020"), "2020");
-        assert_eq!(normalize_linkedin_date(""), "");
-        assert_eq!(normalize_linkedin_date("December 2019"), "2019-12");
     }
 
     #[test]
@@ -317,5 +276,22 @@ mod tests {
             parse_export_from_bytes(&bytes),
             Err(ProfileError::LinkedInMissingFile(_))
         ));
+    }
+
+    #[test]
+    fn renamed_name_columns_fail_loudly() {
+        // Hypothetical future LinkedIn rename: "First Name" → "Given Name".
+        // Without the guard, serde_default would yield empty strings and we'd
+        // emit a profile with name="" that only fails much later at
+        // schema validation.
+        let bytes = build_export(&[(
+            "Profile.csv",
+            "Given Name,Family Name,Email Address\nAlice,Kumar,a@example.com\n",
+        )]);
+        let err = parse_export_from_bytes(&bytes).unwrap_err();
+        assert!(
+            matches!(&err, ProfileError::LinkedInMissingFile(msg) if msg.contains("First Name")),
+            "expected LinkedInMissingFile pointing at name columns, got {err:?}",
+        );
     }
 }

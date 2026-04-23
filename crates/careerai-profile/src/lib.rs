@@ -4,6 +4,7 @@
 //! `profile.yaml` validated against the schema in [`schema`]. Parsers are
 //! best-effort seeds — the produced YAML is expected to be hand-edited.
 
+pub mod dates;
 pub mod docx;
 pub mod error;
 pub mod heuristic;

@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use crate::dates;
 use crate::schema::{Education, Experience, Links, Personal, Profile, Project, Skills};
 
 const EMAIL_RE: &str = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}";
@@ -284,10 +285,10 @@ fn split_dates(line: &str) -> (String, String) {
     for sep in [" - ", " – ", " — ", " to "] {
         if let Some(idx) = line.find(sep) {
             let (a, b) = line.split_at(idx);
-            return (a.trim().to_string(), b[sep.len()..].trim().to_lowercase());
+            return (dates::normalize(a), dates::normalize_end(&b[sep.len()..]));
         }
     }
-    (line.trim().to_string(), String::new())
+    (dates::normalize(line), String::new())
 }
 
 fn strip_bullet(line: &str) -> &str {

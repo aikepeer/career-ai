@@ -96,6 +96,9 @@ enum ProfileCommand {
     Import {
         /// One or more source files (PDF, DOCX, or LinkedIn ZIP).
         paths: Vec<std::path::PathBuf>,
+        /// Overwrite an existing `profile/profile.yaml`.
+        #[arg(long)]
+        force: bool,
     },
     /// Print the parsed profile.
     Show,
@@ -154,20 +157,26 @@ fn profile_yaml_path() -> Result<PathBuf> {
 
 fn run_profile(command: ProfileCommand) -> Result<()> {
     match command {
-        ProfileCommand::Import { paths } => profile_import(&paths),
+        ProfileCommand::Import { paths, force } => profile_import(&paths, force),
         ProfileCommand::Show => profile_show(),
         ProfileCommand::Validate => profile_validate(),
     }
 }
 
-fn profile_import(paths: &[PathBuf]) -> Result<()> {
+fn profile_import(paths: &[PathBuf], force: bool) -> Result<()> {
     if paths.is_empty() {
         anyhow::bail!("profile import: at least one source file is required");
+    }
+    let out = profile_yaml_path()?;
+    if out.exists() && !force {
+        anyhow::bail!(
+            "{} already exists; pass --force to overwrite",
+            out.display(),
+        );
     }
     let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
     let profile = careerai_profile::import_paths(&refs).context("parsing profile sources")?;
 
-    let out = profile_yaml_path()?;
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }

@@ -28,13 +28,6 @@ pub enum ProfileError {
 
     #[error("schema validation failed: {0}")]
     Validation(String),
-
-    #[error("could not parse date {value:?}: {source}")]
-    DateParse {
-        value: String,
-        #[source]
-        source: chrono::ParseError,
-    },
 }
 
 pub type Result<T> = std::result::Result<T, ProfileError>;
