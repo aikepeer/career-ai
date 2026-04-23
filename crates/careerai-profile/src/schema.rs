@@ -1,7 +1,9 @@
 //! Canonical profile schema.
 //!
 //! Mirrors `profile.example.yaml`. Serde round-trips to/from YAML; `validator`
-//! enforces required-field invariants (non-empty name, at least one position).
+//! enforces required-field invariants (currently only non-empty `personal.name`).
+//! Intentionally tolerant of empty experience/education/projects so partial
+//! imports still round-trip cleanly.
 
 use serde::{Deserialize, Serialize};
 use validator::Validate;

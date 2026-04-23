@@ -8,7 +8,6 @@ repository.workspace = true
 description = "Resume + LinkedIn export ingestion and canonical profile schema"
 
 [dependencies]
-anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true

@@ -1,8 +1,9 @@
 //! LinkedIn "Download your data" ZIP parser.
 //!
-//! The export ships a folder of CSVs. We read only the files relevant to a
-//! resume seed: `Profile.csv`, `Positions.csv`, `Education.csv`, `Skills.csv`,
-//! and optionally `Projects.csv`. Missing optional files are tolerated;
+//! The export places CSVs at the ZIP root (e.g. `Profile.csv`, not nested
+//! under a subdirectory). We read only the files relevant to a resume seed:
+//! `Profile.csv`, `Positions.csv`, `Education.csv`, `Skills.csv`, and
+//! optionally `Projects.csv`. Missing optional files are tolerated;
 //! `Profile.csv` is required.
 
 use std::fs::File;
@@ -63,9 +64,13 @@ fn read_csv<R: Read + Seek, T: for<'de> Deserialize<'de>>(
     archive: &mut zip::ZipArchive<R>,
     name: &str,
 ) -> Result<Vec<T>> {
-    let entry = archive
-        .by_name(name)
-        .map_err(|_| ProfileError::LinkedInMissingFile(name.to_string()))?;
+    let entry = match archive.by_name(name) {
+        Ok(entry) => entry,
+        Err(zip::result::ZipError::FileNotFound) => {
+            return Err(ProfileError::LinkedInMissingFile(name.to_string()));
+        }
+        Err(e) => return Err(ProfileError::Zip(e)),
+    };
     let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(entry);
     let mut out = Vec::new();
     for row in rdr.deserialize() {

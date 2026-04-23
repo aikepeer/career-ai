@@ -1,7 +1,8 @@
 //! `careerai` CLI entry point.
 //!
-//! Subcommands dispatch into the workspace crates. Most are stubs at M0;
-//! only `init` and `--help` are wired end-to-end.
+//! Subcommands dispatch into the workspace crates. `init`, `profile import`,
+//! `profile show`, `profile validate`, and `--help` are wired end-to-end at
+//! M1; the rest are stubs until M2+.
 
 use std::path::{Path, PathBuf};
 
