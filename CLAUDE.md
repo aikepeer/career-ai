@@ -1,0 +1,128 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project state
+
+Pre-implementation. The approved plan lives at `/home/kk/.claude/plans/federated-riding-mochi.md` and is the source of truth for scope, tech stack, and milestones — read it before making non-trivial changes.
+
+Current tree is a stale Python stub (`main.py`, `pyproject.toml`, `uv.lock`, `.python-version`, `.venv/`). **M0 deletes all of these** and rebuilds as a Rust cargo workspace. Do not add Python code or dependencies — the direction is Rust end-to-end.
+
+## What this project is
+
+A local, single-user pipeline that discovers jobs (ATS APIs + feeds + LinkedIn + Indeed), matches them to the user's profile, tailors a resume + cover letter per JD via LLM, and auto-applies with a dry-run safety gate. Target niche: **AI/ML + LLM apps** and **embedded platforms / robotics**, remote-first with Delhi-NCR fallback. Runs as a local daemon with `tokio-cron-scheduler` plus a `clap` CLI for one-shots.
+
+## Commands
+
+Once the Rust scaffold exists (post-M0), these are the common commands:
+
+```bash
+# Build + check
+cargo build                                    # dev build all workspace crates
+cargo build --release                          # release binary
+cargo check --workspace                        # fast type-check, no codegen
+
+# Tests
+cargo test --workspace                         # all tests
+cargo test -p careerai-match                   # single crate
+cargo test -p careerai-match -- filters::      # single module
+cargo test --test pipeline_it                  # single integration test file
+cargo nextest run --workspace                  # faster, better output (preferred in CI)
+INSTA_UPDATE=always cargo test                 # accept new insta snapshots
+
+# Lint + format + security
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo audit                                    # CVE scan of dependencies
+cargo deny check                               # license + supply-chain policy
+semgrep scan --config auto                     # per global CLAUDE.md
+
+# DB
+sqlx migrate run                               # apply migrations to DATABASE_URL
+sqlx migrate add <name>                        # create new migration
+
+# Run the CLI (post-M0)
+cargo run -p careerai-cli -- --help
+cargo run -p careerai-cli -- init
+cargo run -p careerai-cli -- discover --source greenhouse
+cargo run -p careerai-cli -- daemon
+```
+
+**External runtime dependency:** `pandoc` must be on PATH for resume rendering (DOCX + PDF). Install via distro package manager.
+
+## Architecture (big picture)
+
+The pipeline is a linear state machine persisted in SQLite. One `Listing` moves through these states, one row per transition appended to `events` for audit:
+
+```
+discovered → filtered_out | shortlisted → tailored → rendered → prepared → submitted | skipped | failed → responded
+```
+
+Two entry points drive the same stages:
+- **Daemon** (`careerai daemon`) — `tokio-cron-scheduler` runs each source on its own cadence (see `config/default.yaml`), walks new listings through the pipeline.
+- **CLI subcommands** (`discover`, `match`, `tailor`, `apply`, `inspect`) — same code paths, manual invocation.
+
+**Crate boundaries are deliberate — respect them:**
+
+| Crate | Owns | Never does |
+|---|---|---|
+| `careerai-core` | Pipeline orchestration, state transitions, config loading | HTTP, browser, DB queries directly |
+| `careerai-db` | `sqlx` models + queries + migrations | Business logic |
+| `careerai-sources` | Discovery adapters (one per job board) behind a `Source` trait | Submission, rendering |
+| `careerai-match` | Filters, fastembed embeddings, cosine rank | LLM calls |
+| `careerai-llm` | `rig`-based provider gateway, prompt building, response cache | Profile/listing schemas (imports them) |
+| `careerai-tailor` | Constrained-diff resume edits, cover letter drafting | Rendering to DOCX/PDF |
+| `careerai-render` | Tera → Markdown → `pandoc` subprocess | Network |
+| `careerai-submit` | Submitters per source behind a `Submitter` trait (HTTP, browser, email) + dry-run wrapper | Discovery, matching |
+| `careerai-scheduler` | Daemon, cron wiring, graceful shutdown | Submission logic |
+| `careerai-cli` | `clap` parsing, dispatch into other crates, human-readable output | Any logic beyond dispatch |
+
+All adapters plug in through two traits — `Source` (discovery) and `Submitter` (apply). Adding a new job board means implementing `Source`; adding a new apply channel means implementing `Submitter`. Do not special-case individual sources/submitters in `careerai-core`.
+
+**LLM safety invariant (non-negotiable):** The resume tailoring step emits a **constrained JSON diff** that can only reorder or rewrite existing bullets from the profile. It cannot invent new experience, titles, dates, or employers. Schema validation in `careerai-tailor/src/diff.rs` rejects anything outside that grammar. When touching this module, keep the validator strict and add tests for any new diff op.
+
+**Submit safety invariant:** `auto_submit` defaults to `false`. In dry-run mode, submitters must never issue a network write — they screenshot + log a `would_submit` event instead. Per-source `submit_enabled` gates must be honored even with `--auto-submit`. Integration tests assert both of these via `wiremock` expectations and log capture; don't bypass them.
+
+**Rate limiting:** All outbound submissions go through `governor` token-buckets defined per source in config. Quiet hours and daily caps are enforced at the boundary, not in the submitter. New submitters must acquire a permit before any network call.
+
+## Configuration
+
+All tunables (domains, locations, LLM models, rate caps, cron cadences, score threshold) live in `config/default.yaml` and can be overridden via `config/local.yaml` or env vars (via the `config` crate's layered loader). Never hardcode thresholds or cadences inside crates — read them from `CoreConfig` which is loaded once at startup.
+
+## Credentials
+
+OS keychain via the `keyring` crate is the primary store (LinkedIn cookies, Anthropic/OpenAI keys, SMTP creds). `.env` is the fallback for CI-like environments. Secrets must never hit logs — `tracing` has a redaction filter; there is a regex-based test in `careerai-submit` asserting captured events contain no known-secret shapes.
+
+## Testing layers
+
+Match the layer to what you're testing:
+
+1. **Unit** — pure functions (parsing, filters, rank math, diff apply). No I/O. Fast.
+2. **Integration** (`tests/*_it.rs`) — real SQLite (tempfile), `wiremock` for HTTP, `MockLLM` stub for `rig`. Validates state-machine transitions end-to-end.
+3. **Golden / snapshot** — `insta` for filter outputs; render-artifact tests extract text from produced DOCX/PDF via `pdf-extract` + `docx-rs` and diff against snapshots.
+4. **Browser** — `chromiumoxide` driven against captured LinkedIn/Indeed HTML served by a local `tiny-http` fixture server. CI never hits real LinkedIn/Indeed.
+
+`INSTA_UPDATE=always cargo test` is how you accept intentional snapshot changes — always review the diff before accepting.
+
+## Conventions
+
+- Edition 2021, MSRV 1.78. Pin via `rust-toolchain.toml`.
+- Errors: `thiserror` in library crates, `anyhow`/`color-eyre` only in `careerai-cli`.
+- Async: `tokio` everywhere. No `async-std` or `smol` mixing.
+- Logging: structured via `tracing`; no `println!` outside the CLI crate's user-facing output.
+- SQL: `sqlx` with compile-time-checked queries (`query!`/`query_as!`). Set `DATABASE_URL` and run `cargo sqlx prepare` before commits that change queries.
+- Workspace-level lints in `.cargo/config.toml`; clippy must be clean with `-D warnings`.
+
+## Global rules inherited from `~/.claude/CLAUDE.md`
+
+- Commits: 50/72 rule, generic subject, no "Claude"/"AI", always `git commit -s`, SSH-signed, hook blocks unsigned push.
+- No direct commits to `main`. Branch names: `feat/`, `fix/`, `chore/`, `docs/`, `issues/<n>-<slug>`. Check `git branch -r | grep -i <topic>` / `gh pr list --search <topic>` before branching.
+- Post-merge: delete the local branch.
+- Semgrep baseline: `.claude/.semgrep-baseline.json` — create on first entry, re-scan after ≥20 changed files or dep bumps or auth/crypto/SQL/deserialization changes.
+
+## Gotchas
+
+- The `.remember/logs/` directory is required by a hookify PostToolUse hook; do not delete it.
+- LinkedIn + Indeed auto-apply violates their ToS — this is a documented, accepted trade-off with mitigations (dry-run default, rate caps, stealth, kill-switches). Keep the safety gates intact when touching `careerai-submit`.
+- Anthropic prompt caching is used on the master-profile block to cut token cost — don't inline the profile into per-call prompts without caching.
+- `chromiumoxide` stealth relies on a checked-in `stealth-v2.js` pinned by SHA. When Chrome CDP changes break it, update the script and its hash in the same commit as the selector fixes.

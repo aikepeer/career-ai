@@ -1,0 +1,15 @@
+[package]
+name = "careerai-match"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hard filters + embedding-based listing-to-profile ranking"
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

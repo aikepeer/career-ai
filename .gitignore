@@ -1,10 +1,45 @@
-# Python-generated files
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env + secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Local data (generated at runtime)
+/artifacts/
+/logs/
+/backups/
+/data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# User profile (personal data)
+/profile/profile.yaml
+/profile/profile.yml
+
+# Local config overrides
+/config/local.yaml
+/config/local.yml
+
+# Hook working dir
+/.remember/logs/
+
+# Python leftovers (belt-and-suspenders; deleted in M0)
 __pycache__/
 *.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
+.venv/

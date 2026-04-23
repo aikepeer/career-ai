@@ -1,0 +1,80 @@
+user:
+  locations:
+    - "Remote"
+    - "Remote (India)"
+    - "Delhi"
+    - "Delhi NCR"
+    - "Gurgaon"
+    - "Noida"
+    - "Bangalore-remote"
+  timezone: "Asia/Kolkata"
+  work_auth:
+    india: true
+    us: false
+    eu: false
+
+domains:
+  - name: ai_ml
+    keywords_any:
+      - "machine learning"
+      - "ml engineer"
+      - "ai engineer"
+      - "applied scientist"
+      - "llm"
+      - "nlp"
+      - "computer vision"
+      - "deep learning"
+  - name: robotics_embedded
+    keywords_any:
+      - "robotics"
+      - "embedded"
+      - "firmware"
+      - "ros"
+      - "ros2"
+      - "rtos"
+      - "edge ai"
+      - "slam"
+      - "perception"
+      - "autonomous"
+
+match:
+  embedding_model: "BAAI/bge-small-en-v1.5"
+  score_threshold: 0.62
+
+rates:
+  linkedin:
+    max_per_day: 10
+    min_seconds_between: 120
+    jitter_seconds: 60
+    quiet_hours: [0, 7]
+  indeed:
+    max_per_day: 15
+    min_seconds_between: 90
+    jitter_seconds: 45
+  ats_http:
+    max_per_day: 50
+
+submit:
+  auto_submit: false
+  per_source:
+    greenhouse: { enabled: true }
+    lever:      { enabled: true }
+    ashby:      { enabled: true }
+    remotive:   { enabled: true }
+    remoteok:   { enabled: true }
+    linkedin:   { enabled: false }
+    indeed:     { enabled: false }
+
+llm:
+  tailor_model: "anthropic/claude-sonnet-4-6"
+  cover_letter_model: "anthropic/claude-sonnet-4-6"
+  filter_model: "openai/gpt-4o-mini"
+  parse_resume_model: "anthropic/claude-sonnet-4-6"
+
+scheduler:
+  cadence:
+    greenhouse: "0 0 */1 * * *"
+    lever:      "0 0 */1 * * *"
+    remotive:   "0 0 */2 * * *"
+    linkedin:   "0 0 */4 * * *"
+    indeed:     "0 30 */4 * * *"

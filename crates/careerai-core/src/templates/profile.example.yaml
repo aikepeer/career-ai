@@ -1,0 +1,43 @@
+# Canonical user profile. Seeded by `careerai profile import`, then hand-edited.
+# The real file at `profile/profile.yaml` is gitignored. Keep this example sanitized.
+
+personal:
+  name: "Your Name"
+  email: "you@example.com"
+  phone: "+91-0000000000"
+  location: "Delhi NCR, India"
+  links:
+    github: "https://github.com/yourhandle"
+    linkedin: "https://www.linkedin.com/in/yourhandle"
+    portfolio: ""
+
+summary: >
+  One-paragraph elevator pitch. Kept stable across applications; per-job
+  tailoring happens in the experience bullets, not here.
+
+skills:
+  languages: ["Rust", "Python", "C++"]
+  frameworks: ["Tokio", "PyTorch", "ROS2"]
+  tools: ["Linux", "Docker", "Git"]
+
+experience:
+  - title: "Role Title"
+    company: "Company Name"
+    location: "Remote"
+    start: "2022-01"
+    end: "present"
+    bullets:
+      - "Achievement-oriented bullet with a metric."
+      - "Another bullet, 1-2 lines max."
+
+education:
+  - degree: "B.Tech, Computer Science"
+    institution: "Your University"
+    start: "2016"
+    end: "2020"
+
+projects:
+  - name: "Project Name"
+    url: "https://..."
+    bullets:
+      - "What it does; impact; stack used."

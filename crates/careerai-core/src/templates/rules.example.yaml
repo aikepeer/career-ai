@@ -1,0 +1,26 @@
+# User-editable hard filters applied before embedding match.
+# Any rule evaluating to `reject` drops the listing into `filtered_out`.
+
+exclude_titles:
+  - "sales"
+  - "marketing"
+  - "recruiter"
+  - "customer success"
+  - "internship"
+
+exclude_keywords_in_jd:
+  - "on-site only"
+  - "onsite only"
+  - "no remote"
+
+require_any_keyword_in_jd:
+  - "python"
+  - "rust"
+  - "c++"
+  - "embedded"
+  - "robotics"
+  - "machine learning"
+  - "llm"
+
+min_years_experience: 0
+max_years_experience: 20

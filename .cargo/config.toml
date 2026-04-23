@@ -1,0 +1,8 @@
+[build]
+# Keep compile times sane during iteration.
+
+[alias]
+check-all = "check --workspace --all-targets"
+test-all = "test --workspace --all-targets"
+lint = "clippy --workspace --all-targets -- -D warnings"
+fmt-check = "fmt --all -- --check"

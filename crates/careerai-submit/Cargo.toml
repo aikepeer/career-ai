@@ -1,0 +1,15 @@
+[package]
+name = "careerai-submit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Submitters per source (HTTP, browser, email) with dry-run safety"
+
+[dependencies]
+thiserror.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true
