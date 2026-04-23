@@ -11,6 +11,17 @@ description = "Resume + LinkedIn export ingestion and canonical profile schema"
 thiserror.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
+validator.workspace = true
+tracing.workspace = true
+pdf-extract = "0.9"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+csv = "1"
+quick-xml = "0.37"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+insta = { version = "1", features = ["yaml"] }
 
 [lints]
 workspace = true

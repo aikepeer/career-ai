@@ -1,0 +1,40 @@
+---
+source: crates/careerai-profile/tests/import_it.rs
+expression: profile
+---
+personal:
+  name: Alice Kumar
+  email: alice@example.com
+  phone: ""
+  location: Delhi NCR
+  links:
+    portfolio: "https://alice.dev"
+summary: Builder of systems
+skills:
+  languages:
+    - Rust
+    - Python
+    - Tokio
+  frameworks: []
+  tools: []
+experience:
+  - title: Senior Engineer
+    company: Acme Robotics
+    location: Remote
+    start: 2022-01
+    end: present
+    bullets:
+      - "Led migration\\nCut latency"
+  - title: Engineer
+    company: BetaCorp
+    location: Bangalore
+    start: 2019-06
+    end: 2021-12
+    bullets:
+      - Built ingest pipeline
+education:
+  - degree: B.Tech Computer Science
+    institution: IIT Delhi
+    start: "2015"
+    end: "2019"
+projects: []
