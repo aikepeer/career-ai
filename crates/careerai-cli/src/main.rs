@@ -3,7 +3,9 @@
 //! Subcommands dispatch into the workspace crates. Most are stubs at M0;
 //! only `init` and `--help` are wired end-to-end.
 
-use anyhow::Result;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
@@ -124,7 +126,10 @@ async fn main() -> Result<()> {
     init_tracing(cli.log.as_deref());
 
     match cli.command {
-        Command::Init { force } => careerai_core::init::scaffold(&std::env::current_dir()?, force)?,
+        Command::Init { force } => {
+            careerai_core::init::scaffold(&std::env::current_dir()?, force)?;
+        }
+        Command::Profile { command } => run_profile(command)?,
         Command::Discover { .. }
         | Command::Match { .. }
         | Command::Tailor { .. }
@@ -132,11 +137,59 @@ async fn main() -> Result<()> {
         | Command::Apply { .. }
         | Command::Daemon
         | Command::Inspect { .. }
-        | Command::Profile { .. }
         | Command::Shortlist { .. }
         | Command::Applied => {
-            anyhow::bail!("subcommand not implemented yet (tracked in plan milestones M1+)");
+            anyhow::bail!("subcommand not implemented yet (tracked in plan milestones M2+)");
         }
     }
+    Ok(())
+}
+
+/// Default location for the canonical profile file: `./profile/profile.yaml`.
+fn profile_yaml_path() -> Result<PathBuf> {
+    Ok(std::env::current_dir()?
+        .join("profile")
+        .join("profile.yaml"))
+}
+
+fn run_profile(command: ProfileCommand) -> Result<()> {
+    match command {
+        ProfileCommand::Import { paths } => profile_import(&paths),
+        ProfileCommand::Show => profile_show(),
+        ProfileCommand::Validate => profile_validate(),
+    }
+}
+
+fn profile_import(paths: &[PathBuf]) -> Result<()> {
+    if paths.is_empty() {
+        anyhow::bail!("profile import: at least one source file is required");
+    }
+    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+    let profile = careerai_profile::import_paths(&refs).context("parsing profile sources")?;
+
+    let out = profile_yaml_path()?;
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let yaml = profile.to_yaml().context("serialize profile")?;
+    std::fs::write(&out, &yaml).with_context(|| format!("write {}", out.display()))?;
+    tracing::info!(out = %out.display(), bytes = yaml.len(), "profile imported");
+    println!("wrote {}", out.display());
+    Ok(())
+}
+
+fn profile_show() -> Result<()> {
+    let out = profile_yaml_path()?;
+    let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
+    println!("{text}");
+    Ok(())
+}
+
+fn profile_validate() -> Result<()> {
+    let out = profile_yaml_path()?;
+    let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
+    let profile = careerai_profile::Profile::from_yaml(&text).context("parse profile yaml")?;
+    profile.check().context("profile validation failed")?;
+    println!("profile ok: {}", out.display());
     Ok(())
 }
