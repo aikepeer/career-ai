@@ -1,5 +1,24 @@
 //! LLM gateway.
 //!
-//! Single call site for all LLM traffic. Wraps `rig` (multi-provider),
-//! handles retries, on-disk caching, and Anthropic prompt-caching for the
-//! master-profile block. Implemented in M3.
+//! Single call site for all LLM traffic. Provider-agnostic `Llm` trait with
+//! `MockLlm` as the default deterministic impl; `rig-core`-backed provider
+//! lives behind the `live-llm` feature (Wave 3B). On-disk response cache
+//! keyed by sha256 of (prompt_version, profile_hash, jd_hash, model).
+
+#![forbid(unsafe_code)]
+
+pub mod cache;
+pub mod error;
+pub mod hashing;
+pub mod mock;
+pub mod retry;
+pub mod trait_def;
+pub mod types;
+
+pub use crate::cache::{Cache, CacheKey};
+pub use crate::error::{LlmError, Result};
+pub use crate::hashing::{canonical_profile_hash, compose_key, jd_hash};
+pub use crate::mock::MockLlm;
+pub use crate::retry::llm_backoff;
+pub use crate::trait_def::Llm;
+pub use crate::types::{LlmRequest, LlmResponse};

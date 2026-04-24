@@ -38,6 +38,15 @@ async-trait = "0.1"
 validator = { version = "0.20", features = ["derive"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
+rig-core = { version = "0.10", default-features = false }
+tera = { version = "1", default-features = false }
+which = "7"
+sha2 = "0.10"
+hex = "0.4"
+backon = "1"
+tempfile = "3"
+insta = { version = "1", features = ["yaml", "json"] }
+docx-rs = "0.4"
 
 [profile.release]
 opt-level = 3

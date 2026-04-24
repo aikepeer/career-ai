@@ -8,9 +8,30 @@ repository.workspace = true
 description = "Multi-provider LLM gateway with on-disk cache"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-profile = { path = "../careerai-profile" }
 thiserror.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
+backon.workspace = true
+chrono.workspace = true
+# Features (`anthropic`, `openai`) are attached by Wave 3B when the real
+# provider wiring lands — rig-core 0.10 exposes providers via the base
+# crate without feature gates, and the actual feature list varies across
+# rig-core versions.
+rig-core = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+default = []
+live-llm = ["dep:rig-core"]
 
 [lints]
 workspace = true
