@@ -21,7 +21,7 @@ use careerai_match::{
 use careerai_profile::Profile;
 use careerai_render::render_application;
 use careerai_sources::{
-    GreenhouseSource, LeverSource, RawListing, RemoteOkSource, RemotiveSource, Source,
+    GreenhouseSource, LeverSource, NaukriSource, RawListing, RemoteOkSource, RemotiveSource, Source,
 };
 use careerai_tailor::model::{CoverLetter, ResumeView};
 use careerai_tailor::tailor_for_listing;
@@ -53,6 +53,19 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     }
     if cfg.sources.remoteok.enabled {
         out.push(Arc::new(RemoteOkSource::new()));
+    }
+    if cfg.sources.naukri.enabled {
+        let mut s = NaukriSource::new();
+        if !cfg.sources.naukri.keywords.is_empty() {
+            s = s.with_keywords(cfg.sources.naukri.keywords.clone());
+        }
+        if let Some(loc) = &cfg.sources.naukri.location {
+            s = s.with_location(loc.clone());
+        }
+        if let Some(n) = cfg.sources.naukri.max_results {
+            s = s.with_max_results(n);
+        }
+        out.push(Arc::new(s));
     }
     out
 }
