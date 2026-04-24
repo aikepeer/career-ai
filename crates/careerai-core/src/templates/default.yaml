@@ -70,6 +70,11 @@ llm:
   cover_letter_model: "anthropic/claude-sonnet-4-6"
   filter_model: "openai/gpt-4o-mini"
   parse_resume_model: "anthropic/claude-sonnet-4-6"
+  cache_dir: "data/cache/llm"
+  max_retries: 3
+  timeout_seconds: 120
+  prompt_version: "tailor.v1"
+  anthropic_prompt_cache: true
 
 scheduler:
   cadence:
@@ -93,3 +98,10 @@ sources:
     category: "software-dev"
   remoteok:
     enabled: true
+
+render:
+  artifacts_dir: "artifacts"
+  pandoc_bin: null
+  pdf_engine: "weasyprint"
+  timeout_seconds: 60
+  keep_intermediate_markdown: true

@@ -8,9 +8,26 @@ repository.workspace = true
 description = "Constrained-diff resume tailoring and cover-letter drafting"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-llm = { path = "../careerai-llm" }
+careerai-db = { path = "../careerai-db" }
 thiserror.workspace = true
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+regex = "1"
+uuid.workspace = true
+chrono.workspace = true
+tera = { workspace = true }
+sqlx = { workspace = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

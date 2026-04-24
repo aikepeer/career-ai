@@ -1,0 +1,48 @@
+---
+source: crates/careerai-render/tests/render_tera_unit.rs
+expression: md
+---
+# Jane Doe
+
+jane@example.com · +1-555-0100 · Remote · [GitHub](https://github.com/jane) · [LinkedIn](https://linkedin.com/in/jane)
+
+## Summary
+
+Backend engineer focused on distributed systems.
+
+## Experience
+
+### Senior Engineer — Acme Corp
+
+*2022-01 – present · Remote*
+
+- Shipped production pipelines
+- Owned core infra
+
+### Engineer — Globex
+
+*2019-06 – 2021-12*
+
+- Reduced latency by 40%
+- Led migration to Rust
+- Mentored three engineers
+
+
+## Education
+
+- **BSc Computer Science**, State University (2015–2019)
+- **Advanced Algorithms Cert**, MOOC Academy (2020–2020)
+
+
+## Projects
+
+### careerai · [link](https://example.com/careerai)
+
+- Open-source job automation in Rust
+
+
+## Skills
+
+**Languages:** Rust, Python, Go
+**Frameworks:** Tokio, Actix
+**Tools:** Docker, Kubernetes, Postgres

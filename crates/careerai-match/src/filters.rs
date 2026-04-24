@@ -138,6 +138,7 @@ mod tests {
             llm: careerai_core::config::LlmConfig::default(),
             scheduler: careerai_core::config::SchedulerConfig::default(),
             sources: careerai_core::config::SourcesConfig::default(),
+            render: careerai_core::config::RenderConfig::default(),
         }
     }
 

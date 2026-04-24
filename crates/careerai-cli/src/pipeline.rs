@@ -3,23 +3,28 @@
 //! Kept off the main.rs clap tree so the CLI layer is purely dispatch and
 //! the business logic is testable independently later.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 use careerai_core::config::CoreConfig;
-use careerai_db::models::NewListing;
+use careerai_db::models::{NewArtifact, NewListing};
 use careerai_db::{pool_from_path, queries, SqlitePool};
+use careerai_llm::mock::MockLlm;
 use careerai_match::{
     classify, flatten_profile, rank_all, score_histogram, split_at_threshold, Decision,
     FilterRules, JaccardScorer,
 };
 use careerai_profile::Profile;
+use careerai_render::render_application;
 use careerai_sources::{
     GreenhouseSource, LeverSource, RawListing, RemoteOkSource, RemotiveSource, Source,
 };
+use careerai_tailor::model::{CoverLetter, ResumeView};
+use careerai_tailor::tailor_for_listing;
 
 use careerai_core::state::ListingState;
 
@@ -236,4 +241,214 @@ fn load_profile(root: &Path) -> Result<Profile> {
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     Profile::from_yaml(&text).context("parse profile yaml")
+}
+
+#[derive(Debug)]
+pub struct TailoredOutcome {
+    pub application_id: String,
+    pub listing_title: String,
+    pub company: String,
+}
+
+#[derive(Debug)]
+pub struct RenderedOutcome {
+    pub application_id: String,
+    pub resume_md: PathBuf,
+    pub resume_docx: PathBuf,
+    pub resume_pdf: PathBuf,
+    pub cover_md: PathBuf,
+    pub cover_docx: PathBuf,
+    pub bytes: BTreeMap<PathBuf, u64>,
+}
+
+/// Resolve the LLM fixtures directory. Honors the `CAREERAI_LLM_FIXTURES_DIR`
+/// environment override, else falls back to `<root>/data/cache/llm/fixtures`.
+fn fixtures_dir(root: &Path) -> PathBuf {
+    std::env::var("CAREERAI_LLM_FIXTURES_DIR").map_or_else(
+        |_| root.join("data").join("cache").join("llm").join("fixtures"),
+        PathBuf::from,
+    )
+}
+
+/// Tailor a shortlisted listing into an application row + persisted payload.
+///
+/// Uses a `MockLlm` sourced from `CAREERAI_LLM_FIXTURES_DIR` (default
+/// `<root>/data/cache/llm/fixtures`). A live provider is only available with
+/// `cargo build --features live-llm` and `CAREERAI_LLM_LIVE=1`.
+pub async fn tailor_one(
+    root: &Path,
+    cfg: &CoreConfig,
+    listing_id: &str,
+) -> Result<TailoredOutcome> {
+    let pool = open_pool(root).await?;
+
+    let listing = match queries::find_by_id(&pool, listing_id).await {
+        Ok(l) => l,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("listing not found: {listing_id}");
+        }
+        Err(e) => return Err(e).context("fetch listing"),
+    };
+
+    if listing.state != ListingState::Shortlisted.as_str() {
+        anyhow::bail!(
+            "listing {listing_id} is in state '{}'; expected 'shortlisted'",
+            listing.state
+        );
+    }
+
+    let profile = load_profile(root)?;
+
+    // Build the LLM. Default: MockLlm from a fixtures dir. A live provider
+    // can be wired in future via the `live-llm` feature; the CLI re-exports
+    // that feature so `cargo build -p careerai-cli --features live-llm`
+    // compiles the rig-core dependency.
+    #[cfg(feature = "live-llm")]
+    {
+        // Intentionally a no-op today: constructing a RigLlm requires env
+        // credentials (ANTHROPIC_API_KEY / OPENAI_API_KEY) and prompt_cache
+        // wiring. Tracked for a follow-up wave.
+        if std::env::var("CAREERAI_LLM_LIVE").ok().as_deref() == Some("1") {
+            anyhow::bail!(
+                "live-llm runtime path not wired yet; unset CAREERAI_LLM_LIVE and point \
+                 CAREERAI_LLM_FIXTURES_DIR at a fixtures directory for now"
+            );
+        }
+    }
+
+    let fixtures = fixtures_dir(root);
+    if !fixtures.is_dir() {
+        anyhow::bail!(
+            "no LLM fixtures at {}; either set CAREERAI_LLM_FIXTURES_DIR or enable \
+             --features live-llm (not yet available in this CLI build)",
+            fixtures.display()
+        );
+    }
+    let llm = MockLlm::from_dir(&fixtures)
+        .with_context(|| format!("load llm fixtures from {}", fixtures.display()))?;
+
+    info!(
+        target = "tailor",
+        listing_id = %listing.id,
+        title = %listing.title,
+        company = %listing.company,
+        "tailoring listing"
+    );
+
+    let outcome = tailor_for_listing(&pool, &llm, &listing.id, &profile, &cfg.llm)
+        .await
+        .context("tailor_for_listing")?;
+
+    Ok(TailoredOutcome {
+        application_id: outcome.application_id,
+        listing_title: listing.title,
+        company: listing.company,
+    })
+}
+
+/// Render a tailored application to DOCX + PDF on disk, attach artifact rows,
+/// and transition both listing and application to `rendered`.
+pub async fn render_one(
+    root: &Path,
+    cfg: &CoreConfig,
+    application_id: &str,
+) -> Result<RenderedOutcome> {
+    let pool = open_pool(root).await?;
+
+    let application = match queries::find_application_by_id(&pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("application not found: {application_id}");
+        }
+        Err(e) => return Err(e).context("fetch application"),
+    };
+
+    if application.state != "tailored" {
+        anyhow::bail!(
+            "application {application_id} is in state '{}'; expected 'tailored'",
+            application.state
+        );
+    }
+
+    let payload = match queries::find_payload_by_application_id(&pool, application_id).await {
+        Ok(p) => p,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("application payload not found: {application_id}");
+        }
+        Err(e) => return Err(e).context("fetch application payload"),
+    };
+
+    let resume_view: ResumeView =
+        serde_json::from_str(&payload.resume_view_json).context("deserialize resume_view_json")?;
+    let cover_letter = CoverLetter {
+        body: payload.cover_letter_text.clone(),
+    };
+
+    let listing = queries::find_by_id(&pool, &application.listing_id)
+        .await
+        .context("fetch listing for application")?;
+    let profile = load_profile(root)?;
+
+    // Resolve artifacts_dir against `root` if it's relative so the CLI and
+    // integration tests share the same on-disk layout regardless of cwd.
+    let mut render_cfg = cfg.render.clone();
+    if render_cfg.artifacts_dir.is_relative() {
+        render_cfg.artifacts_dir = root.join(&render_cfg.artifacts_dir);
+    }
+
+    let artifacts = render_application(
+        &render_cfg,
+        &application.id,
+        &resume_view,
+        &cover_letter,
+        &profile.personal.name,
+        &listing.company,
+    )
+    .await
+    .context("render_application")?;
+
+    // Attach artifact rows for each rendered file. `bytes` is the canonical
+    // size map returned from render; we look each path up there.
+    for (kind, path) in [
+        ("resume_md", &artifacts.resume_md),
+        ("resume_docx", &artifacts.resume_docx),
+        ("resume_pdf", &artifacts.resume_pdf),
+        ("cover_md", &artifacts.cover_md),
+        ("cover_docx", &artifacts.cover_docx),
+    ] {
+        let size = artifacts.bytes.get(path).copied().unwrap_or_default();
+        queries::attach_artifact(
+            &pool,
+            &application.id,
+            &NewArtifact {
+                kind: kind.to_string(),
+                path: path.to_string_lossy().into_owned(),
+                bytes: i64::try_from(size).unwrap_or(i64::MAX),
+            },
+        )
+        .await
+        .with_context(|| format!("attach_artifact {kind}"))?;
+    }
+
+    queries::transition(
+        &pool,
+        &application.listing_id,
+        ListingState::Rendered,
+        Some(&format!("app={}", application.id)),
+    )
+    .await
+    .context("transition listing to rendered")?;
+    queries::set_application_state(&pool, &application.id, "rendered")
+        .await
+        .context("set application state=rendered")?;
+
+    Ok(RenderedOutcome {
+        application_id: application.id,
+        resume_md: artifacts.resume_md,
+        resume_docx: artifacts.resume_docx,
+        resume_pdf: artifacts.resume_pdf,
+        cover_md: artifacts.cover_md,
+        cover_docx: artifacts.cover_docx,
+        bytes: artifacts.bytes,
+    })
 }

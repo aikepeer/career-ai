@@ -8,9 +8,35 @@ repository.workspace = true
 description = "Multi-provider LLM gateway with on-disk cache"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-profile = { path = "../careerai-profile" }
 thiserror.workspace = true
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
+backon.workspace = true
+chrono.workspace = true
+# rig-core 0.10 exposes Anthropic and OpenAI providers unconditionally from
+# `rig::providers::{anthropic,openai}` — there are no `anthropic` /
+# `openai` cargo features in the 0.10 line, and no `rig-anthropic` /
+# `rig-openai` sibling crates exist on crates.io as of Apr 2026. The
+# workspace pin remains `rig-core = "0.10"` with `default-features = false`;
+# we only need the core client types and reuse `reqwest` for the actual
+# POST since the high-level completion path doesn't wire Anthropic
+# prompt-cache `cache_control` onto content blocks.
+rig-core = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+default = []
+live-llm = ["dep:rig-core", "dep:reqwest"]
 
 [lints]
 workspace = true
