@@ -20,6 +20,7 @@ careerai-match = { path = "../careerai-match" }
 careerai-llm = { path = "../careerai-llm" }
 careerai-tailor = { path = "../careerai-tailor" }
 careerai-render = { path = "../careerai-render" }
+careerai-submit = { path = "../careerai-submit" }
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

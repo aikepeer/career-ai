@@ -240,6 +240,31 @@ pub async fn find_application_by_id(pool: &SqlitePool, id: &str) -> Result<Appli
     row.ok_or_else(|| DbError::NotFound(id.to_string()))
 }
 
+/// List applications currently in the given state, newest first.
+///
+/// Mirrors `list_by_state` for listings but scopes to the `applications`
+/// table; consumed by `careerai apply --all` (state = "rendered"/"prepared")
+/// and `careerai applied` (state = "submitted"). The caller is responsible
+/// for any cross-table filtering (e.g. by listing source) after the fact.
+pub async fn list_applications_by_state(
+    pool: &SqlitePool,
+    state: &str,
+    limit: i64,
+) -> Result<Vec<Application>> {
+    let rows = sqlx::query_as(
+        "SELECT id, listing_id, state, profile_hash, prompt_version, llm_model,
+                created_at, updated_at
+         FROM applications WHERE state = ?
+         ORDER BY created_at DESC
+         LIMIT ?",
+    )
+    .bind(state)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Return the most recent application for `listing_id`, if any.
 pub async fn find_latest_application_for_listing(
     pool: &SqlitePool,
@@ -657,6 +682,50 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(latest.id, second.id);
+    }
+
+    #[tokio::test]
+    async fn list_applications_by_state_newest_first() {
+        let pool = pool_in_memory().await.unwrap();
+        let (listing_id, _) = insert_or_ignore(&pool, &fixture("greenhouse", "lbs"))
+            .await
+            .unwrap();
+        let a = create_application(&pool, &new_app(&listing_id))
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let b = create_application(&pool, &new_app(&listing_id))
+            .await
+            .unwrap();
+
+        // Both are created in the default state "tailored".
+        set_application_state(&pool, &a.id, "rendered")
+            .await
+            .unwrap();
+        set_application_state(&pool, &b.id, "rendered")
+            .await
+            .unwrap();
+
+        let rows = list_applications_by_state(&pool, "rendered", 10)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        // Newest first (b was created after a).
+        assert_eq!(rows[0].id, b.id);
+        assert_eq!(rows[1].id, a.id);
+
+        // Limit is honored.
+        let one = list_applications_by_state(&pool, "rendered", 1)
+            .await
+            .unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].id, b.id);
+
+        // Unrelated state returns empty.
+        let subs = list_applications_by_state(&pool, "submitted", 10)
+            .await
+            .unwrap();
+        assert!(subs.is_empty());
     }
 
     #[tokio::test]

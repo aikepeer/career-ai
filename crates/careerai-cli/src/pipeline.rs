@@ -465,3 +465,200 @@ pub async fn render_one(
         bytes: artifacts.bytes,
     })
 }
+
+// --- apply / applied / inspect (M4 wave 2) ---------------------------------
+
+/// One row of `apply --all` output. One `AppliedOutcome` is emitted per
+/// application the CLI attempted to submit, regardless of whether the
+/// per-call result was success, skip, or dry-run.
+#[derive(Debug)]
+pub struct AppliedOutcome {
+    pub application_id: String,
+    pub source: String,
+    pub outcome: careerai_submit::SubmitOutcome,
+}
+
+/// Structured payload for `careerai inspect <application_id>`.
+#[derive(Debug)]
+pub struct InspectReport {
+    pub application: careerai_db::Application,
+    pub listing_title: String,
+    pub listing_company: String,
+    pub listing_source: String,
+    pub events: Vec<careerai_db::Event>,
+    pub artifacts: Vec<careerai_db::Artifact>,
+}
+
+/// Build a per-call `SubmitConfig` honoring the optional CLI override.
+///
+/// When `override_auto_submit` is `Some(true)` the call is forced live;
+/// `Some(false)` forces dry-run; `None` passes the config's stored value
+/// through unchanged.
+fn effective_submit_cfg(
+    cfg: &CoreConfig,
+    override_auto_submit: Option<bool>,
+) -> careerai_core::config::SubmitConfig {
+    let mut submit = cfg.submit.clone();
+    if let Some(v) = override_auto_submit {
+        submit.auto_submit = v;
+    }
+    submit
+}
+
+/// Submit a single prepared application (state `rendered` or `prepared`).
+///
+/// Gating, state transitions, and artifact loading all live inside
+/// `careerai_submit::submit_application`; this wrapper only opens the pool
+/// and overlays the `--auto-submit` flag on top of the config.
+pub async fn apply_one(
+    root: &Path,
+    cfg: &CoreConfig,
+    application_id: &str,
+    auto_submit_override: Option<bool>,
+) -> Result<AppliedOutcome> {
+    let pool = open_pool(root).await?;
+
+    // Pre-fetch so we can surface NotFound as the CLI's exit-code 2 via
+    // the same stringly-typed convention used by tailor/render.
+    let application = match queries::find_application_by_id(&pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("application not found: {application_id}");
+        }
+        Err(e) => return Err(e).context("fetch application"),
+    };
+    let listing = match queries::find_by_id(&pool, &application.listing_id).await {
+        Ok(l) => l,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("listing not found: {}", application.listing_id);
+        }
+        Err(e) => return Err(e).context("fetch listing"),
+    };
+
+    let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
+    let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
+        .await
+        .context("submit_application")?;
+
+    Ok(AppliedOutcome {
+        application_id: application.id,
+        source: listing.source,
+        outcome,
+    })
+}
+
+/// Iterate every application currently in state `rendered` or `prepared`
+/// and submit each one. Per-application failures are logged and skipped —
+/// `apply --all` deliberately doesn't abort the batch on the first error.
+pub async fn apply_all(
+    root: &Path,
+    cfg: &CoreConfig,
+    source_filter: Option<&str>,
+    auto_submit_override: Option<bool>,
+) -> Result<Vec<AppliedOutcome>> {
+    let pool = open_pool(root).await?;
+
+    // Pull both "rendered" and "prepared" applications; either is eligible
+    // per `careerai_submit::submit_application`'s BadState guard.
+    let mut eligible: Vec<careerai_db::Application> = Vec::new();
+    for state in ["rendered", "prepared"] {
+        let rows = queries::list_applications_by_state(&pool, state, 1_000)
+            .await
+            .with_context(|| format!("list applications in state '{state}'"))?;
+        eligible.extend(rows);
+    }
+
+    if let Some(source) = source_filter {
+        // Filter by the linked listing's source. One fetch per row is fine
+        // for the expected batch sizes (tens, not thousands).
+        let mut kept: Vec<careerai_db::Application> = Vec::new();
+        for app in eligible {
+            let listing = queries::find_by_id(&pool, &app.listing_id)
+                .await
+                .with_context(|| format!("fetch listing for {}", app.id))?;
+            if listing.source == source {
+                kept.push(app);
+            }
+        }
+        eligible = kept;
+    }
+
+    // Drop the local pool so `apply_one` opens its own — matches the
+    // established convention in `tailor_render_it.rs` and avoids holding a
+    // WAL writer across the loop.
+    drop(pool);
+
+    let mut out = Vec::with_capacity(eligible.len());
+    for app in eligible {
+        match apply_one(root, cfg, &app.id, auto_submit_override).await {
+            Ok(o) => out.push(o),
+            Err(e) => {
+                warn!(application_id = %app.id, error = %e, "apply_one failed, continuing batch");
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// List applications already submitted, newest first. Optional `source`
+/// filter matches against the linked listing's source.
+pub async fn applied_show(
+    root: &Path,
+    source_filter: Option<&str>,
+    limit: i64,
+) -> Result<Vec<careerai_db::Application>> {
+    let pool = open_pool(root).await?;
+    let rows = queries::list_applications_by_state(&pool, "submitted", limit)
+        .await
+        .context("list submitted applications")?;
+
+    let Some(source) = source_filter else {
+        return Ok(rows);
+    };
+
+    let mut kept = Vec::with_capacity(rows.len());
+    for app in rows {
+        let listing = queries::find_by_id(&pool, &app.listing_id)
+            .await
+            .with_context(|| format!("fetch listing for {}", app.id))?;
+        if listing.source == source {
+            kept.push(app);
+        }
+    }
+    Ok(kept)
+}
+
+/// Gather everything needed to render `careerai inspect <id>`.
+pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectReport> {
+    let pool = open_pool(root).await?;
+
+    let application = match queries::find_application_by_id(&pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("application not found: {application_id}");
+        }
+        Err(e) => return Err(e).context("fetch application"),
+    };
+    let listing = match queries::find_by_id(&pool, &application.listing_id).await {
+        Ok(l) => l,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            anyhow::bail!("listing not found: {}", application.listing_id);
+        }
+        Err(e) => return Err(e).context("fetch listing"),
+    };
+    let events = queries::events_for(&pool, &listing.id)
+        .await
+        .context("events_for listing")?;
+    let artifacts = queries::list_artifacts(&pool, &application.id)
+        .await
+        .context("list_artifacts")?;
+
+    Ok(InspectReport {
+        application,
+        listing_title: listing.title,
+        listing_company: listing.company,
+        listing_source: listing.source,
+        events,
+        artifacts,
+    })
+}

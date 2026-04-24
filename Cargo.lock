@@ -295,6 +295,7 @@ dependencies = [
  "careerai-profile",
  "careerai-render",
  "careerai-sources",
+ "careerai-submit",
  "careerai-tailor",
  "clap",
  "docx-rs",
