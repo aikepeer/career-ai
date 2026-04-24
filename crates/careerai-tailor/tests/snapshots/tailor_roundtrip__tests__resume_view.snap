@@ -1,0 +1,41 @@
+---
+source: crates/careerai-tailor/tests/tailor_roundtrip.rs
+expression: outcome.resume_view
+---
+personal:
+  name: Ada Lovelace
+  email: ada@example.com
+  phone: ""
+  location: ""
+  links: {}
+summary: Senior Rust engineer with embedded experience.
+skills:
+  languages:
+    - Rust
+    - Python
+  frameworks:
+    - Tokio
+    - Kubernetes
+  tools:
+    - SQLite
+experience:
+  - title: Senior Engineer
+    company: Acme Robotics
+    location: Remote
+    start: 2022-01
+    end: present
+    bullets:
+      - Led team of 4 on embedded perception.
+      - Shipped Rust LLM pipeline cutting latency 35%.
+  - title: Engineer
+    company: Widget Corp
+    start: 2018-06
+    end: 2021-12
+    bullets:
+      - Built Python services on Kubernetes.
+education: []
+projects:
+  - name: openLLM
+    url: "https://example.com/openllm"
+    bullets:
+      - Tokenizer in Rust supporting 5 languages.
