@@ -28,6 +28,30 @@ pub struct CoreConfig {
     pub scheduler: SchedulerConfig,
     #[serde(default)]
     pub sources: SourcesConfig,
+    #[serde(default)]
+    pub render: RenderConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RenderConfig {
+    pub artifacts_dir: std::path::PathBuf,
+    pub pandoc_bin: Option<std::path::PathBuf>,
+    pub pdf_engine: String,
+    pub timeout_seconds: u64,
+    pub keep_intermediate_markdown: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            artifacts_dir: std::path::PathBuf::from("artifacts"),
+            pandoc_bin: None,
+            pdf_engine: "weasyprint".into(),
+            timeout_seconds: 60,
+            keep_intermediate_markdown: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

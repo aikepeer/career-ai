@@ -1,0 +1,35 @@
+# {{ personal_name }}
+
+{% if personal.email %}{{ personal.email }}{% endif %}{% if personal.phone %} · {{ personal.phone }}{% endif %}{% if personal.location %} · {{ personal.location }}{% endif %}{% if personal.links and personal.links.github %} · [GitHub]({{ personal.links.github }}){% endif %}{% if personal.links and personal.links.linkedin %} · [LinkedIn]({{ personal.links.linkedin }}){% endif %}
+
+## Summary
+
+{{ summary }}
+
+## Experience
+
+{% for exp in experience %}### {{ exp.title }} — {{ exp.company }}
+
+*{{ exp.start }} – {{ exp.end }}{% if exp.location %} · {{ exp.location }}{% endif %}*
+
+{% for b in exp.bullets %}- {{ b | escape_md }}
+{% endfor %}
+{% endfor %}
+## Education
+
+{% for ed in education %}- **{{ ed.degree }}**, {{ ed.institution }} ({{ ed.start }}–{{ ed.end }})
+{% endfor %}
+
+{% if projects %}## Projects
+
+{% for p in projects %}### {{ p.name }}{% if p.url %} · [link]({{ p.url }}){% endif %}
+
+{% for b in p.bullets %}- {{ b | escape_md }}
+{% endfor %}
+{% endfor %}{% endif %}
+## Skills
+
+{% if skills.languages %}**Languages:** {{ skills.languages | join(sep=", ") }}
+{% endif %}{% if skills.frameworks %}**Frameworks:** {{ skills.frameworks | join(sep=", ") }}
+{% endif %}{% if skills.tools %}**Tools:** {{ skills.tools | join(sep=", ") }}
+{% endif %}

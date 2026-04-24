@@ -1,0 +1,11 @@
+{{ date }}
+
+Hiring Team
+{{ listing_company }}
+
+Dear Hiring Team,
+
+{{ body }}
+
+Best,
+{{ personal_name }}

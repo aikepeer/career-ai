@@ -93,3 +93,10 @@ sources:
     category: "software-dev"
   remoteok:
     enabled: true
+
+render:
+  artifacts_dir: "artifacts"
+  pandoc_bin: null
+  pdf_engine: "weasyprint"
+  timeout_seconds: 60
+  keep_intermediate_markdown: true
