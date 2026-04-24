@@ -4,7 +4,7 @@
 //! location allowlist → JD keyword exclusions (longer string scan) →
 //! domain keywords + required-keyword rule.
 
-use careerai_core::config::{CoreConfig, Domain};
+use careerai_core::config::CoreConfig;
 use careerai_sources::RawListing;
 
 use crate::rules::FilterRules;
@@ -26,22 +26,25 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
     let title_lc = listing.title.to_lowercase();
     let desc_lc = listing.description.to_lowercase();
 
-    if rules
-        .exclude_titles
-        .iter()
-        .any(|t| title_lc.contains(&t.to_lowercase()))
-    {
+    // rules fields are pre-lowercased at load time (FilterRules::normalize),
+    // so no per-rule to_lowercase() allocation needed here.
+    if rules.exclude_titles.iter().any(|t| title_lc.contains(t.as_str())) {
         return Decision::Reject("excluded title");
     }
 
-    if !location_ok(listing, &cfg.user.locations) {
-        return Decision::Reject("location not in allowlist");
+    // Skip the allocation when there is no location filter configured.
+    if !cfg.user.locations.is_empty() {
+        let locations_lc: Vec<String> =
+            cfg.user.locations.iter().map(|s| s.to_lowercase()).collect();
+        if !location_ok(listing, &locations_lc) {
+            return Decision::Reject("location not in allowlist");
+        }
     }
 
     if rules
         .exclude_keywords_in_jd
         .iter()
-        .any(|k| desc_lc.contains(&k.to_lowercase()))
+        .any(|k| desc_lc.contains(k.as_str()))
     {
         return Decision::Reject("excluded JD keyword");
     }
@@ -50,51 +53,51 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
         && !rules
             .require_any_keyword_in_jd
             .iter()
-            .any(|k| desc_lc.contains(&k.to_lowercase()))
+            .any(|k| desc_lc.contains(k.as_str()))
     {
         return Decision::Reject("no required JD keyword");
     }
 
-    if !cfg.domains.is_empty() && !any_domain_matches(&title_lc, &desc_lc, &cfg.domains) {
+    if !cfg.domains.is_empty()
+        && !cfg
+            .domains
+            .iter()
+            .flat_map(|d| &d.keywords_any)
+            .any(|k| {
+                let k_lc = k.to_lowercase();
+                title_lc.contains(&k_lc) || desc_lc.contains(&k_lc)
+            })
+    {
         return Decision::Reject("no configured domain keyword in title or JD");
     }
 
     Decision::Keep
 }
 
-/// Location check:
+/// Location check (allowlist is already lowercased by the caller):
 /// - Empty allowlist → keep everything.
-/// - Listing location missing → reject (caller can override by adding "" to
-///   the allowlist if they want unknown-location jobs to pass).
+/// - Listing location missing → reject, unless `""` is in the allowlist
+///   (callers opt in to unknown-location listings by including an empty
+///   string in their location list).
 /// - Otherwise: allowed iff the listing location contains any allowed token
 ///   (case-insensitive substring match). "Remote" in allowlist matches
 ///   "Remote - India", "Remote, US", etc.
-fn location_ok(listing: &RawListing, allowlist: &[String]) -> bool {
-    if allowlist.is_empty() {
+fn location_ok(listing: &RawListing, allowlist_lc: &[String]) -> bool {
+    if allowlist_lc.is_empty() {
         return true;
     }
     let Some(loc) = listing.location.as_deref() else {
-        return false;
+        return allowlist_lc.iter().any(String::is_empty);
     };
     let loc_lc = loc.to_lowercase();
-    allowlist
-        .iter()
-        .any(|allowed| loc_lc.contains(&allowed.to_lowercase()))
-}
-
-fn any_domain_matches(title_lc: &str, desc_lc: &str, domains: &[Domain]) -> bool {
-    domains.iter().any(|d| {
-        d.keywords_any
-            .iter()
-            .any(|k| title_lc.contains(&k.to_lowercase()) || desc_lc.contains(&k.to_lowercase()))
-    })
+    allowlist_lc.iter().any(|allowed| loc_lc.contains(allowed.as_str()))
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use careerai_core::config::{MatchConfig, UserConfig};
+    use careerai_core::config::{Domain, MatchConfig, UserConfig};
     use std::collections::HashMap;
 
     fn cfg(locations: &[&str], domain_kws: &[&str]) -> CoreConfig {
@@ -183,6 +186,14 @@ mod tests {
             classify(&l, &cfg, &rules),
             Decision::Reject("location not in allowlist")
         ));
+    }
+
+    #[test]
+    fn allows_missing_location_when_empty_string_in_allowlist() {
+        let cfg = cfg(&["Remote", ""], &[]);
+        let rules = FilterRules::default();
+        let l = listing("ML Engineer", None, "anything");
+        assert_eq!(classify(&l, &cfg, &rules), Decision::Keep);
     }
 
     #[test]

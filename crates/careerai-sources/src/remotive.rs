@@ -56,11 +56,12 @@ impl Source for RemotiveSource {
 
     async fn discover(&self) -> Result<Vec<RawListing>, SourceError> {
         let base = self.base_url.trim_end_matches('/');
-        let url = match &self.category {
-            Some(c) => format!("{base}/api/remote-jobs?category={c}"),
-            None => format!("{base}/api/remote-jobs"),
-        };
-        let resp = self.http.get(&url).send().await?;
+        let url = format!("{base}/api/remote-jobs");
+        let mut req = self.http.get(&url);
+        if let Some(c) = &self.category {
+            req = req.query(&[("category", c)]);
+        }
+        let resp = req.send().await?;
         if !resp.status().is_success() {
             return Err(SourceError::HttpStatus {
                 status: resp.status().as_u16(),

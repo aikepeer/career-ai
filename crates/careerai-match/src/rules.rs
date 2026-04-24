@@ -38,6 +38,28 @@ impl FilterRules {
             .map_err(|e| MatchError::Config(format!("read {}: {e}", path.display())))?;
         serde_yaml::from_str(&text)
             .map_err(|e| MatchError::Config(format!("parse {}: {e}", path.display())))
+            .map(Self::normalize)
+    }
+
+    /// Lowercase all keyword/title lists so `classify` can do plain
+    /// substring comparisons without allocating per rule per listing.
+    fn normalize(mut self) -> Self {
+        self.exclude_titles = self
+            .exclude_titles
+            .into_iter()
+            .map(|s| s.to_lowercase())
+            .collect();
+        self.exclude_keywords_in_jd = self
+            .exclude_keywords_in_jd
+            .into_iter()
+            .map(|s| s.to_lowercase())
+            .collect();
+        self.require_any_keyword_in_jd = self
+            .require_any_keyword_in_jd
+            .into_iter()
+            .map(|s| s.to_lowercase())
+            .collect();
+        self
     }
 }
 

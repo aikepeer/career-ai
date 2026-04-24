@@ -13,8 +13,11 @@ use crate::models::{Event, Listing, NewListing};
 
 /// Insert a new listing or do nothing if `(source, external_id)` already
 /// exists. Returns the row's id and whether it was newly inserted.
+/// The listing insert and its initial `discovered` event are written
+/// atomically so the audit log is always consistent.
 pub async fn insert_or_ignore(pool: &SqlitePool, new: &NewListing) -> Result<(String, bool)> {
     let id = Uuid::now_v7().to_string();
+    let mut tx = pool.begin().await?;
     let res = sqlx::query(
         "INSERT OR IGNORE INTO listings
             (id, source, external_id, title, company, location, url, description, raw_json)
@@ -29,15 +32,28 @@ pub async fn insert_or_ignore(pool: &SqlitePool, new: &NewListing) -> Result<(St
     .bind(&new.url)
     .bind(&new.description)
     .bind(new.raw_json.as_deref())
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
     if res.rows_affected() == 1 {
-        write_event(pool, &id, None, ListingState::Discovered, None).await?;
+        // New insertion: write the initial discovery event in the same tx so
+        // both writes succeed or fail together.
+        sqlx::query(
+            "INSERT INTO events (listing_id, from_state, to_state, note) VALUES (?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind::<Option<&str>>(None)
+        .bind(ListingState::Discovered.as_str())
+        .bind::<Option<&str>>(None)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
         return Ok((id, true));
     }
 
-    // Already existed — fetch its id so callers always get a stable handle.
+    // Already existed — nothing to write; drop the transaction and fetch
+    // the stable id for the caller.
+    drop(tx);
     let existing = find_by_external_id(pool, &new.source, &new.external_id).await?;
     Ok((existing.id, false))
 }
@@ -143,23 +159,6 @@ pub async fn events_for(pool: &SqlitePool, listing_id: &str) -> Result<Vec<Event
     .fetch_all(pool)
     .await?;
     Ok(rows)
-}
-
-async fn write_event(
-    pool: &SqlitePool,
-    listing_id: &str,
-    from: Option<ListingState>,
-    to: ListingState,
-    note: Option<&str>,
-) -> Result<()> {
-    sqlx::query("INSERT INTO events (listing_id, from_state, to_state, note) VALUES (?, ?, ?, ?)")
-        .bind(listing_id)
-        .bind(from.map(ListingState::as_str))
-        .bind(to.as_str())
-        .bind(note)
-        .execute(pool)
-        .await?;
-    Ok(())
 }
 
 #[cfg(test)]

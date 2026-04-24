@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
+use tracing;
 
 use crate::base::{RawListing, Source, SourceError};
 use crate::util::html_to_text;
@@ -23,11 +24,20 @@ impl Default for RemoteOkSource {
     fn default() -> Self {
         Self {
             base_url: DEFAULT_BASE_URL.to_string(),
-            // RemoteOK rejects requests without a UA header.
+            // RemoteOK rejects requests without a UA header.  Building with a
+            // custom UA is not expected to fail; log loudly if it does so the
+            // operator knows the UA will be missing (may cause 403s).
             http: Client::builder()
                 .user_agent("careerai/0.1 (+https://github.com/justdoGIT/career-ai)")
                 .build()
-                .unwrap_or_else(|_| Client::new()),
+                .unwrap_or_else(|e| {
+                    tracing::error!(
+                        error = %e,
+                        "failed to build RemoteOK HTTP client with UA; \
+                         falling back to plain client — requests may be blocked"
+                    );
+                    Client::new()
+                }),
         }
     }
 }

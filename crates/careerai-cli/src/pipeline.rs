@@ -136,8 +136,8 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         })
         .collect();
 
-    // Apply hard filters first. Rejected listings still move off `discovered`
-    // so we don't re-score them every run.
+    // Apply hard filters first. When not in tune mode, rejected listings are
+    // transitioned to `FilteredOut` so they are skipped on subsequent runs.
     let mut post_filter: Vec<(&careerai_db::models::Listing, RawListing)> = Vec::new();
     let mut filtered_out = 0usize;
     for (db_row, raw) in discovered.iter().zip(raws) {
@@ -145,8 +145,15 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
             Decision::Keep => post_filter.push((db_row, raw)),
             Decision::Reject(reason) => {
                 filtered_out += 1;
-                queries::transition(&pool, &db_row.id, ListingState::FilteredOut, Some(reason))
+                if !tune {
+                    queries::transition(
+                        &pool,
+                        &db_row.id,
+                        ListingState::FilteredOut,
+                        Some(reason),
+                    )
                     .await?;
+                }
             }
         }
     }
@@ -172,7 +179,10 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
     for scored in &keep {
         let db_row = post_filter
             .iter()
-            .find(|(_, r)| r.external_id == scored.listing.external_id)
+            .find(|(_, r)| {
+                r.source == scored.listing.source
+                    && r.external_id == scored.listing.external_id
+            })
             .map(|(d, _)| d)
             .context("bug: scored listing missing from post_filter map")?;
         queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
@@ -188,7 +198,10 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
     for scored in &drop {
         let db_row = post_filter
             .iter()
-            .find(|(_, r)| r.external_id == scored.listing.external_id)
+            .find(|(_, r)| {
+                r.source == scored.listing.source
+                    && r.external_id == scored.listing.external_id
+            })
             .map(|(d, _)| d)
             .context("bug: below-threshold listing missing")?;
         queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
