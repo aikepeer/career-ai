@@ -5,11 +5,20 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Hard filters + embedding-based listing-to-profile ranking"
+description = "Hard filters + keyword-similarity ranking of listings against a profile"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-sources = { path = "../careerai-sources" }
 thiserror.workspace = true
 serde.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+insta = { version = "1", features = ["yaml"] }
+tempfile = "3"
 
 [lints]
 workspace = true

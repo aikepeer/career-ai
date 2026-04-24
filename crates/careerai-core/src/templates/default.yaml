@@ -78,3 +78,18 @@ scheduler:
     remotive:   "0 0 */2 * * *"
     linkedin:   "0 0 */4 * * *"
     indeed:     "0 30 */4 * * *"
+
+# Job-board instances to poll on `careerai discover`.
+# Greenhouse + Lever need one entry per company slug; Remotive and RemoteOK
+# are single public feeds.
+sources:
+  greenhouse:
+    companies:
+      - "anthropic"
+  lever:
+    companies: []
+  remotive:
+    enabled: true
+    category: "software-dev"
+  remoteok:
+    enabled: true

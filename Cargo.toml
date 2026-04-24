@@ -36,6 +36,8 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "migr
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
 validator = { version = "0.20", features = ["derive"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+config = { version = "0.15", default-features = false, features = ["yaml"] }
 
 [profile.release]
 opt-level = 3

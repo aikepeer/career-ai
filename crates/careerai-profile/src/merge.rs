@@ -71,8 +71,7 @@ fn merge_experience(base: Vec<Experience>, other: Vec<Experience>) -> Vec<Experi
             .iter_mut()
             .find(|e| !e.start.is_empty() && exp_key(e) == key)
         {
-            existing.bullets =
-                dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
+            existing.bullets = dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
             existing.location = prefer_nonempty(existing.location.clone(), new.location);
             existing.end = prefer_nonempty(existing.end.clone(), new.end);
         } else {
@@ -99,8 +98,7 @@ fn merge_projects(base: Vec<Project>, other: Vec<Project>) -> Vec<Project> {
         let key = new.name.to_lowercase();
         if let Some(existing) = out.iter_mut().find(|p| p.name.to_lowercase() == key) {
             existing.url = prefer_nonempty(existing.url.clone(), new.url);
-            existing.bullets =
-                dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
+            existing.bullets = dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
         } else {
             out.push(new);
         }
@@ -279,7 +277,12 @@ mod tests {
             ..Default::default()
         };
         let other = Profile {
-            experience: vec![exp("ACME", "engineer", "2022-01", &["Designed api", "New work"])],
+            experience: vec![exp(
+                "ACME",
+                "engineer",
+                "2022-01",
+                &["Designed api", "New work"],
+            )],
             ..Default::default()
         };
         let merged = merge_pair(base, other);

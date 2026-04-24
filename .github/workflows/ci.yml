@@ -49,4 +49,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-audit
-      - run: cargo audit
+      # RUSTSEC-2023-0071 (rsa Marvin attack): rsa is a ghost lockfile entry
+      # pulled by sqlx-mysql, which we do not compile — only the sqlite
+      # driver is enabled. `cargo tree -i rsa` confirms it is absent from
+      # the compiled graph. No upstream fix exists; safe to ignore until
+      # sqlx prunes the unused dep.
+      - run: cargo audit --ignore RUSTSEC-2023-0071

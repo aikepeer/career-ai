@@ -4,11 +4,15 @@
 //! `profile show`, `profile validate`, and `--help` are wired end-to-end at
 //! M1; the rest are stubs until M2+.
 
+mod pipeline;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
+
+use careerai_core::config::CoreConfig;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -129,22 +133,88 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log.as_deref());
 
+    let cwd = std::env::current_dir()?;
     match cli.command {
         Command::Init { force } => {
-            careerai_core::init::scaffold(&std::env::current_dir()?, force)?;
+            careerai_core::init::scaffold(&cwd, force)?;
         }
         Command::Profile { command } => run_profile(command)?,
-        Command::Discover { .. }
-        | Command::Match { .. }
-        | Command::Tailor { .. }
+        Command::Discover { sources } => run_discover(&cwd, &sources).await?,
+        Command::Match { tune } => run_match(&cwd, tune).await?,
+        Command::Shortlist { command } => match command {
+            ShortlistCommand::Show { limit } => run_shortlist_show(&cwd, limit).await?,
+        },
+        Command::Tailor { .. }
         | Command::Render { .. }
         | Command::Apply { .. }
         | Command::Daemon
         | Command::Inspect { .. }
-        | Command::Shortlist { .. }
         | Command::Applied => {
-            anyhow::bail!("subcommand not implemented yet (tracked in plan milestones M2+)");
+            anyhow::bail!("subcommand not implemented yet (tracked in plan milestones M3+)");
         }
+    }
+    Ok(())
+}
+
+fn load_cfg(cwd: &Path) -> Result<CoreConfig> {
+    CoreConfig::load(cwd).context("load config")
+}
+
+async fn run_discover(cwd: &Path, source_filter: &[String]) -> Result<()> {
+    let cfg = load_cfg(cwd)?;
+    let report = pipeline::discover_all(cwd, &cfg, source_filter).await?;
+    println!(
+        "discover: fetched {}, new {}, duplicates {}, errors {}",
+        report.fetched, report.new_rows, report.duplicates, report.errors,
+    );
+    Ok(())
+}
+
+async fn run_match(cwd: &Path, tune: bool) -> Result<()> {
+    let cfg = load_cfg(cwd)?;
+    let report = pipeline::match_all(cwd, &cfg, tune).await?;
+    if tune {
+        println!(
+            "match --tune: {} listings after filters (filtered_out: {})",
+            report.histogram.iter().map(|(_, c)| c).sum::<usize>(),
+            report.filtered_out,
+        );
+        println!("score distribution:");
+        for (lower, count) in report.histogram {
+            let bar = "#".repeat(count.min(60));
+            println!("  [{:.1}-{:.1}) {:>4} {bar}", lower, lower + 0.1, count);
+        }
+        println!(
+            "threshold in config: {:.2} — use match (without --tune) to apply",
+            cfg.matching.score_threshold,
+        );
+    } else {
+        println!(
+            "match: filtered_out {}, shortlisted {}, below-threshold {}",
+            report.filtered_out, report.shortlisted, report.also_filtered,
+        );
+    }
+    Ok(())
+}
+
+async fn run_shortlist_show(cwd: &Path, limit: u32) -> Result<()> {
+    let rows = pipeline::shortlist_show(cwd, i64::from(limit)).await?;
+    if rows.is_empty() {
+        println!("(no shortlisted listings — run `careerai discover` then `careerai match`)");
+        return Ok(());
+    }
+    for (i, l) in rows.iter().enumerate() {
+        let score = l
+            .score
+            .map_or_else(|| "—".to_string(), |s| format!("{s:.3}"));
+        println!(
+            "{:>2}. [{score}] {} @ {} ({})\n    {}",
+            i + 1,
+            l.title,
+            l.company,
+            l.source,
+            l.url,
+        );
     }
     Ok(())
 }
