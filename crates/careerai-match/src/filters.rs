@@ -28,14 +28,22 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
 
     // rules fields are pre-lowercased at load time (FilterRules::normalize),
     // so no per-rule to_lowercase() allocation needed here.
-    if rules.exclude_titles.iter().any(|t| title_lc.contains(t.as_str())) {
+    if rules
+        .exclude_titles
+        .iter()
+        .any(|t| title_lc.contains(t.as_str()))
+    {
         return Decision::Reject("excluded title");
     }
 
     // Skip the allocation when there is no location filter configured.
     if !cfg.user.locations.is_empty() {
-        let locations_lc: Vec<String> =
-            cfg.user.locations.iter().map(|s| s.to_lowercase()).collect();
+        let locations_lc: Vec<String> = cfg
+            .user
+            .locations
+            .iter()
+            .map(|s| s.to_lowercase())
+            .collect();
         if !location_ok(listing, &locations_lc) {
             return Decision::Reject("location not in allowlist");
         }
@@ -58,17 +66,21 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
         return Decision::Reject("no required JD keyword");
     }
 
-    if !cfg.domains.is_empty()
-        && !cfg
+    if !cfg.domains.is_empty() {
+        // Lowercase domain keywords once per classify() call instead of per
+        // iteration per listing. Small config, one-shot allocation.
+        let domain_kws_lc: Vec<String> = cfg
             .domains
             .iter()
             .flat_map(|d| &d.keywords_any)
-            .any(|k| {
-                let k_lc = k.to_lowercase();
-                title_lc.contains(&k_lc) || desc_lc.contains(&k_lc)
-            })
-    {
-        return Decision::Reject("no configured domain keyword in title or JD");
+            .map(|k| k.to_lowercase())
+            .collect();
+        if !domain_kws_lc
+            .iter()
+            .any(|k| title_lc.contains(k.as_str()) || desc_lc.contains(k.as_str()))
+        {
+            return Decision::Reject("no configured domain keyword in title or JD");
+        }
     }
 
     Decision::Keep
@@ -90,7 +102,9 @@ fn location_ok(listing: &RawListing, allowlist_lc: &[String]) -> bool {
         return allowlist_lc.iter().any(String::is_empty);
     };
     let loc_lc = loc.to_lowercase();
-    allowlist_lc.iter().any(|allowed| loc_lc.contains(allowed.as_str()))
+    allowlist_lc
+        .iter()
+        .any(|allowed| loc_lc.contains(allowed.as_str()))
 }
 
 #[cfg(test)]

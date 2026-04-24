@@ -146,13 +146,8 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
             Decision::Reject(reason) => {
                 filtered_out += 1;
                 if !tune {
-                    queries::transition(
-                        &pool,
-                        &db_row.id,
-                        ListingState::FilteredOut,
-                        Some(reason),
-                    )
-                    .await?;
+                    queries::transition(&pool, &db_row.id, ListingState::FilteredOut, Some(reason))
+                        .await?;
                 }
             }
         }
@@ -180,8 +175,7 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         let db_row = post_filter
             .iter()
             .find(|(_, r)| {
-                r.source == scored.listing.source
-                    && r.external_id == scored.listing.external_id
+                r.source == scored.listing.source && r.external_id == scored.listing.external_id
             })
             .map(|(d, _)| d)
             .context("bug: scored listing missing from post_filter map")?;
@@ -199,8 +193,7 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         let db_row = post_filter
             .iter()
             .find(|(_, r)| {
-                r.source == scored.listing.source
-                    && r.external_id == scored.listing.external_id
+                r.source == scored.listing.source && r.external_id == scored.listing.external_id
             })
             .map(|(d, _)| d)
             .context("bug: below-threshold listing missing")?;
@@ -240,7 +233,7 @@ pub async fn shortlist_show(root: &Path, limit: i64) -> Result<Vec<careerai_db::
 
 fn load_profile(root: &Path) -> Result<Profile> {
     let path = root.join("profile").join("profile.yaml");
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     Profile::from_yaml(&text).context("parse profile yaml")
 }
