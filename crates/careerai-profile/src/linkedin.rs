@@ -31,10 +31,10 @@ pub fn parse_export_from_bytes(bytes: &[u8]) -> Result<Profile> {
 
 fn parse_archive<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Profile> {
     let profile_row = read_profile_csv(archive)?;
-    let positions = read_positions(archive).unwrap_or_default();
-    let education = read_education(archive).unwrap_or_default();
-    let skills = read_skills(archive).unwrap_or_default();
-    let projects = read_projects(archive).unwrap_or_default();
+    let positions = optional_csv(read_positions(archive))?;
+    let education = optional_csv(read_education(archive))?;
+    let skills = optional_csv(read_skills(archive))?;
+    let projects = optional_csv(read_projects(archive))?;
 
     Ok(Profile {
         personal: Personal {
@@ -58,6 +58,15 @@ fn parse_archive<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Pro
         education,
         projects,
     })
+}
+
+/// Return `Ok(Vec::new())` when a file is absent; propagate every other error.
+fn optional_csv<T>(result: Result<Vec<T>>) -> Result<Vec<T>> {
+    match result {
+        Ok(v) => Ok(v),
+        Err(ProfileError::LinkedInMissingFile(_)) => Ok(Vec::new()),
+        Err(e) => Err(e),
+    }
 }
 
 fn read_csv<R: Read + Seek, T: for<'de> Deserialize<'de>>(
@@ -119,8 +128,9 @@ fn read_profile_csv<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<
     // Catch the LinkedIn-renamed-a-column case here instead of failing late at
     // schema validation with a vague "name is required" message.
     if join_name(&row.first_name, &row.last_name).is_empty() {
-        return Err(ProfileError::LinkedInMissingFile(
-            "Profile.csv: no `First Name`/`Last Name` columns".to_string(),
+        return Err(ProfileError::LinkedInMissingColumn(
+            "Profile.csv: no `First Name`/`Last Name` columns (LinkedIn may have renamed them)"
+                .to_string(),
         ));
     }
     Ok(row)
@@ -295,8 +305,8 @@ mod tests {
         )]);
         let err = parse_export_from_bytes(&bytes).unwrap_err();
         assert!(
-            matches!(&err, ProfileError::LinkedInMissingFile(msg) if msg.contains("First Name")),
-            "expected LinkedInMissingFile pointing at name columns, got {err:?}",
+            matches!(&err, ProfileError::LinkedInMissingColumn(msg) if msg.contains("First Name")),
+            "expected LinkedInMissingColumn pointing at name columns, got {err:?}",
         );
     }
 }

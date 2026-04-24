@@ -51,18 +51,28 @@ fn merge_personal(
 
 fn merge_skills(base: Skills, other: Skills) -> Skills {
     Skills {
-        languages: dedup_keep_order(merge_vecs(base.languages, other.languages)),
-        frameworks: dedup_keep_order(merge_vecs(base.frameworks, other.frameworks)),
-        tools: dedup_keep_order(merge_vecs(base.tools, other.tools)),
+        languages: dedup_keep_order_ci(merge_vecs(base.languages, other.languages)),
+        frameworks: dedup_keep_order_ci(merge_vecs(base.frameworks, other.frameworks)),
+        tools: dedup_keep_order_ci(merge_vecs(base.tools, other.tools)),
     }
 }
 
 fn merge_experience(base: Vec<Experience>, other: Vec<Experience>) -> Vec<Experience> {
     let mut out = base;
     for new in other {
+        // Entries with unknown start dates cannot be reliably deduplicated;
+        // always treat them as new to avoid collapsing distinct roles.
+        if new.start.is_empty() {
+            out.push(new);
+            continue;
+        }
         let key = exp_key(&new);
-        if let Some(existing) = out.iter_mut().find(|e| exp_key(e) == key) {
-            existing.bullets = dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
+        if let Some(existing) = out
+            .iter_mut()
+            .find(|e| !e.start.is_empty() && exp_key(e) == key)
+        {
+            existing.bullets =
+                dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
             existing.location = prefer_nonempty(existing.location.clone(), new.location);
             existing.end = prefer_nonempty(existing.end.clone(), new.end);
         } else {
@@ -89,7 +99,8 @@ fn merge_projects(base: Vec<Project>, other: Vec<Project>) -> Vec<Project> {
         let key = new.name.to_lowercase();
         if let Some(existing) = out.iter_mut().find(|p| p.name.to_lowercase() == key) {
             existing.url = prefer_nonempty(existing.url.clone(), new.url);
-            existing.bullets = dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
+            existing.bullets =
+                dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
         } else {
             out.push(new);
         }
@@ -130,7 +141,22 @@ fn merge_vecs<T>(mut a: Vec<T>, b: Vec<T>) -> Vec<T> {
     a
 }
 
+/// Case-sensitive dedup preserving first-occurrence order.
+/// Used for bullets where casing differences (e.g. acronyms) are meaningful.
 fn dedup_keep_order(items: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        if seen.insert(item.clone()) {
+            out.push(item);
+        }
+    }
+    out
+}
+
+/// Case-insensitive dedup preserving first-occurrence order and casing.
+/// Used for skills where "Rust" and "RUST" are the same skill.
+fn dedup_keep_order_ci(items: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(items.len());
     for item in items {
@@ -243,5 +269,40 @@ mod tests {
         };
         let merged = merge_pair(base, other);
         assert_eq!(merged.summary, "a much longer summary");
+    }
+
+    #[test]
+    fn bullets_with_different_casing_are_kept_distinct() {
+        // Bullets are case-sensitive: "API" and "api" are different.
+        let base = Profile {
+            experience: vec![exp("Acme", "Engineer", "2022-01", &["Designed API"])],
+            ..Default::default()
+        };
+        let other = Profile {
+            experience: vec![exp("ACME", "engineer", "2022-01", &["Designed api", "New work"])],
+            ..Default::default()
+        };
+        let merged = merge_pair(base, other);
+        assert_eq!(merged.experience.len(), 1);
+        assert_eq!(
+            merged.experience[0].bullets,
+            vec!["Designed API", "Designed api", "New work"]
+        );
+    }
+
+    #[test]
+    fn empty_start_entries_are_never_deduped() {
+        // Two roles at the same company/title but unknown start dates must be
+        // kept as separate entries, not collapsed into one.
+        let base = Profile {
+            experience: vec![exp("Acme", "Engineer", "", &["Early work"])],
+            ..Default::default()
+        };
+        let other = Profile {
+            experience: vec![exp("Acme", "Engineer", "", &["Later work"])],
+            ..Default::default()
+        };
+        let merged = merge_pair(base, other);
+        assert_eq!(merged.experience.len(), 2);
     }
 }
