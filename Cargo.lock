@@ -290,13 +290,21 @@ dependencies = [
  "anyhow",
  "careerai-core",
  "careerai-db",
+ "careerai-llm",
  "careerai-match",
  "careerai-profile",
+ "careerai-render",
  "careerai-sources",
+ "careerai-tailor",
  "clap",
+ "docx-rs",
+ "serde_json",
+ "sqlx",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "which",
 ]
 
 [[package]]

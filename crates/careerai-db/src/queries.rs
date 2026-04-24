@@ -10,7 +10,8 @@ use careerai_core::state::ListingState;
 
 use crate::error::{DbError, Result};
 use crate::models::{
-    Application, Artifact, Event, Listing, NewApplication, NewArtifact, NewListing,
+    Application, ApplicationPayload, Artifact, Event, Listing, NewApplication, NewArtifact,
+    NewListing,
 };
 
 /// Insert a new listing or do nothing if `(source, external_id)` already
@@ -277,6 +278,23 @@ pub async fn write_payload(
     Ok(())
 }
 
+/// Fetch the tailored payload for an application. Wave 4 addition so the CLI's
+/// `render` path can rehydrate the `ResumeView` + cover letter without
+/// re-calling the LLM.
+pub async fn find_payload_by_application_id(
+    pool: &SqlitePool,
+    application_id: &str,
+) -> Result<ApplicationPayload> {
+    let row: Option<ApplicationPayload> = sqlx::query_as(
+        "SELECT application_id, resume_view_json, cover_letter_text, diff_json, created_at
+         FROM application_payloads WHERE application_id = ?",
+    )
+    .bind(application_id)
+    .fetch_optional(pool)
+    .await?;
+    row.ok_or_else(|| DbError::NotFound(application_id.to_string()))
+}
+
 /// Attach an artifact row, overwriting any existing same-kind row for the
 /// application (idempotent re-render). Uses `RETURNING *` to avoid a second
 /// round-trip; SQLite >= 3.35 supports this.
@@ -501,6 +519,36 @@ mod tests {
         assert_eq!(resume, r#"{"v":2}"#);
         assert_eq!(cover, "second body");
         assert_eq!(diff, r#"{"d":2}"#);
+    }
+
+    #[tokio::test]
+    async fn find_payload_by_application_id_roundtrip() {
+        let pool = pool_in_memory().await.unwrap();
+        let (listing_id, _) = insert_or_ignore(&pool, &fixture("greenhouse", "payload-1"))
+            .await
+            .unwrap();
+        let app = create_application(&pool, &new_app(&listing_id))
+            .await
+            .unwrap();
+        write_payload(&pool, &app.id, r#"{"v":1}"#, "body", r#"{"d":1}"#)
+            .await
+            .unwrap();
+        let got = find_payload_by_application_id(&pool, &app.id)
+            .await
+            .unwrap();
+        assert_eq!(got.application_id, app.id);
+        assert_eq!(got.resume_view_json, r#"{"v":1}"#);
+        assert_eq!(got.cover_letter_text, "body");
+        assert_eq!(got.diff_json, r#"{"d":1}"#);
+    }
+
+    #[tokio::test]
+    async fn find_payload_by_application_id_missing_is_not_found() {
+        let pool = pool_in_memory().await.unwrap();
+        let err = find_payload_by_application_id(&pool, "nope")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DbError::NotFound(_)));
     }
 
     #[tokio::test]

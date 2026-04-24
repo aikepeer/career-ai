@@ -4,7 +4,7 @@
 //! `profile show`, `profile validate`, and `--help` are wired end-to-end at
 //! M1; the rest are stubs until M2+.
 
-mod pipeline;
+use careerai_cli::pipeline;
 
 use std::path::{Path, PathBuf};
 
@@ -144,16 +144,110 @@ async fn main() -> Result<()> {
         Command::Shortlist { command } => match command {
             ShortlistCommand::Show { limit } => run_shortlist_show(&cwd, limit).await?,
         },
-        Command::Tailor { .. }
-        | Command::Render { .. }
-        | Command::Apply { .. }
-        | Command::Daemon
-        | Command::Inspect { .. }
-        | Command::Applied => {
-            anyhow::bail!("subcommand not implemented yet (tracked in plan milestones M3+)");
+        Command::Tailor { listing_id } => {
+            let cfg = load_cfg(&cwd)?;
+            match pipeline::tailor_one(&cwd, &cfg, &listing_id).await {
+                Ok(outcome) => {
+                    println!(
+                        "tailored: application_id={} ({} @ {})",
+                        outcome.application_id, outcome.listing_title, outcome.company,
+                    );
+                    println!(
+                        "run `careerai render {}` to emit DOCX/PDF artifacts",
+                        outcome.application_id,
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "tailor failed");
+                    std::process::exit(map_tailor_error_to_exit_code(&e));
+                }
+            }
+        }
+        Command::Render { application_id } => {
+            let cfg = load_cfg(&cwd)?;
+            match pipeline::render_one(&cwd, &cfg, &application_id).await {
+                Ok(outcome) => {
+                    println!("rendered: application_id={}", outcome.application_id);
+                    for (path, size) in &outcome.bytes {
+                        println!("  {} ({} bytes)", path.display(), size);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "render failed");
+                    std::process::exit(map_render_error_to_exit_code(&e));
+                }
+            }
+        }
+        Command::Apply { .. } | Command::Daemon | Command::Inspect { .. } | Command::Applied => {
+            anyhow::bail!("subcommand not implemented yet (tracked in plan milestones M4+)");
         }
     }
     Ok(())
+}
+
+/// Map a tailor-path error into a stable process exit code.
+///
+/// - 2: listing / application not found
+/// - 3: listing in unexpected state
+/// - 4: constrained-diff validator rejected the LLM output
+/// - 5: LLM provider/upstream failure
+/// - 1: anything else
+fn map_tailor_error_to_exit_code(err: &anyhow::Error) -> i32 {
+    // Walk the chain looking for typed causes.
+    for cause in err.chain() {
+        if let Some(te) = cause.downcast_ref::<careerai_tailor::TailorError>() {
+            return match te {
+                careerai_tailor::TailorError::InventedContent { .. }
+                | careerai_tailor::TailorError::Schema(_)
+                | careerai_tailor::TailorError::BadPath(_)
+                | careerai_tailor::TailorError::CoverLetterTooLong { .. } => 4,
+                careerai_tailor::TailorError::Llm(_) => 5,
+                _ => 1,
+            };
+        }
+        if cause.downcast_ref::<careerai_llm::LlmError>().is_some() {
+            return 5;
+        }
+    }
+
+    // String-level fallbacks for the `anyhow::bail!` paths that never carry a
+    // typed cause — keep these in sync with the messages in `pipeline.rs`.
+    let msg = err.to_string();
+    if msg.starts_with("listing not found:") || msg.starts_with("application not found:") {
+        return 2;
+    }
+    if msg.contains("expected 'shortlisted'") {
+        return 3;
+    }
+    1
+}
+
+/// Map a render-path error into a stable process exit code.
+///
+/// - 2: application / payload / listing not found
+/// - 3: application in unexpected state
+/// - 6: pandoc missing on PATH
+/// - 1: anything else
+fn map_render_error_to_exit_code(err: &anyhow::Error) -> i32 {
+    for cause in err.chain() {
+        if let Some(re) = cause.downcast_ref::<careerai_render::RenderError>() {
+            if matches!(re, careerai_render::RenderError::PandocMissing) {
+                return 6;
+            }
+        }
+    }
+
+    let msg = err.to_string();
+    if msg.starts_with("application not found:")
+        || msg.starts_with("application payload not found:")
+        || msg.starts_with("listing not found:")
+    {
+        return 2;
+    }
+    if msg.contains("expected 'tailored'") {
+        return 3;
+    }
+    1
 }
 
 fn load_cfg(cwd: &Path) -> Result<CoreConfig> {
