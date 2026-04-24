@@ -47,6 +47,7 @@ backon = "1"
 tempfile = "3"
 insta = { version = "1", features = ["yaml", "json"] }
 docx-rs = "0.4"
+wiremock = "0.6"
 
 [profile.release]
 opt-level = 3

@@ -437,7 +437,21 @@ name = "careerai-submit"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "careerai-core",
+ "careerai-db",
+ "careerai-profile",
+ "careerai-render",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
