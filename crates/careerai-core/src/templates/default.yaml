@@ -53,6 +53,8 @@ rates:
     jitter_seconds: 45
   ats_http:
     max_per_day: 50
+  naukri:
+    max_per_day: 30
 
 submit:
   auto_submit: false
@@ -62,6 +64,7 @@ submit:
     ashby:      { enabled: true }
     remotive:   { enabled: true }
     remoteok:   { enabled: true }
+    naukri:     { enabled: false }
     linkedin:   { enabled: false }
     indeed:     { enabled: false }
 
@@ -81,6 +84,7 @@ scheduler:
     greenhouse: "0 0 */1 * * *"
     lever:      "0 0 */1 * * *"
     remotive:   "0 0 */2 * * *"
+    naukri:     "0 15 */3 * * *"
     linkedin:   "0 0 */4 * * *"
     indeed:     "0 30 */4 * * *"
 
@@ -98,6 +102,14 @@ sources:
     category: "software-dev"
   remoteok:
     enabled: true
+  naukri:
+    enabled: false             # undocumented endpoint; opt-in
+    keywords:
+      - "machine learning"
+      - "llm"
+      - "robotics"
+    location: "Delhi / NCR"
+    max_results: 20
 
 render:
   artifacts_dir: "artifacts"

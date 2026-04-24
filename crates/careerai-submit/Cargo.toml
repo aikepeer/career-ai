@@ -8,8 +8,25 @@ repository.workspace = true
 description = "Submitters per source (HTTP, browser, email) with dry-run safety"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-db = { path = "../careerai-db" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-render = { path = "../careerai-render" }
 thiserror.workspace = true
 async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+reqwest = { workspace = true }
+uuid.workspace = true
+chrono.workspace = true
+sqlx = { workspace = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

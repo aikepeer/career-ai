@@ -21,7 +21,7 @@ use careerai_match::{
 use careerai_profile::Profile;
 use careerai_render::render_application;
 use careerai_sources::{
-    GreenhouseSource, LeverSource, RawListing, RemoteOkSource, RemotiveSource, Source,
+    GreenhouseSource, LeverSource, NaukriSource, RawListing, RemoteOkSource, RemotiveSource, Source,
 };
 use careerai_tailor::model::{CoverLetter, ResumeView};
 use careerai_tailor::tailor_for_listing;
@@ -53,6 +53,19 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     }
     if cfg.sources.remoteok.enabled {
         out.push(Arc::new(RemoteOkSource::new()));
+    }
+    if cfg.sources.naukri.enabled {
+        let mut s = NaukriSource::new();
+        if !cfg.sources.naukri.keywords.is_empty() {
+            s = s.with_keywords(cfg.sources.naukri.keywords.clone());
+        }
+        if let Some(loc) = &cfg.sources.naukri.location {
+            s = s.with_location(loc.clone());
+        }
+        if let Some(n) = cfg.sources.naukri.max_results {
+            s = s.with_max_results(n);
+        }
+        out.push(Arc::new(s));
     }
     out
 }
@@ -450,5 +463,155 @@ pub async fn render_one(
         cover_md: artifacts.cover_md,
         cover_docx: artifacts.cover_docx,
         bytes: artifacts.bytes,
+    })
+}
+
+// --- apply / applied / inspect (M4 wave 2) ---------------------------------
+
+/// One row of `apply --all` output. One `AppliedOutcome` is emitted per
+/// application the CLI attempted to submit, regardless of whether the
+/// per-call result was success, skip, or dry-run.
+#[derive(Debug)]
+pub struct AppliedOutcome {
+    pub application_id: String,
+    pub source: String,
+    pub outcome: careerai_submit::SubmitOutcome,
+}
+
+/// Structured payload for `careerai inspect <application_id>`.
+#[derive(Debug)]
+pub struct InspectReport {
+    pub application: careerai_db::Application,
+    pub listing_title: String,
+    pub listing_company: String,
+    pub listing_source: String,
+    pub events: Vec<careerai_db::Event>,
+    pub artifacts: Vec<careerai_db::Artifact>,
+}
+
+/// Build a per-call `SubmitConfig` honoring the optional CLI override.
+///
+/// When `override_auto_submit` is `Some(true)` the call is forced live;
+/// `Some(false)` forces dry-run; `None` passes the config's stored value
+/// through unchanged.
+fn effective_submit_cfg(
+    cfg: &CoreConfig,
+    override_auto_submit: Option<bool>,
+) -> careerai_core::config::SubmitConfig {
+    let mut submit = cfg.submit.clone();
+    if let Some(v) = override_auto_submit {
+        submit.auto_submit = v;
+    }
+    submit
+}
+
+/// Submit a single prepared application (state `rendered` or `prepared`).
+///
+/// Gating, state transitions, and artifact loading all live inside
+/// `careerai_submit::submit_application`; this wrapper only opens the pool
+/// and overlays the `--auto-submit` flag on top of the config.
+pub async fn apply_one(
+    root: &Path,
+    cfg: &CoreConfig,
+    application_id: &str,
+    auto_submit_override: Option<bool>,
+) -> Result<AppliedOutcome> {
+    let pool = open_pool(root).await?;
+
+    // Pre-fetch surfaces the typed errors from careerai-db; the CLI's
+    // exit-code mapper downcasts to `DbError::NotFound` directly. We do
+    // NOT bail!() into a stringly-typed error here — that was previously
+    // breaking exit-code classification once any `.context(...)` wrapper
+    // ran upstream.
+    let application = queries::find_application_by_id(&pool, application_id).await?;
+    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
+
+    let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
+    let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
+        .await
+        .context("submit_application")?;
+
+    Ok(AppliedOutcome {
+        application_id: application.id,
+        source: listing.source,
+        outcome,
+    })
+}
+
+/// Iterate every application currently in state `rendered` or `prepared`
+/// and submit each one. Per-application failures are logged and skipped —
+/// `apply --all` deliberately doesn't abort the batch on the first error.
+pub async fn apply_all(
+    root: &Path,
+    cfg: &CoreConfig,
+    source_filter: Option<&str>,
+    auto_submit_override: Option<bool>,
+) -> Result<Vec<AppliedOutcome>> {
+    let pool = open_pool(root).await?;
+
+    // Both "rendered" and "prepared" are eligible per submit_application's
+    // BadState guard. Use the JOIN-based query so a `--source` filter is
+    // pushed into SQL — previously the CLI fetched every listing per row
+    // (O(N) round-trips) and filtered client-side.
+    let mut eligible: Vec<careerai_db::Application> = Vec::new();
+    for state in ["rendered", "prepared"] {
+        let rows =
+            queries::list_applications_by_state_and_source(&pool, state, source_filter, 1_000)
+                .await
+                .with_context(|| format!("list applications in state '{state}'"))?;
+        eligible.extend(rows);
+    }
+
+    // Drop the local pool so `apply_one` opens its own — matches the
+    // established convention in `tailor_render_it.rs` and avoids holding a
+    // WAL writer across the loop.
+    drop(pool);
+
+    let mut out = Vec::with_capacity(eligible.len());
+    for app in eligible {
+        match apply_one(root, cfg, &app.id, auto_submit_override).await {
+            Ok(o) => out.push(o),
+            Err(e) => {
+                warn!(application_id = %app.id, error = %e, "apply_one failed, continuing batch");
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// List applications already submitted, newest first. Optional `source`
+/// filter matches against the linked listing's source.
+pub async fn applied_show(
+    root: &Path,
+    source_filter: Option<&str>,
+    limit: i64,
+) -> Result<Vec<careerai_db::Application>> {
+    let pool = open_pool(root).await?;
+    queries::list_applications_by_state_and_source(&pool, "submitted", source_filter, limit)
+        .await
+        .context("list submitted applications")
+}
+
+/// Gather everything needed to render `careerai inspect <id>`.
+pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectReport> {
+    let pool = open_pool(root).await?;
+
+    // Same typed-error pattern as apply_one: don't bail!() into strings.
+    let application = queries::find_application_by_id(&pool, application_id).await?;
+    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
+    let events = queries::events_for(&pool, &listing.id)
+        .await
+        .context("events_for listing")?;
+    let artifacts = queries::list_artifacts(&pool, &application.id)
+        .await
+        .context("list_artifacts")?;
+
+    Ok(InspectReport {
+        application,
+        listing_title: listing.title,
+        listing_company: listing.company,
+        listing_source: listing.source,
+        events,
+        artifacts,
     })
 }

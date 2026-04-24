@@ -64,6 +64,8 @@ pub struct SourcesConfig {
     pub remotive: RemotiveSourceConfig,
     #[serde(default)]
     pub remoteok: ToggleSource,
+    #[serde(default)]
+    pub naukri: NaukriSourceConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,6 +87,34 @@ impl Default for RemotiveSourceConfig {
         Self {
             enabled: true,
             category: Some("software-dev".to_string()),
+        }
+    }
+}
+
+/// Naukri.com — India's largest job board. Uses the undocumented
+/// `jobapi/v3/search` endpoint with `AppId`/`SystemId` headers. Defaults
+/// to `enabled: false` because the endpoint is unofficial and Naukri
+/// aggressively rate-limits unauthenticated callers; the user opts in
+/// via `config/local.yaml` once they've decided to accept the trade-off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NaukriSourceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub max_results: Option<usize>,
+}
+
+impl Default for NaukriSourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            keywords: vec!["machine learning".into(), "llm".into(), "robotics".into()],
+            location: Some("Delhi / NCR".into()),
+            max_results: Some(20),
         }
     }
 }
