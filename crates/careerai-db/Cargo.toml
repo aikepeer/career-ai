@@ -8,7 +8,17 @@ repository.workspace = true
 description = "SQLite persistence for career-ai (sqlx models, queries, migrations)"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
 thiserror.workspace = true
+sqlx.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lints]
 workspace = true
