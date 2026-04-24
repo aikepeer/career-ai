@@ -12,6 +12,8 @@ pub mod error;
 pub mod hashing;
 pub mod mock;
 pub mod retry;
+#[cfg(feature = "live-llm")]
+pub mod rig;
 pub mod trait_def;
 pub mod types;
 
@@ -20,5 +22,7 @@ pub use crate::error::{LlmError, Result};
 pub use crate::hashing::{canonical_profile_hash, compose_key, jd_hash};
 pub use crate::mock::MockLlm;
 pub use crate::retry::llm_backoff;
+#[cfg(feature = "live-llm")]
+pub use crate::rig::{Provider, RigLlm};
 pub use crate::trait_def::Llm;
 pub use crate::types::{LlmRequest, LlmResponse};
