@@ -206,7 +206,6 @@ pub async fn create_application(pool: &SqlitePool, new: &NewApplication) -> Resu
                 // UUID collision — drop tx, retry with a fresh id.
                 drop(tx);
                 last_err = Some(DbError::Sqlx(sqlx::Error::Database(db_err)));
-                continue;
             }
             Err(e) => return Err(DbError::Sqlx(e)),
         }
