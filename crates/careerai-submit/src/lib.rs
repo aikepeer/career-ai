@@ -11,12 +11,14 @@ pub mod base;
 pub mod credentials;
 pub mod dry_run;
 pub mod error;
+pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
 pub use base::{SubmitContext, SubmitDecision, SubmitOutcome, Submitter, WouldSubmit};
 pub use credentials::Credential;
 pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
+pub use rate_limiter::{RateLimitError, RateLimiter, RatePolicy};
 
 use std::path::Path;
 
