@@ -3,8 +3,8 @@
 Automated job discovery, resume tailoring, and auto-apply for a single user.
 
 **Status:** M0 (workspace scaffold) and M1 (profile ingestion) merged.
-M2 (discovery + matching) in review. See `CLAUDE.md` for development
-guidance and the approved milestone plan.
+M2 (discovery + matching) in review. See [CLAUDE.md](./CLAUDE.md) for
+development guidance.
 
 ## What it does (target v1)
 
@@ -37,9 +37,9 @@ cargo run -p careerai-cli -- --help
 
 `profile import` accepts any combination of `.pdf`, `.docx`, and a
 LinkedIn data-export `.zip`; the canonical merge writes
-`profile/profile.yaml`. `profile show` and `profile validate` round-trip
-that file against the schema. Pass `--force` to overwrite an existing
-profile.
+`profile/profile.yaml`. Use `profile show` to print that file, and
+`profile validate` to validate it against the schema. Pass `--force`
+to overwrite an existing profile.
 
 ## Runtime dependencies
 

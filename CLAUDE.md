@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-M0 (workspace scaffold) and M1 (profile ingestion) are merged on `main`. M2 (discovery + matching) is in review on `feat/m2-discovery-match` (PR #2). Remaining milestones M3–M7 (LLM tailoring + render, dry-run submitters, browser auto-apply, daemon, follow-ups) are unstarted. The approved plan lives at `/home/kk/.claude/plans/federated-riding-mochi.md` and remains the source of truth for scope, tech stack, and milestones — read it before making non-trivial changes.
+M0 (workspace scaffold) and M1 (profile ingestion) are merged on `main`. M2 (discovery + matching) is in review on `feat/m2-discovery-match` (PR #2). Remaining milestones M3–M7 (LLM tailoring + render, dry-run submitters, browser auto-apply, daemon, follow-ups) are unstarted. Scope, tech stack, and milestones are summarized below; refer to this file before making non-trivial changes.
 
 The Python stub (`main.py`, `pyproject.toml`, `uv.lock`, `.python-version`, `.venv/`) was deleted in M0. Do not add Python code or dependencies — the direction is Rust end-to-end.
 
