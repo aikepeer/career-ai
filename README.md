@@ -2,8 +2,9 @@
 
 Automated job discovery, resume tailoring, and auto-apply for a single user.
 
-**Status:** pre-implementation. See `/home/kk/.claude/plans/federated-riding-mochi.md`
-for the approved plan and `CLAUDE.md` for development guidance.
+**Status:** M0 (workspace scaffold) and M1 (profile ingestion) merged.
+M2 (discovery + matching) in review. See `CLAUDE.md` for development
+guidance and the approved milestone plan.
 
 ## What it does (target v1)
 
@@ -23,13 +24,22 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-## Quick start (post-M0)
+## Quick start
 
 ```bash
 cargo run -p careerai-cli -- init           # scaffolds config/, profile/, .env
-$EDITOR profile/profile.yaml                 # seed your profile
+cargo run -p careerai-cli -- profile import \
+    ~/Downloads/resume.pdf \
+    ~/Downloads/LinkedIn-Export.zip          # PDF/DOCX/LinkedIn-zip → profile.yaml
+cargo run -p careerai-cli -- profile validate
 cargo run -p careerai-cli -- --help
 ```
+
+`profile import` accepts any combination of `.pdf`, `.docx`, and a
+LinkedIn data-export `.zip`; the canonical merge writes
+`profile/profile.yaml`. `profile show` and `profile validate` round-trip
+that file against the schema. Pass `--force` to overwrite an existing
+profile.
 
 ## Runtime dependencies
 

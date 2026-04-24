@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Pre-implementation. The approved plan lives at `/home/kk/.claude/plans/federated-riding-mochi.md` and is the source of truth for scope, tech stack, and milestones — read it before making non-trivial changes.
+M0 (workspace scaffold) and M1 (profile ingestion) are merged on `main`. M2 (discovery + matching) is in review on `feat/m2-discovery-match` (PR #2). Remaining milestones M3–M7 (LLM tailoring + render, dry-run submitters, browser auto-apply, daemon, follow-ups) are unstarted. The approved plan lives at `/home/kk/.claude/plans/federated-riding-mochi.md` and remains the source of truth for scope, tech stack, and milestones — read it before making non-trivial changes.
 
-Current tree is a stale Python stub (`main.py`, `pyproject.toml`, `uv.lock`, `.python-version`, `.venv/`). **M0 deletes all of these** and rebuilds as a Rust cargo workspace. Do not add Python code or dependencies — the direction is Rust end-to-end.
+The Python stub (`main.py`, `pyproject.toml`, `uv.lock`, `.python-version`, `.venv/`) was deleted in M0. Do not add Python code or dependencies — the direction is Rust end-to-end.
+
+The profile pipeline (M1) ingests `.pdf` / `.docx` / LinkedIn data-export `.zip` into `profile/profile.yaml`. Errors distinguish a missing file (`LinkedInMissingFile`) from a renamed-column schema drift (`LinkedInMissingColumn`); only `LinkedInMissingFile` is silently tolerated when stitching optional CSVs. Bullet dedup is case-sensitive (acronyms preserved); skill dedup is case-insensitive. Experience entries with empty `start` dates are never deduped. `dates::two_digit_month` validates the month is in `1..=12`; out-of-range inputs pass through verbatim rather than producing invalid `YYYY-00` / `YYYY-13` strings.
 
 ## What this project is
 
@@ -14,7 +16,7 @@ A local, single-user pipeline that discovers jobs (ATS APIs + feeds + LinkedIn +
 
 ## Commands
 
-Once the Rust scaffold exists (post-M0), these are the common commands:
+Common commands:
 
 ```bash
 # Build + check
@@ -41,7 +43,7 @@ semgrep scan --config auto                     # per global CLAUDE.md
 sqlx migrate run                               # apply migrations to DATABASE_URL
 sqlx migrate add <name>                        # create new migration
 
-# Run the CLI (post-M0)
+# Run the CLI
 cargo run -p careerai-cli -- --help
 cargo run -p careerai-cli -- init
 cargo run -p careerai-cli -- discover --source greenhouse
