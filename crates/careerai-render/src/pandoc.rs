@@ -18,6 +18,38 @@ use crate::error::{RenderError, Result};
 
 const STDERR_TAIL_BYTES: usize = 2 * 1024;
 
+/// Allowlist of PDF engines pandoc accepts. Config-sourced `pdf_engine`
+/// values outside this set are rejected — prevents a malicious or
+/// mistaken `render.pdf_engine` in `config/local.yaml` from pointing
+/// pandoc at an arbitrary attacker-controlled path (via `../../x`) or
+/// an unexpected binary.
+const ALLOWED_PDF_ENGINES: &[&str] = &[
+    "weasyprint",
+    "wkhtmltopdf",
+    "tectonic",
+    "xelatex",
+    "lualatex",
+    "pdflatex",
+    "prince",
+    "context",
+    "pdfroff",
+];
+
+/// Validate `cfg.pdf_engine` against `ALLOWED_PDF_ENGINES`.
+fn check_pdf_engine(pdf_engine: &str) -> Result<()> {
+    if ALLOWED_PDF_ENGINES.contains(&pdf_engine) {
+        Ok(())
+    } else {
+        Err(RenderError::Pandoc {
+            code: 0,
+            stderr_tail: format!(
+                "pdf_engine '{pdf_engine}' is not in the allowlist; pick one of: {}",
+                ALLOWED_PDF_ENGINES.join(", ")
+            ),
+        })
+    }
+}
+
 /// Resolve the pandoc binary to use. If `cfg.pandoc_bin` is set and the
 /// file exists, use it verbatim. Otherwise probe PATH via `which`.
 pub fn resolve_pandoc_bin(cfg: &RenderConfig) -> Result<PathBuf> {
@@ -101,23 +133,51 @@ fn tail_bytes(bytes: &[u8], max: usize) -> String {
 
 pub async fn md_to_docx(md_path: &Path, out_path: &Path, cfg: &RenderConfig) -> Result<()> {
     let bin = resolve_pandoc_bin(cfg)?;
+    md_to_docx_with_bin(&bin, md_path, out_path, cfg).await
+}
+
+pub async fn md_to_pdf(md_path: &Path, out_path: &Path, cfg: &RenderConfig) -> Result<()> {
+    check_pdf_engine(&cfg.pdf_engine)?;
+    let bin = resolve_pandoc_bin(cfg)?;
+    md_to_pdf_with_bin(&bin, md_path, out_path, cfg).await
+}
+
+/// `md_to_docx` variant that skips the `which::which` probe — the caller
+/// is expected to have resolved the pandoc binary once via
+/// `resolve_pandoc_bin` and pass the same path to each subprocess. Used
+/// by `render_application` to amortize the PATH scan across three calls
+/// that run in parallel.
+pub async fn md_to_docx_with_bin(
+    bin: &Path,
+    md_path: &Path,
+    out_path: &Path,
+    cfg: &RenderConfig,
+) -> Result<()> {
     let args = vec![
         md_path.to_string_lossy().into_owned(),
         "-o".to_string(),
         out_path.to_string_lossy().into_owned(),
     ];
-    spawn_and_wait(&bin, &args, cfg.timeout_seconds).await
+    spawn_and_wait(bin, &args, cfg.timeout_seconds).await
 }
 
-pub async fn md_to_pdf(md_path: &Path, out_path: &Path, cfg: &RenderConfig) -> Result<()> {
-    let bin = resolve_pandoc_bin(cfg)?;
+/// `md_to_pdf` variant that skips the `which::which` probe. Still
+/// enforces the `pdf_engine` allowlist — the security check belongs on
+/// every entry path.
+pub async fn md_to_pdf_with_bin(
+    bin: &Path,
+    md_path: &Path,
+    out_path: &Path,
+    cfg: &RenderConfig,
+) -> Result<()> {
+    check_pdf_engine(&cfg.pdf_engine)?;
     let args = vec![
         md_path.to_string_lossy().into_owned(),
         format!("--pdf-engine={}", cfg.pdf_engine),
         "-o".to_string(),
         out_path.to_string_lossy().into_owned(),
     ];
-    spawn_and_wait(&bin, &args, cfg.timeout_seconds).await
+    spawn_and_wait(bin, &args, cfg.timeout_seconds).await
 }
 
 #[cfg(test)]

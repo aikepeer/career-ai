@@ -92,8 +92,10 @@ pub async fn tailor_for_listing(
     let resume_view = diff::apply(doc, profile.clone())?;
 
     // 5) Draft the cover letter (separate cache scope with its own
-    //    prompt_version suffix in `cover_letter::draft`).
-    let letter = cover_letter::draft(llm, profile, &listing, cfg, &cache).await?;
+    //    prompt_version suffix in `cover_letter::draft`). Pass the
+    //    pre-computed profile_hash so we don't re-canonicalize the
+    //    whole profile JSON tree.
+    let letter = cover_letter::draft(llm, profile, &listing, cfg, &cache, &profile_hash).await?;
 
     // 6) Persist application row + payload.
     let new_app = NewApplication {

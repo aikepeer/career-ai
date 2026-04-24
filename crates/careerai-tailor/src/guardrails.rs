@@ -28,23 +28,27 @@ fn year_regex() -> &'static Regex {
 }
 
 /// Extract consecutive Capitalized-token runs. Tokens may include a handful
-/// of connector characters common in tech names (`+`, `&`, `.`). We match
-/// on unicode categories so tokens containing homoglyphs (Cyrillic `о` in
-/// "Gооgle", etc.) still register as proper nouns — which is desirable
-/// because they will NOT lowercase-equal any profile token and will be
-/// rejected by the intersection check below.
+/// of connector characters common in tech names (`+`, `&`, `#`, `.`). We
+/// match on unicode categories so tokens containing homoglyphs (Cyrillic
+/// `о` in "Gооgle", etc.) still register as proper nouns — which is
+/// desirable because they will NOT lowercase-equal any profile token and
+/// will be rejected by the intersection check below.
 fn proper_noun_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     #[allow(clippy::unwrap_used)]
     RE.get_or_init(|| {
         // `\p{Lu}` = any uppercase letter (ASCII or not).
-        // `[\p{L}\p{N}+&.]` = letters (any script), digits, or connectors.
-        Regex::new(r"\p{Lu}[\p{L}\p{N}+&.]*(?:\s+\p{Lu}[\p{L}\p{N}+&.]*)*").unwrap()
+        // `[\p{L}\p{N}+&#.]` = letters (any script), digits, or connectors.
+        Regex::new(r"\p{Lu}[\p{L}\p{N}+&#.]*(?:\s+\p{Lu}[\p{L}\p{N}+&#.]*)*").unwrap()
     })
 }
 
+/// Pre-computed lookup sets derived from a `Profile`. Built once per
+/// `validate()` call and reused across every reword op — rebuilding per
+/// op was O(ops × profile_size) and dominated validate time for large
+/// profiles.
 #[allow(clippy::struct_field_names)]
-struct ProfileTokenSets {
+pub(crate) struct ProfileTokenSets {
     employer_tokens: HashSet<String>,
     project_tokens: HashSet<String>,
     skill_tokens: HashSet<String>,
@@ -58,7 +62,7 @@ fn split_words_lowercase(s: &str) -> impl Iterator<Item = String> + '_ {
         .map(str::to_lowercase)
 }
 
-fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
+pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
     let mut employer_tokens = HashSet::new();
     for exp in &profile.experience {
         for w in split_words_lowercase(&exp.company) {
@@ -89,8 +93,9 @@ fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         for w in split_words_lowercase(s) {
             skill_tokens.insert(w);
         }
-        // Skills may be short (e.g. "Go", "C") — keep the raw lowercase
-        // form too so two-letter langs still match.
+        // Skills may be short (e.g. "Go", "C") or contain kept punctuation
+        // (e.g. "C++", "C#") — keep the raw lowercase form too so two-letter
+        // langs and `#`-suffixed langs still match against `strip_for_match`.
         skill_tokens.insert(s.to_lowercase());
     }
 
@@ -100,10 +105,17 @@ fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         .find_iter(&flat)
         .map(|m| m.as_str().to_string())
         .collect();
-    let number_tokens = number_regex()
-        .find_iter(&flat)
-        .map(|m| m.as_str().to_string())
-        .collect();
+    // Numbers: store both the raw token ("35%") and the bare digits form
+    // ("35") so `forbid_invented_entities` accepts `"35 years"` when the
+    // profile only has "35%" or vice-versa.
+    let mut number_tokens: HashSet<String> = HashSet::new();
+    for m in number_regex().find_iter(&flat) {
+        let raw = m.as_str().to_string();
+        number_tokens.insert(raw.clone());
+        if let Some(bare) = raw.strip_suffix('%') {
+            number_tokens.insert(bare.to_string());
+        }
+    }
 
     ProfileTokenSets {
         employer_tokens,
@@ -114,7 +126,10 @@ fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
     }
 }
 
-fn flat_profile_text(profile: &Profile) -> String {
+/// Flatten profile into a single space-separated string for regex scans.
+/// Stays `pub(crate)` so `diff.rs` can reuse it without duplicating the
+/// walker.
+pub(crate) fn flat_profile_text(profile: &Profile) -> String {
     let mut out = String::new();
     out.push_str(&profile.summary);
     out.push(' ');
@@ -157,12 +172,9 @@ fn flat_profile_text(profile: &Profile) -> String {
     out
 }
 
-/// Reject a reword that introduces employers, numbers, years, or proper
-/// nouns absent from the profile. The original bullet is allowed to widen
-/// the accept-set for numbers (but not proper nouns — rewords shouldn't
-/// recycle some unrelated employer name just because it was in the
-/// original bullet; in practice, any original-bullet employer is already
-/// in the profile's employer set).
+/// Backwards-compatible wrapper: builds token sets on each call. Prefer
+/// `forbid_invented_entities_with` when validating many rewords against
+/// the same profile.
 pub fn forbid_invented_entities(
     new_text: &str,
     original_bullet: &str,
@@ -170,12 +182,36 @@ pub fn forbid_invented_entities(
     path: &str,
 ) -> Result<()> {
     let sets = build_token_sets(profile);
+    forbid_invented_entities_with(new_text, original_bullet, &sets, path)
+}
 
+/// Strip a token down to comparable form. Keeps alphanumerics + `+`, `&`,
+/// `#` so tech identifiers like "C++", "AT&T", "C#" survive intact.
+fn strip_for_match(t: &str) -> String {
+    t.chars()
+        .filter(|c| c.is_alphanumeric() || *c == '+' || *c == '&' || *c == '#')
+        .collect()
+}
+
+/// Reject a reword that introduces employers, numbers, years, or proper
+/// nouns absent from the profile. Token sets are pre-built by the caller
+/// via `build_token_sets` — the validator in `diff.rs` builds them once
+/// per `validate()` call and passes them through here.
+pub(crate) fn forbid_invented_entities_with(
+    new_text: &str,
+    original_bullet: &str,
+    sets: &ProfileTokenSets,
+    path: &str,
+) -> Result<()> {
     // --- Numbers (including years) ---
-    let original_numbers: HashSet<String> = number_regex()
-        .find_iter(original_bullet)
-        .map(|m| m.as_str().to_string())
-        .collect();
+    let mut original_numbers: HashSet<String> = HashSet::new();
+    for m in number_regex().find_iter(original_bullet) {
+        let raw = m.as_str().to_string();
+        if let Some(bare) = raw.strip_suffix('%') {
+            original_numbers.insert(bare.to_string());
+        }
+        original_numbers.insert(raw);
+    }
     for m in number_regex().find_iter(new_text) {
         let tok = m.as_str().to_string();
         if original_numbers.contains(&tok) {
@@ -187,8 +223,6 @@ pub fn forbid_invented_entities(
         if sets.year_tokens.contains(&tok) {
             continue;
         }
-        // Year reject: if the token matches YYYY pattern, flag as year;
-        // otherwise generic number. Both surface the token for debugging.
         let reason = if year_regex().is_match(&tok) {
             "invented year"
         } else {
@@ -205,33 +239,27 @@ pub fn forbid_invented_entities(
     // --- Proper nouns ---
     for m in proper_noun_regex().find_iter(new_text) {
         let span = m.as_str();
-        // Skip spans that are entirely at sentence start (single capitalized
-        // leading word followed by space-then-lowercase is common prose).
-        // We still require the span's tokens to intersect a known set if
-        // ANY token within the span is ≥ 3 chars and not a stopword.
-        let tokens: Vec<String> = span
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .filter(|t| t.len() >= 3)
-            .collect();
-        if tokens.is_empty() {
-            continue;
-        }
         let mut intersects = false;
-        for t in &tokens {
-            // Strip trailing punctuation for set comparison.
-            let stripped: String = t
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '+' || *c == '&')
-                .collect();
+        let mut any_substantive = false;
+        for raw in span.split_whitespace() {
+            let lower = raw.to_lowercase();
+            if lower.len() < 3 {
+                continue;
+            }
+            any_substantive = true;
+            let stripped = strip_for_match(&lower);
             if sets.employer_tokens.contains(&stripped)
                 || sets.project_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&stripped)
+                || sets.skill_tokens.contains(&lower)
                 || COMMON_ENGLISH_CAPS.contains(&stripped.as_str())
             {
                 intersects = true;
                 break;
             }
+        }
+        if !any_substantive {
+            continue;
         }
         if !intersects {
             return Err(TailorError::InventedContent {
@@ -246,9 +274,9 @@ pub fn forbid_invented_entities(
     Ok(())
 }
 
-/// Words that are commonly capitalized in English prose but are not proper
-/// nouns — we allow them through to avoid false positives on sentence
-/// starters. Intentionally short; everything else has to match the profile.
+/// Words commonly capitalized at sentence start in English prose. Kept
+/// intentionally short; anything else has to match the profile's
+/// employer/project/skill tokens.
 const COMMON_ENGLISH_CAPS: &[&str] = &[
     "the",
     "and",
@@ -263,13 +291,19 @@ const COMMON_ENGLISH_CAPS: &[&str] = &[
     "where",
     "which",
     "while",
+    "after",
+    "during",
+    "using",
+    "through",
+    "also",
     "built",
     "led",
     "shipped",
     "drove",
     "designed",
     "implemented",
-    "tokenizer",
+    "owned",
+    "delivered",
 ];
 
 #[cfg(test)]
@@ -286,7 +320,7 @@ mod tests {
             },
             summary: "Summary here".into(),
             skills: Skills {
-                languages: vec!["Rust".into(), "Python".into()],
+                languages: vec!["Rust".into(), "Python".into(), "C#".into()],
                 frameworks: vec!["Kubernetes".into(), "Tokio".into()],
                 tools: vec![],
             },
@@ -348,6 +382,23 @@ mod tests {
     fn accepts_skills_injection() {
         let p = fixture();
         forbid_invented_entities("shipped Rust and Kubernetes services", "", &p, "x").unwrap();
+    }
+
+    #[test]
+    fn accepts_csharp_skill_with_hash_kept_intact() {
+        let p = fixture();
+        // "C#" must survive the strip_for_match normalization so it
+        // intersects with `profile.skills.languages = ["C#"]`.
+        forbid_invented_entities("built systems in C# and Rust", "", &p, "x").unwrap();
+    }
+
+    #[test]
+    fn accepts_bare_number_when_profile_has_percent_form() {
+        let p = fixture();
+        // Profile has "35% throughput win" — the number_regex captures
+        // the bare form "35". A reword mentioning "35 engineers" must be
+        // accepted because "35" is in the number token set.
+        forbid_invented_entities("managed 35 engineers", "35% baseline", &p, "x").unwrap();
     }
 
     #[test]

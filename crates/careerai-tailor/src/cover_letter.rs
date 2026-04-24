@@ -8,7 +8,7 @@
 use careerai_core::config::LlmConfig;
 use careerai_db::models::Listing;
 use careerai_llm::cache::Cache;
-use careerai_llm::hashing::{canonical_profile_hash, compose_key, jd_hash};
+use careerai_llm::hashing::{compose_key, jd_hash};
 use careerai_llm::trait_def::Llm;
 use careerai_profile::schema::Profile;
 use tracing::info;
@@ -18,22 +18,28 @@ use crate::model::CoverLetter;
 use crate::prompt::cover_letter_prompt;
 
 pub const COVER_LETTER_WORD_CAP: usize = 350;
+/// Char cap companion to the word cap — catches LLMs emitting one giant
+/// no-whitespace blob that would pass the word count check.
+pub const COVER_LETTER_CHAR_CAP: usize = 3500;
 
 /// Draft a cover letter via the LLM (cache first). Errors:
 ///
-/// - `CoverLetterTooLong` if > 350 whitespace-split words.
+/// - `CoverLetterTooLong` if > 350 whitespace-split words OR > 3500 chars.
 /// - `Llm` on provider / upstream failure.
+///
+/// `profile_hash` is provided by the caller (already computed in
+/// `tailor_for_listing`) to avoid recomputing the canonical-JSON hash.
 pub async fn draft(
     llm: &(dyn Llm + Send + Sync),
     profile: &Profile,
     listing: &Listing,
     cfg: &LlmConfig,
     cache: &Cache,
+    profile_hash: &str,
 ) -> Result<CoverLetter> {
     let req = cover_letter_prompt(profile, listing, cfg)?;
-    let profile_hash = canonical_profile_hash(profile);
     let jd = jd_hash(&listing.title, &listing.company, &listing.description);
-    let key = compose_key(&req.prompt_version, &profile_hash, &jd, &req.model);
+    let key = compose_key(&req.prompt_version, profile_hash, &jd, &req.model);
 
     let resp = if let Some(hit) = cache.get(&key).await? {
         info!(
@@ -56,6 +62,13 @@ pub async fn draft(
     };
 
     let body = resp.text.trim().to_string();
+    let chars = body.chars().count();
+    if chars > COVER_LETTER_CHAR_CAP {
+        return Err(TailorError::CoverLetterTooLong {
+            words: chars,
+            cap: COVER_LETTER_CHAR_CAP,
+        });
+    }
     let words = body.split_whitespace().count();
     if words > COVER_LETTER_WORD_CAP {
         return Err(TailorError::CoverLetterTooLong {
@@ -130,6 +143,7 @@ mod tests {
             &fixture_listing(),
             &fixture_cfg(),
             &cache,
+            "profile-hash-fixture",
         )
         .await
         .unwrap();
@@ -149,6 +163,7 @@ mod tests {
             &fixture_listing(),
             &fixture_cfg(),
             &cache,
+            "profile-hash-fixture",
         )
         .await
         .unwrap_err();
@@ -169,6 +184,7 @@ mod tests {
             &fixture_listing(),
             &fixture_cfg(),
             &cache,
+            "profile-hash-fixture",
         )
         .await
         .unwrap();
@@ -183,6 +199,7 @@ mod tests {
             &fixture_listing(),
             &fixture_cfg(),
             &cache,
+            "profile-hash-fixture",
         )
         .await
         .unwrap();

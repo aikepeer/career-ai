@@ -18,9 +18,14 @@ pub enum TailorError {
     #[error("schema: {0}")]
     Schema(String),
 
+    // `original_bullet` is kept as a struct field for tests + downstream
+    // inspectors but the Display form truncates it to keep logs tight and
+    // avoid leaking long bullet text into tracing output where it may be
+    // shipped to aggregators.
     #[error(
         "invented content at {path}: reason={reason}; offending_token={offending_token:?}; \
-         original_bullet={original_bullet:?}"
+         original_bullet={}",
+        truncate_for_log(.original_bullet, 64)
     )]
     InventedContent {
         path: String,
@@ -52,6 +57,19 @@ pub enum TailorError {
 }
 
 pub type Result<T> = std::result::Result<T, TailorError>;
+
+/// Truncate a string for log display. Keeps the first `max` chars and
+/// appends a length suffix when truncation occurred. Referenced by
+/// `TailorError::InventedContent`'s Display via `thiserror`.
+pub(crate) fn truncate_for_log(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    if n <= max {
+        format!("{s:?}")
+    } else {
+        let head: String = s.chars().take(max).collect();
+        format!("{head:?}...[truncated, {n} total chars]")
+    }
+}
 
 impl From<tera::Error> for TailorError {
     fn from(e: tera::Error) -> Self {

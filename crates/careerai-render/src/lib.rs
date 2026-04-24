@@ -34,6 +34,11 @@ pub struct RenderedArtifacts {
 /// Render a tailored resume + cover letter into an application-scoped
 /// artifact directory. Wipes and recreates the directory to guarantee a
 /// clean slate per render.
+///
+/// `app_id` MUST be a valid UUID string — we use it as a path component
+/// and reject anything else before touching the filesystem. Production
+/// callers thread `Uuid::now_v7().to_string()` here, so the failure
+/// path only triggers under developer error / tampering.
 pub async fn render_application(
     cfg: &RenderConfig,
     app_id: &str,
@@ -42,6 +47,16 @@ pub async fn render_application(
     personal_name: &str,
     listing_company: &str,
 ) -> Result<RenderedArtifacts> {
+    // Defense against path traversal through a caller-supplied app_id.
+    // UUIDs are 8-4-4-4-12 hex with hyphens — a format that forbids `..`,
+    // `/`, backslashes, and NUL bytes. Any other shape is rejected.
+    if uuid::Uuid::parse_str(app_id).is_err() {
+        return Err(RenderError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("app_id is not a valid UUID: {app_id:?}"),
+        )));
+    }
+
     let layout = layout_for(cfg, app_id);
     info!(
         target = "render",
@@ -49,6 +64,10 @@ pub async fn render_application(
         root = %layout.root.display(),
         "rendering application"
     );
+
+    // Probe pandoc once up front — fail fast before any FS work if the
+    // binary is missing. Also cheaper than three `which` probes later.
+    let pandoc_bin = pandoc::resolve_pandoc_bin(cfg)?;
 
     // Wipe + recreate the per-application directory.
     match tokio::fs::remove_dir_all(&layout.root).await {
@@ -68,10 +87,13 @@ pub async fn render_application(
     let cover_md = templates::render_cover_letter(letter, personal_name, listing_company, &today)?;
     tokio::fs::write(&layout.cover_md, cover_md.as_bytes()).await?;
 
-    // Pandoc conversions.
-    pandoc::md_to_docx(&layout.resume_md, &layout.resume_docx, cfg).await?;
-    pandoc::md_to_pdf(&layout.resume_md, &layout.resume_pdf, cfg).await?;
-    pandoc::md_to_docx(&layout.cover_md, &layout.cover_docx, cfg).await?;
+    // Pandoc conversions run in parallel — three independent subprocess
+    // spawns, each ~500ms wall-clock. Sequential would be ~1.5s.
+    tokio::try_join!(
+        pandoc::md_to_docx_with_bin(&pandoc_bin, &layout.resume_md, &layout.resume_docx, cfg),
+        pandoc::md_to_pdf_with_bin(&pandoc_bin, &layout.resume_md, &layout.resume_pdf, cfg),
+        pandoc::md_to_docx_with_bin(&pandoc_bin, &layout.cover_md, &layout.cover_docx, cfg),
+    )?;
 
     let bytes = stat_all(&layout).await?;
 

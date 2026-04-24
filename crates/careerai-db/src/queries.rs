@@ -202,9 +202,14 @@ pub async fn create_application(pool: &SqlitePool, new: &NewApplication) -> Resu
                 return Ok(row);
             }
             Err(sqlx::Error::Database(db_err))
-                if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation =>
+                if db_err.kind() == sqlx::error::ErrorKind::UniqueViolation
+                    && is_applications_pk_collision(&*db_err) =>
             {
-                // UUID collision — drop tx, retry with a fresh id.
+                // Primary-key UUID collision — drop tx, retry with a
+                // fresh id. Every other UNIQUE violation (e.g. a future
+                // business-rule uniqueness on listing_id + hash) would
+                // never succeed on retry, so we surface it immediately
+                // instead of eating 3 attempts then returning NotFound.
                 drop(tx);
                 last_err = Some(DbError::Sqlx(sqlx::Error::Database(db_err)));
             }
@@ -212,6 +217,15 @@ pub async fn create_application(pool: &SqlitePool, new: &NewApplication) -> Resu
         }
     }
     Err(last_err.unwrap_or_else(|| DbError::NotFound("uuid collision retries exhausted".into())))
+}
+
+/// SQLite reports every UNIQUE violation with the message
+/// `UNIQUE constraint failed: <table>.<column>[, ...]`. We only want to
+/// retry when the violation is on the applications primary key — any
+/// other unique constraint wouldn't be cleared by minting a fresh UUID.
+fn is_applications_pk_collision(db_err: &dyn sqlx::error::DatabaseError) -> bool {
+    let msg = db_err.message();
+    msg.contains("applications.id")
 }
 
 pub async fn find_application_by_id(pool: &SqlitePool, id: &str) -> Result<Application> {

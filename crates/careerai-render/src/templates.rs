@@ -5,11 +5,12 @@
 //! neutralize via the `escape_md` filter instead.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use careerai_tailor::model::{CoverLetter, ResumeView};
 use tera::{Context, Tera, Value};
 
-use crate::error::Result;
+use crate::error::{RenderError, Result};
 
 pub(crate) const RESUME_TEMPLATE: &str = include_str!("../../../templates/resume.md.tera");
 pub(crate) const COVER_LETTER_TEMPLATE: &str =
@@ -83,8 +84,21 @@ fn build_engine() -> Result<Tera> {
     Ok(tera)
 }
 
+/// Process-wide Tera instance. Parsing both templates + registering
+/// filters costs ~30ms on first use; cache it so subsequent renders
+/// pay only the render cost (single-digit ms).
+fn engine() -> Result<&'static Tera> {
+    static ENGINE: OnceLock<std::result::Result<Tera, String>> = OnceLock::new();
+    match ENGINE.get_or_init(|| build_engine().map_err(|e| e.to_string())) {
+        Ok(t) => Ok(t),
+        Err(msg) => Err(RenderError::Io(std::io::Error::other(format!(
+            "tera engine init failed: {msg}"
+        )))),
+    }
+}
+
 pub fn render_resume(view: &ResumeView, personal_name: &str) -> Result<String> {
-    let tera = build_engine()?;
+    let tera = engine()?;
     let mut ctx = {
         let json = serde_json::to_value(view)
             .map_err(|e| tera::Error::msg(format!("serialize ResumeView: {e}")))?;
@@ -100,7 +114,7 @@ pub fn render_cover_letter(
     listing_company: &str,
     date: &str,
 ) -> Result<String> {
-    let tera = build_engine()?;
+    let tera = engine()?;
     let mut ctx = Context::new();
     ctx.insert("body", &letter.body);
     ctx.insert("personal_name", personal_name);

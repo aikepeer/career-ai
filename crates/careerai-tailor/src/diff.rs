@@ -134,6 +134,10 @@ impl BulletPath {
 
 const MAX_BULLET_CHARS: usize = 280;
 const MAX_COVER_LETTER_WORDS: usize = 350;
+/// Hard char cap on cover letters — catches LLMs that emit one giant
+/// no-whitespace string that trivially bypasses `MAX_COVER_LETTER_WORDS`.
+/// Sized for ~350 words × average English word length ~6 chars + slack.
+const MAX_COVER_LETTER_CHARS: usize = 3500;
 
 /// Enumerate every `(section, entry_index, bullet_index)` tuple in the
 /// profile. Drives the coverage rule.
@@ -198,6 +202,16 @@ fn original_bullet_text<'a>(profile: &'a Profile, bp: &BulletPath) -> Option<&'a
 #[allow(clippy::too_many_lines)]
 pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
     // Rule 9 first — cheap, independent of the ops list.
+    // Enforce both a word cap and a char cap; the char cap closes a
+    // word-only-counting bypass where an LLM could emit one huge
+    // no-whitespace blob and pass as "1 word".
+    let cl_chars = doc.cover_letter.chars().count();
+    if cl_chars > MAX_COVER_LETTER_CHARS {
+        return Err(TailorError::CoverLetterTooLong {
+            words: cl_chars,
+            cap: MAX_COVER_LETTER_CHARS,
+        });
+    }
     let cl_words = doc.cover_letter.split_whitespace().count();
     if cl_words > MAX_COVER_LETTER_WORDS {
         return Err(TailorError::CoverLetterTooLong {
@@ -271,7 +285,11 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
     }
     // Extra ops not present in the profile were already rejected by rule 3.
 
-    // Rule 4 — cross-entry move guard.
+    // Rule 4 — cross-entry move guard + no-op / self-target guard.
+    // A `move_before` with target == source silently reorders to end in
+    // `apply()` (the source is removed before the target lookup runs).
+    // Reject it here so mis-behaving LLMs can't hide a no-op that
+    // reorders bullets.
     for (bp, op) in &parsed_ops {
         if let OpKind::MoveBefore { target_path } = &op.kind {
             let tp = BulletPath::parse(target_path)?;
@@ -279,6 +297,12 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
                 return Err(TailorError::Schema(format!(
                     "move_before crosses entries: {} -> {}",
                     op.path, target_path
+                )));
+            }
+            if tp == *bp {
+                return Err(TailorError::Schema(format!(
+                    "move_before target equals source: {}",
+                    op.path
                 )));
             }
         }
@@ -301,9 +325,18 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
         }
     }
 
-    // Rules 6 + 7 — reword length cap and entity guardrails.
+    // Rules 6 + 7 — reword length cap + empty-reword guard + entity
+    // guardrails. Token sets are built ONCE here and shared across every
+    // reword op (previously rebuilt per bullet, O(ops × profile_size)).
+    let token_sets = guardrails::build_token_sets(profile);
     for (bp, op) in &parsed_ops {
         if let OpKind::Reword { new_text } = &op.kind {
+            if new_text.trim().is_empty() {
+                return Err(TailorError::Schema(format!(
+                    "reword new_text is empty: {}",
+                    op.path
+                )));
+            }
             if new_text.chars().count() > MAX_BULLET_CHARS {
                 return Err(TailorError::InventedContent {
                     path: op.path.clone(),
@@ -313,64 +346,25 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
                 });
             }
             let original = original_bullet_text(profile, bp).unwrap_or("");
-            guardrails::forbid_invented_entities(new_text, original, profile, &op.path)?;
+            guardrails::forbid_invented_entities_with(new_text, original, &token_sets, &op.path)?;
         }
     }
 
     // Rule 8 — summary reword respects employer proper-noun guardrails.
     if let Some(SummaryOp::Reword { new_text }) = &doc.summary {
+        if new_text.trim().is_empty() {
+            return Err(TailorError::Schema(
+                "summary reword new_text is empty".into(),
+            ));
+        }
         // Summaries legitimately carry years/numbers from experience; we
-        // only police invented *proper nouns* here. We piggyback on
-        // `forbid_invented_entities` by feeding a large "original_bullet"
-        // composed of the whole profile text so numbers/years always pass.
-        let combined = profile_flat_text(profile);
-        guardrails::forbid_invented_entities(new_text, &combined, profile, "summary")?;
+        // pass the whole-profile flat text as "original_bullet" so numeric
+        // and year tokens from anywhere in the profile are accepted.
+        let combined = guardrails::flat_profile_text(profile);
+        guardrails::forbid_invented_entities_with(new_text, &combined, &token_sets, "summary")?;
     }
 
     Ok(())
-}
-
-fn profile_flat_text(profile: &Profile) -> String {
-    let mut out = String::new();
-    out.push_str(&profile.summary);
-    out.push(' ');
-    for exp in &profile.experience {
-        out.push_str(&exp.title);
-        out.push(' ');
-        out.push_str(&exp.company);
-        out.push(' ');
-        out.push_str(&exp.location);
-        out.push(' ');
-        out.push_str(&exp.start);
-        out.push(' ');
-        out.push_str(&exp.end);
-        out.push(' ');
-        for b in &exp.bullets {
-            out.push_str(b);
-            out.push(' ');
-        }
-    }
-    for ed in &profile.education {
-        out.push_str(&ed.degree);
-        out.push(' ');
-        out.push_str(&ed.institution);
-        out.push(' ');
-        out.push_str(&ed.start);
-        out.push(' ');
-        out.push_str(&ed.end);
-        out.push(' ');
-    }
-    for p in &profile.projects {
-        out.push_str(&p.name);
-        out.push(' ');
-        out.push_str(&p.url);
-        out.push(' ');
-        for b in &p.bullets {
-            out.push_str(b);
-            out.push(' ');
-        }
-    }
-    out
 }
 
 /// Apply a validated `DiffDoc` to the profile and return a `ResumeView`.
@@ -388,14 +382,15 @@ pub fn apply(doc: DiffDoc, profile: Profile) -> Result<ResumeView> {
         _ => profile.summary.clone(),
     };
 
-    // Group ops by (section, entry_index).
+    // Group ops by (section, entry_index). Consume `doc.ops` by value so
+    // `OpKind::Reword { new_text }` moves instead of cloning its String.
     let mut per_entry: HashMap<(Section, usize), Vec<(BulletPath, OpKind)>> = HashMap::new();
-    for op in &doc.ops {
+    for op in doc.ops {
         let bp = BulletPath::parse(&op.path)?;
         per_entry
             .entry((bp.section.clone(), bp.entry_index))
             .or_default()
-            .push((bp, op.kind.clone()));
+            .push((bp, op.kind));
     }
 
     let experience = profile
@@ -811,6 +806,62 @@ mod tests {
         let err = validate(&doc, &profile).unwrap_err();
         assert!(
             matches!(err, TailorError::InventedContent { reason, .. } if reason == "bullet over 280 chars"),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_reword_new_text() {
+        let profile = fixture_profile();
+        let mut ops = full_coverage_ops();
+        // Whitespace-only reword should also reject (trim().is_empty()).
+        ops[0] = DiffOp {
+            path: "experience[0].bullets[0]".into(),
+            kind: OpKind::Reword {
+                new_text: "   \t\n  ".into(),
+            },
+        };
+        let doc = minimal_doc(ops);
+        let err = validate(&doc, &profile).unwrap_err();
+        assert!(
+            matches!(err, TailorError::Schema(ref s) if s.contains("reword new_text is empty")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_move_before_target_equals_source() {
+        let profile = fixture_profile();
+        let mut ops = full_coverage_ops();
+        ops[0] = DiffOp {
+            path: "experience[0].bullets[0]".into(),
+            kind: OpKind::MoveBefore {
+                target_path: "experience[0].bullets[0]".into(),
+            },
+        };
+        let doc = minimal_doc(ops);
+        let err = validate(&doc, &profile).unwrap_err();
+        assert!(
+            matches!(err, TailorError::Schema(ref s) if s.contains("move_before target equals source")),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_cover_letter_over_char_cap_even_with_low_word_count() {
+        let profile = fixture_profile();
+        // One long hyphenated "word" that split_whitespace counts as 1
+        // but total chars vastly exceeds the cap — the char guard kicks.
+        let huge: String = "x".repeat(4000);
+        let doc = DiffDoc {
+            prompt_version: "tailor.v1".into(),
+            summary: Some(SummaryOp::Keep),
+            ops: full_coverage_ops(),
+            cover_letter: huge,
+        };
+        let err = validate(&doc, &profile).unwrap_err();
+        assert!(
+            matches!(err, TailorError::CoverLetterTooLong { .. }),
             "got {err:?}"
         );
     }
