@@ -368,6 +368,13 @@ async fn run_inspect(cwd: &Path, application_id: &str) -> Result<()> {
 /// - 7: unknown source (no submitter registered)
 /// - 1: anything else
 fn map_apply_error_to_exit_code(err: &anyhow::Error) -> i32 {
+    // Walk the cause chain and match on typed errors only. The
+    // earlier stringly-typed fallback (`msg.starts_with("application
+    // not found:")`) was fragile: any `.context("…")` wrapping
+    // prepended text and silently broke the match. The typed downcast
+    // path covers every real path because `apply_one` / `inspect_show`
+    // wrap `careerai_db::DbError::NotFound` directly, and
+    // `submit_application` returns `careerai_submit::SubmitError`.
     for cause in err.chain() {
         if let Some(se) = cause.downcast_ref::<careerai_submit::SubmitError>() {
             return match se {
@@ -385,10 +392,6 @@ fn map_apply_error_to_exit_code(err: &anyhow::Error) -> i32 {
         {
             return 2;
         }
-    }
-    let msg = err.to_string();
-    if msg.starts_with("application not found:") || msg.starts_with("listing not found:") {
-        return 2;
     }
     1
 }

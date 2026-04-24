@@ -69,12 +69,14 @@ async fn dry_run_returns_deterministic_pseudo_id_without_network() {
 
     // Base URL is localhost:0 — if the dry-run path ever issued a real
     // HTTP request, it would fail with ConnectionRefused. Returning
-    // `Ok("dry-run:greenhouse")` proves no network write happened.
-    let submitter =
-        DryRunSubmitter::new(GreenhouseSubmitter::new().with_base_url("http://127.0.0.1:0"));
+    // `Ok("dry-run:greenhouse:<app_id>")` proves no network write
+    // happened and pins per-application uniqueness in the pseudo-id.
+    let submitter = DryRunSubmitter::new(Box::new(
+        GreenhouseSubmitter::new().with_base_url("http://127.0.0.1:0"),
+    ));
 
     let id = submitter.submit(&ctx).await.expect("dry-run never errors");
-    assert_eq!(id, "dry-run:greenhouse");
+    assert_eq!(id, format!("dry-run:greenhouse:{}", application.id));
 }
 
 #[tokio::test]
@@ -92,7 +94,7 @@ async fn dry_run_prepare_includes_body_preview() {
         cover_letter_text: "cover letter body",
     };
 
-    let submitter = DryRunSubmitter::new(GreenhouseSubmitter::new());
+    let submitter = DryRunSubmitter::new(Box::new(GreenhouseSubmitter::new()));
     let would = submitter.prepare(&ctx).expect("prepare is pure");
     assert_eq!(would.source, "greenhouse");
     assert_eq!(would.method, "POST");

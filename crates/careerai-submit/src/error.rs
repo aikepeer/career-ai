@@ -24,8 +24,6 @@ pub enum SubmitError {
     UnknownSource(String),
     #[error("source '{0}' is disabled in submit.per_source config")]
     SourceDisabled(String),
-    #[error("dry-run mode; nothing sent")]
-    DryRun,
 }
 
 pub type Result<T> = std::result::Result<T, SubmitError>;

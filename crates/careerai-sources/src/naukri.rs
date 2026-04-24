@@ -136,31 +136,64 @@ impl Source for NaukriSource {
         Ok(body
             .job_details
             .into_iter()
-            .map(|j| {
+            .filter_map(|j| {
+                // Skip rows with no job_id — `insert_or_ignore` dedupes
+                // on (source, external_id), so all empty-id rows would
+                // collapse into one and silently drop later listings.
+                let external_id = j.job_id.clone().filter(|s| !s.is_empty())?;
                 let location = j
                     .placeholders
                     .iter()
                     .find(|p| p.kind.as_deref() == Some("location"))
                     .and_then(|p| p.label.clone());
-                let abs_url = if j.jd_url.starts_with("http") {
-                    j.jd_url.clone()
-                } else {
-                    format!("{NAUKRI_WEB_ORIGIN}{}", j.jd_url)
-                };
+                let abs_url = absolutize_jd_url(&j.jd_url)?;
                 let raw_json = serde_json::to_string(&j).ok();
-                RawListing {
+                Some(RawListing {
                     source: "naukri".to_string(),
-                    external_id: j.job_id.unwrap_or_default(),
+                    external_id,
                     title: j.title.unwrap_or_default(),
                     company: j.company_name.unwrap_or_default(),
                     location,
                     url: abs_url,
                     description: html_to_text(&j.job_description.unwrap_or_default()),
                     raw_json,
-                }
+                })
             })
             .collect())
     }
+}
+
+/// Absolutize a Naukri-supplied `jdURL`, refusing any value that isn't
+/// rooted at `https://www.naukri.com`. An attacker-controlled feed
+/// could otherwise return an absolute URL pointing anywhere — that URL
+/// then lands in `listings.url` and downstream submitters / templates.
+///
+/// Returns `None` for empty or off-origin URLs (caller treats as
+/// "skip this row").
+fn absolutize_jd_url(jd_url: &str) -> Option<String> {
+    let trimmed = jd_url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Protocol-relative `//foo.com/bar` resolves to whatever scheme the
+    // page is served over — unsafe in any context. Reject.
+    if trimmed.starts_with("//") {
+        return None;
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        if trimmed.starts_with("https://www.naukri.com/")
+            || trimmed.starts_with("http://www.naukri.com/")
+        {
+            return Some(trimmed.to_string());
+        }
+        return None;
+    }
+    // Site-relative path: must start with `/` and not collapse the
+    // origin (`/foo` is OK; `foo` without a leading `/` is suspicious).
+    if !trimmed.starts_with('/') {
+        return None;
+    }
+    Some(format!("{NAUKRI_WEB_ORIGIN}{trimmed}"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,7 +204,15 @@ struct Payload {
 
 #[derive(Debug, Deserialize, serde::Serialize)]
 struct JobDetail {
-    #[serde(rename = "jobId", default)]
+    /// Naukri's payload has historically returned `jobId` as both a
+    /// string ("280125500001") and a JSON number (280125500001) at
+    /// different points in the API lifecycle. Accept either; the
+    /// deserializer normalizes to `Option<String>`.
+    #[serde(
+        rename = "jobId",
+        default,
+        deserialize_with = "deserialize_string_or_number"
+    )]
     job_id: Option<String>,
     #[serde(default)]
     title: Option<String>,
@@ -189,6 +230,62 @@ struct JobDetail {
     #[serde(rename = "createdDate", default)]
     #[allow(dead_code)]
     created_date: Option<i64>,
+}
+
+/// Accept JSON `"280125"`, `280125`, or `null` for fields that should
+/// land as `Option<String>`. Naukri's API has shipped jobId in both
+/// string and integer forms across versions; tolerate both rather than
+/// drop a whole page of listings on a serde error.
+fn deserialize_string_or_number<'de, D>(de: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    use std::fmt;
+
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("string, integer, or null")
+        }
+        fn visit_none<E>(self) -> std::result::Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> std::result::Result<Self::Value, E> {
+            Ok(Some(v.to_owned()))
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> std::result::Result<Self::Value, E> {
+            Ok(Some(v))
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> std::result::Result<Self::Value, E> {
+            Ok(Some(v.to_string()))
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> std::result::Result<Self::Value, E> {
+            Ok(Some(v.to_string()))
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        fn visit_f64<E: de::Error>(self, v: f64) -> std::result::Result<Self::Value, E> {
+            // Treat as integer-ish; reject NaN/Infinity. JobIds are
+            // expected to be in the i64 range; the truncation is the
+            // intended behavior for any value that arrived as a float.
+            if v.is_finite() {
+                Ok(Some((v as i64).to_string()))
+            } else {
+                Err(de::Error::custom("non-finite number for jobId"))
+            }
+        }
+        fn visit_some<D: serde::Deserializer<'de>>(
+            self,
+            de: D,
+        ) -> std::result::Result<Self::Value, D::Error> {
+            de.deserialize_any(V)
+        }
+    }
+    de.deserialize_any(V)
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -346,5 +443,97 @@ mod tests {
             .with_location("Delhi / NCR".to_string());
         let listings = src.discover().await.unwrap();
         assert_eq!(listings.len(), 2);
+    }
+
+    #[test]
+    fn absolutize_jd_url_rejects_off_origin_absolute() {
+        // Site-relative path stays site-relative.
+        assert_eq!(
+            absolutize_jd_url("/foo-bar-1234"),
+            Some("https://www.naukri.com/foo-bar-1234".to_owned())
+        );
+        // Same-origin absolute URL passes through.
+        assert_eq!(
+            absolutize_jd_url("https://www.naukri.com/foo-1234"),
+            Some("https://www.naukri.com/foo-1234".to_owned())
+        );
+        // Off-origin absolute URL → rejected.
+        assert_eq!(absolutize_jd_url("https://evil.com/phish"), None);
+        // Protocol-relative → rejected.
+        assert_eq!(absolutize_jd_url("//evil.com/foo"), None);
+        // Empty / whitespace → rejected.
+        assert_eq!(absolutize_jd_url(""), None);
+        assert_eq!(absolutize_jd_url("   "), None);
+        // Bare token (no leading slash) → rejected.
+        assert_eq!(absolutize_jd_url("foo"), None);
+    }
+
+    #[tokio::test]
+    async fn skips_listings_with_empty_or_missing_job_id() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "jobDetails": [
+                {
+                    "jobId": "real-1",
+                    "title": "Engineer",
+                    "companyName": "Co",
+                    "placeholders": [],
+                    "jdURL": "/jd/1",
+                    "jobDescription": "x"
+                },
+                {
+                    "jobId": "",
+                    "title": "Empty ID",
+                    "companyName": "Co",
+                    "placeholders": [],
+                    "jdURL": "/jd/2",
+                    "jobDescription": "x"
+                },
+                {
+                    // jobId omitted entirely
+                    "title": "Missing ID",
+                    "companyName": "Co",
+                    "placeholders": [],
+                    "jdURL": "/jd/3",
+                    "jobDescription": "x"
+                }
+            ]
+        });
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+        let src = NaukriSource::new().with_base_url(server.uri());
+        let listings = src.discover().await.unwrap();
+        // Only the row with a real jobId survives.
+        assert_eq!(listings.len(), 1);
+        assert_eq!(listings[0].external_id, "real-1");
+    }
+
+    #[tokio::test]
+    async fn accepts_numeric_job_id_in_response() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "jobDetails": [
+                {
+                    // Number, not string — must round-trip via the
+                    // string-or-number deserializer.
+                    "jobId": 280_125_500_001_i64,
+                    "title": "ML Engineer",
+                    "companyName": "Co",
+                    "placeholders": [],
+                    "jdURL": "/jd/1",
+                    "jobDescription": "x"
+                }
+            ]
+        });
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+        let src = NaukriSource::new().with_base_url(server.uri());
+        let listings = src.discover().await.unwrap();
+        assert_eq!(listings.len(), 1);
+        assert_eq!(listings[0].external_id, "280125500001");
     }
 }

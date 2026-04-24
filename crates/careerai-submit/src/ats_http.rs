@@ -119,7 +119,7 @@ impl GreenhouseSubmitter {
             "{}/v1/boards/{}/jobs/{}",
             self.base_url.trim_end_matches('/'),
             company_slug,
-            ctx.listing.external_id
+            sanitize_external_id(&ctx.listing.external_id)
         )
     }
 }
@@ -183,7 +183,7 @@ impl LeverSubmitter {
             "{}/v0/postings/{}/{}",
             self.base_url.trim_end_matches('/'),
             company_slug,
-            ctx.listing.external_id
+            sanitize_external_id(&ctx.listing.external_id)
         )
     }
 }
@@ -291,6 +291,31 @@ fn slugify(s: &str) -> String {
     out
 }
 
+/// Sanitize an external job id before interpolating it into a URL path.
+///
+/// The `external_id` field comes from third-party feeds (Greenhouse,
+/// Lever, Naukri, ...). A malicious feed could supply
+/// `../../admin` or `foo?bar=baz#frag` and have the URL parser route the
+/// POST to an unintended endpoint when live submission lands. Allowed
+/// characters: alphanumerics, `-`, `_`. Dots are deliberately rejected
+/// because `..` segments are interpreted by URL parsers as parent
+/// directories. Real job ids in observed feeds are alphanumeric with
+/// hyphens/underscores; the strict allowlist costs nothing.
+fn sanitize_external_id(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        out.push_str("unknown");
+    }
+    out
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -301,6 +326,18 @@ mod tests {
         assert_eq!(slugify("Acme Robotics"), "acmerobotics");
         assert_eq!(slugify("Foo, Inc."), "fooinc");
         assert_eq!(slugify(""), "unknown");
+    }
+
+    #[test]
+    fn sanitize_external_id_blocks_path_traversal() {
+        // Dots become `_` so `..` can never appear in the output.
+        assert_eq!(sanitize_external_id("../../admin"), "______admin");
+        assert_eq!(sanitize_external_id("job-42"), "job-42");
+        assert_eq!(sanitize_external_id("job_42_v2"), "job_42_v2");
+        assert_eq!(sanitize_external_id("job.v2"), "job_v2");
+        assert_eq!(sanitize_external_id("foo/bar"), "foo_bar");
+        assert_eq!(sanitize_external_id("foo?bar=baz#frag"), "foo_bar_baz_frag");
+        assert_eq!(sanitize_external_id(""), "unknown");
     }
 
     #[test]

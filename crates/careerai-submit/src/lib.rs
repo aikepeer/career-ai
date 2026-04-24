@@ -73,38 +73,39 @@ pub async fn submit_application(
         cover_letter_text: &payload.cover_letter_text,
     };
 
-    // 3. Resolve the submitter for this source. Unknown → hard error.
-    let source = listing.source.as_str();
-    let submitter: Box<dyn Submitter> = match source {
+    // 3. Resolve the submitter for this source. Lookup is
+    //    case-insensitive — listing.source is conventionally lowercase
+    //    but the schema doesn't enforce it, and a typo shouldn't route
+    //    a Greenhouse listing into UnknownSource.
+    let source_lc = listing.source.to_ascii_lowercase();
+    let submitter: Box<dyn Submitter> = match source_lc.as_str() {
         "greenhouse" => Box::new(GreenhouseSubmitter::new()),
         "lever" => Box::new(LeverSubmitter::new()),
         "ashby" => Box::new(AshbySubmitter::new()),
+        // Feed-only sources don't have an HTTP submission API. Browser
+        // submitters land in M5 for LinkedIn / Indeed; until then the
+        // safe answer is to mark the application Skipped with a clear
+        // reason rather than fail the whole batch with UnknownSource.
+        "remotive" | "remoteok" | "naukri" => {
+            return mark_skipped(
+                pool,
+                &application,
+                &listing,
+                "feed-only source (no HTTP submitter available)",
+            )
+            .await;
+        }
         other => return Err(SubmitError::UnknownSource(other.to_owned())),
     };
 
     // 4. Per-source gating. Unknown source in the map => treated as
     // disabled. Callers opt in explicitly.
-    let per_source_enabled = cfg.per_source.get(source).is_some_and(|s| s.enabled);
+    let per_source_enabled = cfg
+        .per_source
+        .get(source_lc.as_str())
+        .is_some_and(|s| s.enabled);
     if !per_source_enabled {
-        let reason = "source disabled";
-        info!(
-            target: "submit",
-            source,
-            application_id = %application.id,
-            "skipping — source not enabled in submit.per_source"
-        );
-        queries::set_application_state(pool, &application.id, ListingState::Skipped.as_str())
-            .await?;
-        queries::transition(
-            pool,
-            &listing.id,
-            ListingState::Skipped,
-            Some("skipped: source disabled"),
-        )
-        .await?;
-        return Ok(SubmitOutcome::Skipped {
-            reason: reason.to_owned(),
-        });
+        return mark_skipped(pool, &application, &listing, "source disabled").await;
     }
 
     // 5. Choose live vs dry-run.
@@ -117,10 +118,39 @@ pub async fn submit_application(
     match decision {
         SubmitDecision::Live => run_live(pool, submitter.as_ref(), &ctx).await,
         SubmitDecision::DryRun => {
-            let wrapper = DryRunSubmitter::new(BoxedSubmitter(submitter));
-            run_dry_run(&wrapper, &ctx).await
+            let wrapper = DryRunSubmitter::new(submitter);
+            run_dry_run(&wrapper, &ctx)
         }
     }
+}
+
+/// Common Skipped path: log + transition both rows + return outcome.
+async fn mark_skipped(
+    pool: &SqlitePool,
+    application: &careerai_db::Application,
+    listing: &careerai_db::Listing,
+    reason: &str,
+) -> Result<SubmitOutcome> {
+    info!(
+        target: "submit",
+        source = %listing.source,
+        application_id = %application.id,
+        reason,
+        "skipping submission"
+    );
+    let note = format!("skipped: {reason}");
+    queries::transition_application_and_listing(
+        pool,
+        &application.id,
+        &listing.id,
+        ListingState::Skipped.as_str(),
+        ListingState::Skipped,
+        Some(&note),
+    )
+    .await?;
+    Ok(SubmitOutcome::Skipped {
+        reason: reason.to_owned(),
+    })
 }
 
 async fn run_live(
@@ -137,15 +167,12 @@ async fn run_live(
                 remote_id = %remote_id,
                 "submitted"
             );
-            queries::set_application_state(
+            // Atomic: both rows transition together or neither does.
+            queries::transition_application_and_listing(
                 pool,
                 &ctx.application.id,
-                ListingState::Submitted.as_str(),
-            )
-            .await?;
-            queries::transition(
-                pool,
                 &ctx.listing.id,
+                ListingState::Submitted.as_str(),
                 ListingState::Submitted,
                 Some(&format!("submitted via {}", submitter.name())),
             )
@@ -160,29 +187,30 @@ async fn run_live(
                 error = %err,
                 "submission failed"
             );
-            // Best-effort: record the failure, but always return the
-            // original error.
+            // Best-effort failure record in a single tx. Original error
+            // always propagates, even if recording fails.
             let note = format!("failed: {err}");
-            let _ = queries::set_application_state(
+            let _ = queries::transition_application_and_listing(
                 pool,
                 &ctx.application.id,
+                &ctx.listing.id,
                 ListingState::Failed.as_str(),
+                ListingState::Failed,
+                Some(&note),
             )
             .await;
-            let _ =
-                queries::transition(pool, &ctx.listing.id, ListingState::Failed, Some(&note)).await;
             Err(err)
         }
     }
 }
 
-async fn run_dry_run<S: Submitter>(
-    wrapper: &DryRunSubmitter<S>,
-    ctx: &SubmitContext<'_>,
-) -> Result<SubmitOutcome> {
-    // `prepare` is pure — we call it for the payload summary too.
+/// Dry-run path: prepare once, log via the structured `would_submit`
+/// event (PII omitted), return a deterministic outcome. Never calls
+/// `submit()` so any stray network access in a custom impl can't leak
+/// out from here.
+fn run_dry_run(wrapper: &DryRunSubmitter, ctx: &SubmitContext<'_>) -> Result<SubmitOutcome> {
     let would = wrapper.prepare(ctx)?;
-    let _ = wrapper.submit(ctx).await?;
+    crate::dry_run::log_would_submit(&would, ctx);
     Ok(SubmitOutcome::DryRun {
         payload_summary: format!(
             "{} {} (body {} bytes, artifacts {:?})",
@@ -192,32 +220,6 @@ async fn run_dry_run<S: Submitter>(
             would.artifact_kinds
         ),
     })
-}
-
-/// Tiny adapter so a `Box<dyn Submitter>` can be moved into
-/// `DryRunSubmitter<S: Submitter>` without loosening that bound to
-/// `?Sized`. Forwards every call.
-struct BoxedSubmitter(Box<dyn Submitter>);
-
-#[async_trait::async_trait]
-impl Submitter for BoxedSubmitter {
-    fn name(&self) -> &'static str {
-        self.0.name()
-    }
-    fn prepare(&self, ctx: &SubmitContext<'_>) -> Result<WouldSubmit> {
-        self.0.prepare(ctx)
-    }
-    async fn submit(&self, ctx: &SubmitContext<'_>) -> Result<String> {
-        self.0.submit(ctx).await
-    }
-}
-
-impl std::fmt::Debug for BoxedSubmitter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BoxedSubmitter")
-            .field("name", &self.0.name())
-            .finish()
-    }
 }
 
 fn load_profile(root: &Path) -> Result<Profile> {

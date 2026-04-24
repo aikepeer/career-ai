@@ -518,22 +518,13 @@ pub async fn apply_one(
 ) -> Result<AppliedOutcome> {
     let pool = open_pool(root).await?;
 
-    // Pre-fetch so we can surface NotFound as the CLI's exit-code 2 via
-    // the same stringly-typed convention used by tailor/render.
-    let application = match queries::find_application_by_id(&pool, application_id).await {
-        Ok(a) => a,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("application not found: {application_id}");
-        }
-        Err(e) => return Err(e).context("fetch application"),
-    };
-    let listing = match queries::find_by_id(&pool, &application.listing_id).await {
-        Ok(l) => l,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("listing not found: {}", application.listing_id);
-        }
-        Err(e) => return Err(e).context("fetch listing"),
-    };
+    // Pre-fetch surfaces the typed errors from careerai-db; the CLI's
+    // exit-code mapper downcasts to `DbError::NotFound` directly. We do
+    // NOT bail!() into a stringly-typed error here — that was previously
+    // breaking exit-code classification once any `.context(...)` wrapper
+    // ran upstream.
+    let application = queries::find_application_by_id(&pool, application_id).await?;
+    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
 
     let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
     let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
@@ -558,29 +549,17 @@ pub async fn apply_all(
 ) -> Result<Vec<AppliedOutcome>> {
     let pool = open_pool(root).await?;
 
-    // Pull both "rendered" and "prepared" applications; either is eligible
-    // per `careerai_submit::submit_application`'s BadState guard.
+    // Both "rendered" and "prepared" are eligible per submit_application's
+    // BadState guard. Use the JOIN-based query so a `--source` filter is
+    // pushed into SQL — previously the CLI fetched every listing per row
+    // (O(N) round-trips) and filtered client-side.
     let mut eligible: Vec<careerai_db::Application> = Vec::new();
     for state in ["rendered", "prepared"] {
-        let rows = queries::list_applications_by_state(&pool, state, 1_000)
-            .await
-            .with_context(|| format!("list applications in state '{state}'"))?;
-        eligible.extend(rows);
-    }
-
-    if let Some(source) = source_filter {
-        // Filter by the linked listing's source. One fetch per row is fine
-        // for the expected batch sizes (tens, not thousands).
-        let mut kept: Vec<careerai_db::Application> = Vec::new();
-        for app in eligible {
-            let listing = queries::find_by_id(&pool, &app.listing_id)
+        let rows =
+            queries::list_applications_by_state_and_source(&pool, state, source_filter, 1_000)
                 .await
-                .with_context(|| format!("fetch listing for {}", app.id))?;
-            if listing.source == source {
-                kept.push(app);
-            }
-        }
-        eligible = kept;
+                .with_context(|| format!("list applications in state '{state}'"))?;
+        eligible.extend(rows);
     }
 
     // Drop the local pool so `apply_one` opens its own — matches the
@@ -608,44 +587,18 @@ pub async fn applied_show(
     limit: i64,
 ) -> Result<Vec<careerai_db::Application>> {
     let pool = open_pool(root).await?;
-    let rows = queries::list_applications_by_state(&pool, "submitted", limit)
+    queries::list_applications_by_state_and_source(&pool, "submitted", source_filter, limit)
         .await
-        .context("list submitted applications")?;
-
-    let Some(source) = source_filter else {
-        return Ok(rows);
-    };
-
-    let mut kept = Vec::with_capacity(rows.len());
-    for app in rows {
-        let listing = queries::find_by_id(&pool, &app.listing_id)
-            .await
-            .with_context(|| format!("fetch listing for {}", app.id))?;
-        if listing.source == source {
-            kept.push(app);
-        }
-    }
-    Ok(kept)
+        .context("list submitted applications")
 }
 
 /// Gather everything needed to render `careerai inspect <id>`.
 pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectReport> {
     let pool = open_pool(root).await?;
 
-    let application = match queries::find_application_by_id(&pool, application_id).await {
-        Ok(a) => a,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("application not found: {application_id}");
-        }
-        Err(e) => return Err(e).context("fetch application"),
-    };
-    let listing = match queries::find_by_id(&pool, &application.listing_id).await {
-        Ok(l) => l,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("listing not found: {}", application.listing_id);
-        }
-        Err(e) => return Err(e).context("fetch listing"),
-    };
+    // Same typed-error pattern as apply_one: don't bail!() into strings.
+    let application = queries::find_application_by_id(&pool, application_id).await?;
+    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
     let events = queries::events_for(&pool, &listing.id)
         .await
         .context("events_for listing")?;
