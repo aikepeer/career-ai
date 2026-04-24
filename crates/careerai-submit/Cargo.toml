@@ -22,6 +22,15 @@ reqwest = { workspace = true }
 uuid.workspace = true
 chrono.workspace = true
 sqlx = { workspace = true }
+keyring = { workspace = true }
+sha2.workspace = true
+hex.workspace = true
+chromiumoxide = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+[features]
+default = []
+browser = ["dep:chromiumoxide", "dep:futures"]
 
 [dev-dependencies]
 tempfile.workspace = true
