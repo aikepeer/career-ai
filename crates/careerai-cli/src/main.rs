@@ -209,7 +209,14 @@ async fn main() -> Result<()> {
             run_inspect(&cwd, &application_id).await?;
         }
         Command::Daemon => {
-            anyhow::bail!("subcommand not implemented yet (tracked in plan milestone M6)");
+            let cfg = load_cfg(&cwd)?;
+            let sched = careerai_scheduler::Scheduler::from_config(&cfg)
+                .await
+                .context("init scheduler")?;
+            sched
+                .run_until_shutdown()
+                .await
+                .context("scheduler shutdown")?;
         }
     }
     Ok(())
