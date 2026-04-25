@@ -175,17 +175,70 @@ pub struct SourceRate {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SubmitConfig {
     #[serde(default)]
     pub auto_submit: bool,
     #[serde(default)]
     pub per_source: HashMap<String, SubmitSource>,
+    /// LinkedIn browser submitter knobs (M5a). Only consulted when the
+    /// CLI is built with `--features browser`. Additive and `#[serde(default)]`
+    /// so pre-M5a `local.yaml` files keep parsing.
+    #[serde(default)]
+    pub linkedin: LinkedinSubmitConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubmitSource {
     #[serde(default)]
     pub enabled: bool,
+}
+
+/// LinkedIn-specific browser submitter configuration. Loaded from
+/// `submit.linkedin.*` in `config/{default,local}.yaml`. Mirrors the
+/// runtime `careerai_submit::LinkedinConfig` one-for-one so the
+/// wire-up in `LinkedinConfig::from_core` is a trivial field copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LinkedinSubmitConfig {
+    /// Where the submitter writes pre-submit screenshots. Created on
+    /// demand at submit time; relative paths resolve against the
+    /// process cwd (typically the repo root).
+    pub screenshots_dir: std::path::PathBuf,
+    /// Optional Chromium user-agent override. `None` → use
+    /// `BrowserSessionConfig` default.
+    pub user_agent: Option<String>,
+    /// Headless Chromium. Default `true`.
+    pub headless: bool,
+    /// Rate-limit policy — max submissions per UTC day.
+    pub max_per_day: u32,
+    /// Minimum seconds between two submissions.
+    pub min_seconds_between: u32,
+    /// Uniform random jitter (seconds) added after the min-interval
+    /// wait to avoid burst fingerprinting.
+    pub jitter_seconds: u32,
+    /// `[start_hour_utc, end_hour_utc)` window when the limiter refuses
+    /// permits. Wraps across midnight (e.g. `[19, 1)` = late IST night).
+    pub quiet_hours_utc: Option<(u32, u32)>,
+    /// Per-action selector / click timeout in seconds.
+    pub action_timeout_seconds: u64,
+}
+
+impl Default for LinkedinSubmitConfig {
+    fn default() -> Self {
+        Self {
+            screenshots_dir: std::path::PathBuf::from("artifacts/screenshots/linkedin"),
+            user_agent: None,
+            headless: true,
+            max_per_day: 10,
+            min_seconds_between: 120,
+            jitter_seconds: 60,
+            // 19:00 UTC = 00:30 IST; runs through 01:00 UTC, covering
+            // late IST night when no human is reviewing submissions.
+            quiet_hours_utc: Some((19, 1)),
+            action_timeout_seconds: 20,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

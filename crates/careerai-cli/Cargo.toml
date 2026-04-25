@@ -35,7 +35,11 @@ which.workspace = true
 sqlx.workspace = true
 
 [features]
+default = []
 live-llm = ["careerai-llm/live-llm"]
+# Enables the LinkedIn browser submitter path in careerai-submit.
+# Build: `cargo build -p careerai-cli --features browser`.
+browser = ["careerai-submit/browser"]
 
 [lints]
 workspace = true

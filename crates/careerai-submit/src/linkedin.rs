@@ -77,6 +77,29 @@ impl Default for LinkedinConfig {
     }
 }
 
+impl LinkedinConfig {
+    /// Build a `LinkedinConfig` from the user's `SubmitConfig`.
+    /// Reads the dedicated `submit.linkedin` block; all fields have
+    /// `#[serde(default)]` so a missing block yields the same shape
+    /// as `LinkedinConfig::default()`.
+    #[must_use]
+    pub fn from_core(submit_cfg: &careerai_core::config::SubmitConfig) -> Self {
+        let lk = submit_cfg.linkedin.clone();
+        Self {
+            screenshots_dir: lk.screenshots_dir,
+            user_agent: lk.user_agent,
+            headless: lk.headless,
+            rate_policy: RatePolicy {
+                max_per_day: lk.max_per_day,
+                min_seconds_between: lk.min_seconds_between,
+                jitter_seconds: lk.jitter_seconds,
+                quiet_hours_utc: lk.quiet_hours_utc,
+            },
+            action_timeout_seconds: lk.action_timeout_seconds,
+        }
+    }
+}
+
 /// LinkedIn Easy Apply submitter. Holds a shared `RateLimiter` so
 /// concurrent invocations (e.g. `apply --all`) coordinate one bucket.
 pub struct LinkedinSubmitter {

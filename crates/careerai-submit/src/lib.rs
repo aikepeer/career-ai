@@ -94,6 +94,32 @@ pub async fn submit_application(
         "greenhouse" => Box::new(GreenhouseSubmitter::new()),
         "lever" => Box::new(LeverSubmitter::new()),
         "ashby" => Box::new(AshbySubmitter::new()),
+        // Browser-based LinkedIn path. Only built in when the crate is
+        // compiled with `--features browser`; otherwise fall through to
+        // a Skipped transition with an actionable rebuild hint.
+        //
+        // FIXME (M6 daemon): `RateLimiter::new()` is constructed per
+        // call here so concurrent `submit_application` invocations do
+        // not share a bucket. Safe for M5a because the live path bails
+        // with `SourceDisabled` before the rate-gated submit click,
+        // but must be hoisted to a process-shared singleton before the
+        // daemon flips `auto_submit = true`.
+        #[cfg(feature = "browser")]
+        "linkedin" => Box::new(crate::linkedin::LinkedinSubmitter::new(
+            crate::linkedin::LinkedinConfig::from_core(cfg),
+            std::sync::Arc::new(RateLimiter::new()),
+        )),
+        #[cfg(not(feature = "browser"))]
+        "linkedin" => {
+            return mark_skipped(
+                pool,
+                &application,
+                &listing,
+                "linkedin requires --features browser; rebuild with \
+                 `cargo build -p careerai-cli --features browser`",
+            )
+            .await;
+        }
         // Feed-only sources don't have an HTTP submission API. Browser
         // submitters land in M5 for LinkedIn / Indeed; until then the
         // safe answer is to mark the application Skipped with a clear

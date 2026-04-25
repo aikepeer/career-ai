@@ -41,6 +41,10 @@ match:
   embedding_model: "BAAI/bge-small-en-v1.5"
   score_threshold: 0.62
 
+# NOTE: `rates.*` predates M5a and drives the legacy submit-layer
+# guardrails. The M5a browser submitter reads `submit.linkedin.*`
+# directly (see below); the duplicate `rates.linkedin` block stays
+# for backward compat with M4-era configs.
 rates:
   linkedin:
     max_per_day: 10
@@ -67,6 +71,18 @@ submit:
     naukri:     { enabled: false }
     linkedin:   { enabled: false }
     indeed:     { enabled: false }
+  # LinkedIn browser submitter (M5a). Only consulted when the CLI is
+  # built with `--features browser`. Defaults tuned for India-remote
+  # operators: small daily cap, long min-interval, late-night quiet
+  # window.
+  linkedin:
+    screenshots_dir: "artifacts/screenshots/linkedin"
+    headless: true
+    max_per_day: 10
+    min_seconds_between: 120
+    jitter_seconds: 60
+    quiet_hours_utc: [19, 1]
+    action_timeout_seconds: 20
 
 llm:
   tailor_model: "anthropic/claude-sonnet-4-6"
