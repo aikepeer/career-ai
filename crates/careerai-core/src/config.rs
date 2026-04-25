@@ -154,6 +154,13 @@ pub struct Domain {
 pub struct MatchConfig {
     pub embedding_model: String,
     pub score_threshold: f32,
+    /// Hard filter applied BEFORE scoring. A listing must contain at least
+    /// one of these tokens (case-insensitive substring match) anywhere in
+    /// its title, description, or normalized skill set, or it transitions
+    /// directly to `filtered_out`. Empty = no hard filter (default
+    /// behavior matches pre-W1 builds).
+    #[serde(default)]
+    pub must_include_skills: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -389,6 +396,20 @@ impl CoreConfig {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn match_config_must_include_skills_defaults_empty() {
+        let yaml = "embedding_model: \"x\"\nscore_threshold: 0.5";
+        let cfg: MatchConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.must_include_skills.is_empty());
+    }
+
+    #[test]
+    fn match_config_parses_must_include_skills() {
+        let yaml = "embedding_model: \"x\"\nscore_threshold: 0.5\nmust_include_skills: [rust, async]";
+        let cfg: MatchConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.must_include_skills, vec!["rust", "async"]);
+    }
 
     #[test]
     fn embedded_defaults_parse() {
