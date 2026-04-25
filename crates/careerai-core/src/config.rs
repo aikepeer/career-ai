@@ -264,21 +264,35 @@ impl LinkedinSubmitConfig {
     /// warning. Called from `from_core` in `careerai-submit::linkedin`
     /// so every consumer gets a vetted policy.
     ///
-    /// Range: start in `0..=23`, end in `0..=24`. Equal start+end is
-    /// also rejected (would mean "always quiet" or "never quiet"
-    /// depending on interpretation; either is a footgun).
+    /// Valid range:
+    /// - `start` in `0..=23`, `end` in `0..=24`.
+    /// - `start != end` (equal pair is ambiguous: "always quiet" vs
+    ///   "never quiet" — either is a footgun, so reject).
+    /// - `(0, 24)` is also rejected because `in_window` treats it as
+    ///   the wrap-across-midnight pair `[0:00, 24:00)` covering every
+    ///   hour — i.e. always quiet, indistinguishable from leaving the
+    ///   submitter disabled. Operators who want "never submit" should
+    ///   set `submit.linkedin.enabled = false` instead.
+    /// - To disable the quiet-hours gate entirely, set
+    ///   `quiet_hours_utc: null` (None).
     #[must_use]
     pub fn validated(mut self) -> Self {
         if let Some((start, end)) = self.quiet_hours_utc {
             let start_ok = start <= 23;
             let end_ok = end <= 24;
             let distinct = start != end;
-            if !(start_ok && end_ok && distinct) {
+            // (0, 24) is a degenerate full-coverage wrap — same as
+            // "always quiet". Surface it as out-of-range so operators
+            // notice they probably wanted `null` or
+            // `submit.linkedin.enabled = false`.
+            let not_full_coverage = !(start == 0 && end == 24);
+            if !(start_ok && end_ok && distinct && not_full_coverage) {
                 tracing::warn!(
                     target: "config",
                     submit_linkedin_quiet_hours = ?(start, end),
-                    "out-of-range quiet_hours_utc; clamping to default (19, 1) — \
-                     valid range is start in 0..=23, end in 0..=24, start != end"
+                    "out-of-range or full-coverage quiet_hours_utc; clamping to default (19, 1) — \
+                     valid range is start in 0..=23, end in 0..=24, start != end, and (0, 24) is reserved \
+                     (use `quiet_hours_utc: null` to disable the gate, or `submit.linkedin.enabled = false`)"
                 );
                 self.quiet_hours_utc = Some((19, 1));
             }
