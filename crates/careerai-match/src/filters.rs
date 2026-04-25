@@ -4,7 +4,7 @@
 //! location allowlist → JD keyword exclusions (longer string scan) →
 //! domain keywords + required-keyword rule.
 
-use careerai_core::config::CoreConfig;
+use careerai_core::config::{CoreConfig, MatchConfig};
 use careerai_sources::RawListing;
 
 use crate::rules::FilterRules;
@@ -22,7 +22,27 @@ impl Decision {
     }
 }
 
+/// Returns `true` if the listing satisfies the `must_include_skills` hard
+/// filter. Empty filter → always true. Otherwise: at least one configured
+/// skill (case-insensitive substring) must appear in the listing's title
+/// or description.
+pub fn apply_must_include_filter(listing: &RawListing, cfg: &MatchConfig) -> bool {
+    if cfg.must_include_skills.is_empty() {
+        return true;
+    }
+    let haystack = format!("{} {}", listing.title, listing.description).to_ascii_lowercase();
+    cfg.must_include_skills
+        .iter()
+        .any(|needle| haystack.contains(&needle.to_ascii_lowercase()))
+}
+
 pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> Decision {
+    // Hard skill filter runs first — cheapest possible early-exit before
+    // any scoring or heavier keyword checks.
+    if !apply_must_include_filter(listing, &cfg.matching) {
+        return Decision::Reject("missing required skill");
+    }
+
     let title_lc = listing.title.to_lowercase();
     let desc_lc = listing.description.to_lowercase();
 
@@ -132,6 +152,7 @@ mod tests {
             matching: MatchConfig {
                 embedding_model: String::new(),
                 score_threshold: 0.0,
+                must_include_skills: vec![],
             },
             rates: careerai_core::config::RatesConfig::default(),
             submit: careerai_core::config::SubmitConfig::default(),
@@ -248,5 +269,61 @@ mod tests {
             classify(&l, &cfg, &rules),
             Decision::Reject("no configured domain keyword in title or JD")
         ));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod must_include_tests {
+    use super::*;
+    use careerai_core::config::MatchConfig;
+
+    fn cfg_with_required(skills: &[&str]) -> MatchConfig {
+        MatchConfig {
+            embedding_model: "x".into(),
+            score_threshold: 0.0,
+            must_include_skills: skills.iter().map(|s| (*s).into()).collect(),
+        }
+    }
+
+    fn make_listing(title: &str, desc: &str) -> RawListing {
+        RawListing {
+            source: "test".into(),
+            external_id: "1".into(),
+            title: title.into(),
+            company: "Acme".into(),
+            location: None,
+            url: "https://example.com/1".into(),
+            description: desc.into(),
+            raw_json: None,
+        }
+    }
+
+    #[test]
+    fn missing_required_skill_filters_out() {
+        let listing = make_listing("Frontend Engineer", "We use React and GraphQL.");
+        let cfg = cfg_with_required(&["rust", "tokio"]);
+        assert!(!apply_must_include_filter(&listing, &cfg));
+    }
+
+    #[test]
+    fn matching_required_skill_passes() {
+        let listing = make_listing("Backend Engineer", "Rust + tokio shop, async-heavy.");
+        let cfg = cfg_with_required(&["rust"]);
+        assert!(apply_must_include_filter(&listing, &cfg));
+    }
+
+    #[test]
+    fn empty_required_list_passes_everything() {
+        let listing = make_listing("Anything", "Anything");
+        let cfg = cfg_with_required(&[]);
+        assert!(apply_must_include_filter(&listing, &cfg));
+    }
+
+    #[test]
+    fn match_is_case_insensitive() {
+        let listing = make_listing("Senior Engineer", "We use RUST and Tokio.");
+        let cfg = cfg_with_required(&["rust"]);
+        assert!(apply_must_include_filter(&listing, &cfg));
     }
 }
