@@ -203,6 +203,23 @@ mod tests {
     }
 
     #[test]
+    fn classify_rejects_listing_missing_required_skill() {
+        // Integration test for must_include_skills wiring: verifies that
+        // classify() actually calls apply_must_include_filter as its first
+        // guard. A future refactor that drops the early-return would let
+        // this test fail even though the unit tests on the helper still
+        // pass.
+        let mut cfg = cfg(&["Remote"], &[]);
+        cfg.matching.must_include_skills = vec!["rust".into()];
+        let rules = FilterRules::default();
+        let l = listing("Senior ML Engineer", Some("Remote"), "Python, TensorFlow.");
+        assert!(matches!(
+            classify(&l, &cfg, &rules),
+            Decision::Reject("missing required skill")
+        ));
+    }
+
+    #[test]
     fn rejects_location_not_in_allowlist() {
         let cfg = cfg(&["Remote", "Delhi"], &[]);
         let rules = FilterRules::default();
