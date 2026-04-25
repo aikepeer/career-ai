@@ -4,6 +4,8 @@
 //! `profile show`, `profile validate`, and `--help` are wired end-to-end at
 //! M1; the rest are stubs until M2+.
 
+mod review;
+
 use careerai_pipeline as pipeline;
 
 use std::path::{Path, PathBuf};
@@ -100,6 +102,8 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: i64,
     },
+    /// Walk drafted LinkedIn applications, prompt y/N per draft, click Submit on yes.
+    Review,
 }
 
 #[derive(Debug, Subcommand)]
@@ -204,6 +208,10 @@ async fn main() -> Result<()> {
         }
         Command::Applied { source, limit } => {
             run_applied(&cwd, source.as_deref(), limit).await?;
+        }
+        Command::Review => {
+            let cfg = load_cfg(&cwd)?;
+            review::run_review(&cwd, &cfg).await?;
         }
         Command::Inspect { application_id } => {
             run_inspect(&cwd, &application_id).await?;

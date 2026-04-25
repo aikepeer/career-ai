@@ -880,19 +880,27 @@ mod tests {
 
         // A: drafted + linkedin
         let app_a = create_application(&pool, &new_app(&li_id_a)).await.unwrap();
-        set_application_state(&pool, &app_a.id, "drafted").await.unwrap();
+        set_application_state(&pool, &app_a.id, "drafted")
+            .await
+            .unwrap();
 
         // B: drafted + linkedin
         let app_b = create_application(&pool, &new_app(&li_id_b)).await.unwrap();
-        set_application_state(&pool, &app_b.id, "drafted").await.unwrap();
+        set_application_state(&pool, &app_b.id, "drafted")
+            .await
+            .unwrap();
 
         // C: rendered + linkedin (wrong state — must not appear)
         let app_c = create_application(&pool, &new_app(&li_id_c)).await.unwrap();
-        set_application_state(&pool, &app_c.id, "rendered").await.unwrap();
+        set_application_state(&pool, &app_c.id, "rendered")
+            .await
+            .unwrap();
 
         // D: drafted + greenhouse (wrong source — must not appear)
         let app_d = create_application(&pool, &new_app(&gh_id)).await.unwrap();
-        set_application_state(&pool, &app_d.id, "drafted").await.unwrap();
+        set_application_state(&pool, &app_d.id, "drafted")
+            .await
+            .unwrap();
 
         let rows = list_drafted_linkedin(&pool, 100).await.unwrap();
         assert_eq!(rows.len(), 2, "must return only drafted+linkedin rows");
@@ -901,7 +909,13 @@ mod tests {
         }
         // IDs must be A and B (order is oldest-first, which is insertion order here)
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-        assert!(ids.contains(&app_a.id.as_str()), "app_a missing from results");
-        assert!(ids.contains(&app_b.id.as_str()), "app_b missing from results");
+        assert!(
+            ids.contains(&app_a.id.as_str()),
+            "app_a missing from results"
+        );
+        assert!(
+            ids.contains(&app_b.id.as_str()),
+            "app_b missing from results"
+        );
     }
 }
