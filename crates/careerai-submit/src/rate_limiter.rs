@@ -544,12 +544,15 @@ mod tests {
                 ordinal: entry.day.ordinal.saturating_sub(1).max(1),
             }
         };
-        // Hand-construct a stale permit by dropping the live one
-        // (which would refund correctly) and inserting a fake matching
-        // the post-rollover state.
-        permit.commit(); // commit so its drop doesn't refund the real today bucket
-        // Manually bump count_today to 1 via a fresh acquire — that's
-        // the "another caller bumped after the rollover" half.
+        // Commit the live permit so its drop doesn't refund the real
+        // today bucket — we want to observe today's count from a
+        // post-rollover refund of a STALE permit (constructed below),
+        // not from this one.
+        permit.commit();
+
+        // "Another caller bumped count_today after the rollover" — the
+        // half of the simulation where a parallel acquire takes a real
+        // slot on today's bucket.
         let real_today_permit = rl.acquire("test", &policy).await.unwrap();
         let count_before_drop = {
             let map = rl.inner.lock().await;
