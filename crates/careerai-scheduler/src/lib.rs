@@ -2,8 +2,10 @@
 //!
 //! Wraps `tokio-cron-scheduler` and registers one async job per configured
 //! source cadence. Each tick fires the real `discover` → `match` half of
-//! the pipeline for that single source. Submit cadence is a separate concern
-//! and is not driven from here yet (Wave 3).
+//! the pipeline for that single source. A separate submit cadence (Wave 3)
+//! drives a periodic dry-run apply sweep when `scheduler.submit_cadence` is
+//! set. The submit job hard-pins `auto_submit=false` — the daemon never
+//! live-submits.
 //!
 //! Architectural boundary (per `CLAUDE.md`): this crate owns daemon, cron
 //! wiring, and graceful shutdown only. It does not pull in `careerai-sources`,
@@ -12,6 +14,8 @@
 //! `careerai-pipeline`, and this crate goes through it.
 
 use std::path::{Path, PathBuf};
+#[cfg(feature = "test-hooks")]
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,6 +78,33 @@ impl Scheduler {
     /// locate `data/`, `profile/`, and `config/`. It is the same path the
     /// CLI passes (`std::env::current_dir()`).
     pub async fn from_config(root: &Path, cfg: &CoreConfig) -> Result<Self, SchedulerError> {
+        Self::from_config_inner(
+            root,
+            cfg,
+            #[cfg(feature = "test-hooks")]
+            None,
+        )
+        .await
+    }
+
+    /// Test-only constructor that threads an `Arc<AtomicUsize>` into every
+    /// registered job, so a test can wait for the first tick to land. The
+    /// counter is incremented once per fired tick, regardless of which job
+    /// fired.
+    #[cfg(feature = "test-hooks")]
+    pub async fn from_config_with_counter(
+        root: &Path,
+        cfg: &CoreConfig,
+        counter: Arc<AtomicUsize>,
+    ) -> Result<Self, SchedulerError> {
+        Self::from_config_inner(root, cfg, Some(counter)).await
+    }
+
+    async fn from_config_inner(
+        root: &Path,
+        cfg: &CoreConfig,
+        #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
+    ) -> Result<Self, SchedulerError> {
         let inner = JobScheduler::new().await?;
         let span = info_span!("scheduler");
         let _enter = span.enter();
@@ -95,7 +126,15 @@ impl Scheduler {
         entries.sort_by(|a, b| a.0.cmp(b.0));
 
         for (source_name, cron_expr) in entries {
-            match build_tick_job(source_name, cron_expr, Arc::clone(&root), Arc::clone(&cfg)) {
+            let built = build_tick_job(
+                source_name,
+                cron_expr,
+                Arc::clone(&root),
+                Arc::clone(&cfg),
+                #[cfg(feature = "test-hooks")]
+                tick_counter.clone(),
+            );
+            match built {
                 Ok(job) => match inner.add(job).await {
                     Ok(uuid) => info!(
                         source = %source_name,
@@ -119,6 +158,39 @@ impl Scheduler {
             }
         }
 
+        // Register the submit cron exactly once if configured. Unset means
+        // the daemon does not poll for apply at all — operators must run
+        // `careerai apply` manually. Same swallow-and-log pattern as the
+        // per-source jobs: never propagate, never panic.
+        if let Some(submit_cron) = cfg.scheduler.submit_cadence.as_deref() {
+            let built = build_submit_job(
+                submit_cron,
+                Arc::clone(&root),
+                Arc::clone(&cfg),
+                #[cfg(feature = "test-hooks")]
+                tick_counter.clone(),
+            );
+            match built {
+                Ok(job) => match inner.add(job).await {
+                    Ok(uuid) => info!(
+                        cron = %submit_cron,
+                        job = %uuid,
+                        "registered submit cron job (dry-run only)",
+                    ),
+                    Err(e) => error!(
+                        cron = %submit_cron,
+                        error = %e,
+                        "failed to add submit cron job; skipping",
+                    ),
+                },
+                Err(e) => error!(
+                    cron = %submit_cron,
+                    error = %e,
+                    "invalid submit_cadence cron expression; skipping",
+                ),
+            }
+        }
+
         Ok(Self { inner })
     }
 
@@ -128,6 +200,25 @@ impl Scheduler {
         self.inner.start().await?;
         info!(parent: &info_span!("scheduler"), "scheduler started");
         Ok(())
+    }
+
+    /// Shut down the scheduler, draining in-flight jobs up to
+    /// `SHUTDOWN_DRAIN`. Used by `run_until_shutdown` on signal and by
+    /// integration tests that need to stop the cron loop without waiting
+    /// for SIGINT/SIGTERM.
+    pub async fn shutdown(&mut self) -> Result<(), SchedulerError> {
+        let drain = tokio::time::timeout(SHUTDOWN_DRAIN, self.inner.shutdown()).await;
+        match drain {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(SchedulerError::from(e)),
+            Err(_) => {
+                warn!(
+                    drain_secs = SHUTDOWN_DRAIN.as_secs(),
+                    "scheduler shutdown timed out; returning anyway",
+                );
+                Ok(())
+            }
+        }
     }
 
     /// Run until SIGINT or SIGTERM, then gracefully shut down.
@@ -184,12 +275,15 @@ fn build_tick_job(
     cron_expr: &str,
     root: Arc<PathBuf>,
     cfg: Arc<CoreConfig>,
+    #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
 ) -> Result<Job, JobSchedulerError> {
     let source_owned = source.to_owned();
     Job::new_async(cron_expr, move |_uuid, _scheduler| {
         let source = source_owned.clone();
         let root = Arc::clone(&root);
         let cfg = Arc::clone(&cfg);
+        #[cfg(feature = "test-hooks")]
+        let tick_counter = tick_counter.clone();
         Box::pin(async move {
             // Each stage's Result is matched independently: a discover
             // failure should not block the match retry, since match runs
@@ -216,6 +310,59 @@ fn build_tick_job(
                     "match ok",
                 ),
                 Err(e) => error!(source = %source, error = %e, "match failed"),
+            }
+
+            #[cfg(feature = "test-hooks")]
+            if let Some(counter) = &tick_counter {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        })
+    })
+}
+
+/// Build the submit cron job. The daemon hard-pins `auto_submit=false` —
+/// live submission is operator-driven only (`careerai apply --auto-submit
+/// ...`). This invariant is non-negotiable: the daemon must never live-submit
+/// from a cron tick. The `debug_assert!` below documents the contract and
+/// trips loudly in test/dev builds if someone ever flips the flag.
+fn build_submit_job(
+    cron_expr: &str,
+    root: Arc<PathBuf>,
+    cfg: Arc<CoreConfig>,
+    #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
+) -> Result<Job, JobSchedulerError> {
+    Job::new_async(cron_expr, move |_uuid, _scheduler| {
+        let root = Arc::clone(&root);
+        let cfg = Arc::clone(&cfg);
+        #[cfg(feature = "test-hooks")]
+        let tick_counter = tick_counter.clone();
+        Box::pin(async move {
+            // SAFETY INVARIANT (see CLAUDE.md "Submit safety invariant"):
+            // the scheduler tick must always force dry-run. We pass
+            // `Some(false)` to override whatever `cfg.submit.auto_submit`
+            // says — operators can still flip live mode for one-shot CLI
+            // runs, but the daemon never live-submits.
+            let auto_submit_override: Option<bool> = Some(false);
+            debug_assert!(
+                matches!(auto_submit_override, Some(false)),
+                "scheduler submit job must always be dry-run",
+            );
+
+            match careerai_pipeline::apply_all(
+                root.as_path(),
+                cfg.as_ref(),
+                None, // no source filter — sweep every eligible application
+                auto_submit_override,
+            )
+            .await
+            {
+                Ok(outcomes) => info!(submitted = outcomes.len(), "apply tick",),
+                Err(e) => error!(error = %e, "apply tick failed"),
+            }
+
+            #[cfg(feature = "test-hooks")]
+            if let Some(counter) = &tick_counter {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         })
     })
