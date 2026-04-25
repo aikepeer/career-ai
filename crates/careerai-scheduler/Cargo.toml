@@ -9,6 +9,7 @@ description = "tokio-cron-scheduler daemon driving the pipeline"
 
 [dependencies]
 careerai-core = { path = "../careerai-core" }
+careerai-pipeline = { path = "../careerai-pipeline" }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-cron-scheduler.workspace = true

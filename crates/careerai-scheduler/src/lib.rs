@@ -1,15 +1,18 @@
 //! Scheduler daemon.
 //!
 //! Wraps `tokio-cron-scheduler` and registers one async job per configured
-//! source cadence. Each cron tick logs at `info` for now — Wave 2 will replace
-//! the per-source closure body with real pipeline calls (discover → match →
-//! tailor → render → submit) without changing this module's public API.
+//! source cadence. Each tick fires the real `discover` → `match` half of
+//! the pipeline for that single source. Submit cadence is a separate concern
+//! and is not driven from here yet (Wave 3).
 //!
 //! Architectural boundary (per `CLAUDE.md`): this crate owns daemon, cron
-//! wiring, and graceful shutdown only. It must not import submission or
-//! render-layer code directly. Wave 2 will plug in pipeline entry points
-//! through `careerai-core` so this rule continues to hold.
+//! wiring, and graceful shutdown only. It does not pull in `careerai-sources`,
+//! `careerai-match`, `careerai-submit`, `careerai-db`, or any other
+//! implementation crate directly — the orchestration layer is
+//! `careerai-pipeline`, and this crate goes through it.
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use careerai_core::config::CoreConfig;
@@ -59,11 +62,18 @@ impl std::fmt::Debug for Scheduler {
 }
 
 impl Scheduler {
-    /// Build a scheduler from `CoreConfig`. Registers one cron `Job` per entry
-    /// in `cfg.scheduler.cadence`. Invalid cron expressions are logged and
-    /// skipped — they must not abort daemon startup, since one typo in
-    /// `local.yaml` would otherwise wedge every other source.
-    pub async fn from_config(cfg: &CoreConfig) -> Result<Self, SchedulerError> {
+    /// Build a scheduler from `CoreConfig` rooted at `root`. Registers one
+    /// cron `Job` per entry in `cfg.scheduler.cadence`. Each job, when fired,
+    /// runs `careerai_pipeline::discover_one` followed by
+    /// `careerai_pipeline::match_one` for that single source. Invalid cron
+    /// expressions are logged and skipped — they must not abort daemon
+    /// startup, since one typo in `local.yaml` would otherwise wedge every
+    /// other source.
+    ///
+    /// `root` is the project root used by every pipeline entry point to
+    /// locate `data/`, `profile/`, and `config/`. It is the same path the
+    /// CLI passes (`std::env::current_dir()`).
+    pub async fn from_config(root: &Path, cfg: &CoreConfig) -> Result<Self, SchedulerError> {
         let inner = JobScheduler::new().await?;
         let span = info_span!("scheduler");
         let _enter = span.enter();
@@ -72,13 +82,20 @@ impl Scheduler {
             warn!("scheduler.cadence is empty — daemon will idle with no jobs");
         }
 
+        // Share root + cfg into every job closure via `Arc` so we don't
+        // clone the full `CoreConfig` once per tick. The closures are
+        // `'static` (required by tokio-cron-scheduler), so they each take
+        // their own `Arc` clone.
+        let root: Arc<PathBuf> = Arc::new(root.to_path_buf());
+        let cfg: Arc<CoreConfig> = Arc::new(cfg.clone());
+
         // Sort to keep startup logs deterministic across runs (HashMap is not
         // ordered). Helps a lot when diffing daemon logs in CI / local.
         let mut entries: Vec<(&String, &String)> = cfg.scheduler.cadence.iter().collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
 
         for (source_name, cron_expr) in entries {
-            match build_tick_job(source_name, cron_expr) {
+            match build_tick_job(source_name, cron_expr, Arc::clone(&root), Arc::clone(&cfg)) {
                 Ok(job) => match inner.add(job).await {
                     Ok(uuid) => info!(
                         source = %source_name,
@@ -158,25 +175,47 @@ impl Scheduler {
 
 /// Build the per-tick async job for a single source.
 ///
-/// Wave 1 just logs. The closure is structured so Wave 2 can swap the body
-/// for a real pipeline call without touching the surrounding scaffolding —
-/// in particular, errors raised inside must be caught and logged, never
-/// propagated, so one source's failure cannot cancel the others' jobs.
-fn build_tick_job(source: &str, cron_expr: &str) -> Result<Job, JobSchedulerError> {
+/// Each fired tick runs `discover_one` then `match_one` against the shared
+/// pipeline crate, scoped to this single source. Errors from either stage
+/// are logged at `error` and swallowed — one source's failure must never
+/// propagate up and cancel sibling jobs registered with the same scheduler.
+fn build_tick_job(
+    source: &str,
+    cron_expr: &str,
+    root: Arc<PathBuf>,
+    cfg: Arc<CoreConfig>,
+) -> Result<Job, JobSchedulerError> {
     let source_owned = source.to_owned();
     Job::new_async(cron_expr, move |_uuid, _scheduler| {
         let source = source_owned.clone();
+        let root = Arc::clone(&root);
+        let cfg = Arc::clone(&cfg);
         Box::pin(async move {
-            // Wave 2 replaces the body of this inner async with the real
-            // pipeline call. Keep the catch-all so a panicking or erroring
-            // source can never cancel other registered jobs.
-            let outcome: Result<(), &'static str> = async {
-                info!(source = %source, "tick");
-                Ok(())
+            // Each stage's Result is matched independently: a discover
+            // failure should not block the match retry, since match runs
+            // against rows already in the DB from prior ticks. Both arms
+            // log per-source so log filtering by `source=...` keeps working.
+            match careerai_pipeline::discover_one(root.as_path(), cfg.as_ref(), &source).await {
+                Ok(report) => info!(
+                    source = %source,
+                    fetched = report.fetched,
+                    new = report.new_rows,
+                    duplicates = report.duplicates,
+                    errors = report.errors,
+                    "discover ok",
+                ),
+                Err(e) => error!(source = %source, error = %e, "discover failed"),
             }
-            .await;
-            if let Err(e) = outcome {
-                error!(source = %source, error = %e, "scheduled tick failed");
+
+            match careerai_pipeline::match_one(root.as_path(), cfg.as_ref(), &source).await {
+                Ok(report) => info!(
+                    source = %source,
+                    filtered_out = report.filtered_out,
+                    shortlisted = report.shortlisted,
+                    below_threshold = report.also_filtered,
+                    "match ok",
+                ),
+                Err(e) => error!(source = %source, error = %e, "match failed"),
             }
         })
     })
@@ -188,27 +227,30 @@ mod tests {
     use super::*;
 
     /// Load a fresh `CoreConfig` backed by the embedded defaults — same
-    /// pattern `careerai-core` uses in its own unit tests.
-    fn embedded_cfg() -> CoreConfig {
+    /// pattern `careerai-core` uses in its own unit tests. Returns the
+    /// config plus the tempdir guarding the scratch root, so the dir
+    /// outlives the test body.
+    fn embedded_cfg() -> (tempfile::TempDir, CoreConfig) {
         let tmp = tempfile::tempdir().unwrap();
-        CoreConfig::load(tmp.path()).unwrap()
+        let cfg = CoreConfig::load(tmp.path()).unwrap();
+        (tmp, cfg)
     }
 
     #[tokio::test]
     async fn from_config_with_embedded_defaults_succeeds() {
-        let cfg = embedded_cfg();
+        let (tmp, cfg) = embedded_cfg();
         // Embedded defaults declare a non-empty cadence map, so this also
         // exercises the per-source registration branch.
         assert!(!cfg.scheduler.cadence.is_empty());
-        let sched = Scheduler::from_config(&cfg).await;
+        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
         assert!(sched.is_ok(), "embedded cadence must register cleanly");
     }
 
     #[tokio::test]
     async fn from_config_with_empty_cadence_succeeds() {
-        let mut cfg = embedded_cfg();
+        let (tmp, mut cfg) = embedded_cfg();
         cfg.scheduler.cadence.clear();
-        let sched = Scheduler::from_config(&cfg).await;
+        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
         assert!(sched.is_ok(), "empty cadence must not be an error");
     }
 
@@ -216,7 +258,7 @@ mod tests {
     async fn from_config_skips_invalid_cron_without_failing() {
         // A clearly invalid cron string must not abort startup. Other
         // (valid) sources should still register.
-        let mut cfg = embedded_cfg();
+        let (tmp, mut cfg) = embedded_cfg();
         cfg.scheduler.cadence.clear();
         cfg.scheduler
             .cadence
@@ -224,7 +266,7 @@ mod tests {
         cfg.scheduler
             .cadence
             .insert("bogus".into(), "this is not a cron expression".into());
-        let sched = Scheduler::from_config(&cfg).await;
+        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
         assert!(
             sched.is_ok(),
             "invalid cron in one source must not fail the scheduler",
@@ -233,13 +275,13 @@ mod tests {
 
     #[tokio::test]
     async fn start_then_immediate_shutdown_is_clean() {
-        let mut cfg = embedded_cfg();
+        let (tmp, mut cfg) = embedded_cfg();
         cfg.scheduler.cadence.clear();
         cfg.scheduler
             .cadence
             .insert("greenhouse".into(), "0 0 */1 * * *".into());
 
-        let mut sched = Scheduler::from_config(&cfg).await.unwrap();
+        let mut sched = Scheduler::from_config(tmp.path(), &cfg).await.unwrap();
         sched.start().await.unwrap();
         // Shutdown directly without waiting for a signal — exercises the
         // same drain path `run_until_shutdown` uses.

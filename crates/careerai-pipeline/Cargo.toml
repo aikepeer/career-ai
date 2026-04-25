@@ -1,0 +1,30 @@
+[package]
+name = "careerai-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pipeline orchestration entry points (discover/match/tailor/render/apply) for career-ai"
+
+[dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-db = { path = "../careerai-db" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-sources = { path = "../careerai-sources" }
+careerai-match = { path = "../careerai-match" }
+careerai-llm = { path = "../careerai-llm" }
+careerai-tailor = { path = "../careerai-tailor" }
+careerai-render = { path = "../careerai-render" }
+careerai-submit = { path = "../careerai-submit" }
+anyhow.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+live-llm = ["careerai-llm/live-llm"]
+browser = ["careerai-submit/browser"]
+
+[lints]
+workspace = true

@@ -12,6 +12,7 @@ members = [
     "crates/careerai-render",
     "crates/careerai-submit",
     "crates/careerai-scheduler",
+    "crates/careerai-pipeline",
 ]
 
 [workspace.package]

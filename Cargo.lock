@@ -305,16 +305,14 @@ dependencies = [
  "careerai-core",
  "careerai-db",
  "careerai-llm",
- "careerai-match",
+ "careerai-pipeline",
  "careerai-profile",
  "careerai-render",
  "careerai-scheduler",
- "careerai-sources",
  "careerai-submit",
  "careerai-tailor",
  "clap",
  "docx-rs",
- "serde_json",
  "sqlx",
  "tempfile",
  "tokio",
@@ -388,6 +386,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "careerai-pipeline"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "careerai-core",
+ "careerai-db",
+ "careerai-llm",
+ "careerai-match",
+ "careerai-profile",
+ "careerai-render",
+ "careerai-sources",
+ "careerai-submit",
+ "careerai-tailor",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "careerai-profile"
 version = "0.1.0"
 dependencies = [
@@ -430,6 +446,7 @@ name = "careerai-scheduler"
 version = "0.1.0"
 dependencies = [
  "careerai-core",
+ "careerai-pipeline",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

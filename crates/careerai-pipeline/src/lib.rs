@@ -1,7 +1,17 @@
-//! Discover / match / shortlist entry points called from `main.rs`.
+//! Pipeline orchestration: discover / match / tailor / render / apply.
 //!
-//! Kept off the main.rs clap tree so the CLI layer is purely dispatch and
-//! the business logic is testable independently later.
+//! Owns the linear-state-machine entry points the CLI and scheduler both
+//! drive. Lives in its own crate (rather than `careerai-core`) because the
+//! implementation crates it pulls in — `careerai-db`, `careerai-sources`,
+//! `careerai-match`, `careerai-tailor`, `careerai-render`, `careerai-submit`,
+//! `careerai-llm`, `careerai-profile` — all already depend on `careerai-core`
+//! for shared types. Putting orchestration in core would create a cycle.
+//!
+//! Architectural rule: this crate is the *only* place where the pipeline
+//! stages get composed end-to-end. Both `careerai-cli` (for one-shot
+//! subcommands) and `careerai-scheduler` (for cron ticks) call into here.
+//! Neither of them should reach past this layer into the implementation
+//! crates directly.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -11,6 +21,7 @@ use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 use careerai_core::config::CoreConfig;
+use careerai_core::state::ListingState;
 use careerai_db::models::{NewArtifact, NewListing};
 use careerai_db::{pool_from_path, queries, SqlitePool};
 use careerai_llm::mock::MockLlm;
@@ -25,8 +36,6 @@ use careerai_sources::{
 };
 use careerai_tailor::model::{CoverLetter, ResumeView};
 use careerai_tailor::tailor_for_listing;
-
-use careerai_core::state::ListingState;
 
 pub async fn open_pool(root: &Path) -> Result<SqlitePool> {
     let path = root.join("data").join("careerai.sqlite");
@@ -120,6 +129,18 @@ pub async fn discover_all(
         }
     }
     Ok(report)
+}
+
+/// Run discovery for a single configured source. Used by the scheduler's
+/// per-source cron tick — each tick fires this for exactly one source.
+///
+/// Internally delegates to `discover_all` with a one-element filter so the
+/// adapter-construction logic stays in one place. Returns an empty report
+/// (with no error) if `source` doesn't match any enabled adapter, matching
+/// the behavior of `discover_all` with an unmatched filter.
+pub async fn discover_one(root: &Path, cfg: &CoreConfig, source: &str) -> Result<DiscoveryReport> {
+    let filter = [source.to_owned()];
+    discover_all(root, cfg, &filter).await
 }
 
 #[derive(Debug, Default)]
@@ -231,6 +252,20 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         also_filtered: drop.len(),
         histogram: [(0.0, 0); 10],
     })
+}
+
+/// Per-source match wrapper used by the scheduler's cron tick.
+///
+/// Matching is naturally global — `match_all` walks every `discovered`-state
+/// row regardless of source, and the filter/score logic doesn't read the
+/// `source` column. So `match_one` just delegates to `match_all`. The
+/// `_source` argument is accepted for symmetry with `discover_one` and to
+/// give the scheduler a place to attach span context per tick. Keeping match
+/// global also means a tick that fired discover for source A still rescores
+/// any listings from source B that arrived earlier — desirable when the
+/// profile or rules have been edited between ticks.
+pub async fn match_one(root: &Path, cfg: &CoreConfig, _source: &str) -> Result<MatchReport> {
+    match_all(root, cfg, false).await
 }
 
 #[derive(Debug, Default)]
