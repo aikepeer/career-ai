@@ -15,6 +15,7 @@ pub mod dry_run;
 pub mod error;
 #[cfg(feature = "browser")]
 pub mod linkedin;
+pub mod linkedin_selectors;
 pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
@@ -36,6 +37,21 @@ use careerai_db::queries;
 use careerai_db::SqlitePool;
 use careerai_profile::Profile;
 use tracing::{info, warn};
+
+/// Process-wide rate limiter shared across every `submit_application`
+/// call. Per-source counters (day-cap, min-interval bucket) live here,
+/// not in a per-call instance, so two concurrent submits coordinate.
+/// Built lazily on first access; no state is persisted across process
+/// restarts (counters reset, which is the desired behavior at this
+/// scale). Only consulted by browser-feature submitters; gated to keep
+/// the default build off the rate-limiter dependency graph.
+#[cfg(feature = "browser")]
+fn shared_rate_limiter() -> std::sync::Arc<rate_limiter::RateLimiter> {
+    static RL: std::sync::OnceLock<std::sync::Arc<rate_limiter::RateLimiter>> =
+        std::sync::OnceLock::new();
+    RL.get_or_init(|| std::sync::Arc::new(rate_limiter::RateLimiter::new()))
+        .clone()
+}
 
 /// Submit a prepared application. Routes to the correct per-source
 /// `Submitter` based on the listing's `source` column. Honors dry-run
@@ -98,16 +114,15 @@ pub async fn submit_application(
         // compiled with `--features browser`; otherwise fall through to
         // a Skipped transition with an actionable rebuild hint.
         //
-        // FIXME (M6 daemon): `RateLimiter::new()` is constructed per
-        // call here so concurrent `submit_application` invocations do
-        // not share a bucket. Safe for M5a because the live path bails
-        // with `SourceDisabled` before the rate-gated submit click,
-        // but must be hoisted to a process-shared singleton before the
-        // daemon flips `auto_submit = true`.
+        // The RateLimiter is now a process-shared singleton via
+        // `shared_rate_limiter()` so concurrent `submit_application`
+        // calls coordinate one bucket. Day-cap, min-interval, and
+        // jitter all do their job even when an `apply --all` batch
+        // fans out submissions in parallel.
         #[cfg(feature = "browser")]
         "linkedin" => Box::new(crate::linkedin::LinkedinSubmitter::new(
             crate::linkedin::LinkedinConfig::from_core(cfg),
-            std::sync::Arc::new(RateLimiter::new()),
+            shared_rate_limiter(),
         )),
         #[cfg(not(feature = "browser"))]
         "linkedin" => {

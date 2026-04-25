@@ -9,6 +9,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use careerai_submit::linkedin_selectors::EASY_APPLY_SELECTOR;
 use scraper::{Html, Selector};
 
 const LINKEDIN_FIXTURE_HTML: &str = r#"
@@ -38,12 +39,10 @@ const LINKEDIN_NO_EASY_APPLY_FIXTURE: &str = r#"
 </body></html>
 "#;
 
-const SELECTOR_EXPR: &str = "button.jobs-apply-button, button[aria-label*='Easy Apply']";
-
 #[test]
 fn easy_apply_selector_matches_button_only() {
     let doc = Html::parse_document(LINKEDIN_FIXTURE_HTML);
-    let sel = Selector::parse(SELECTOR_EXPR).unwrap();
+    let sel = Selector::parse(EASY_APPLY_SELECTOR).unwrap();
     let matches: Vec<_> = doc.select(&sel).collect();
     assert_eq!(matches.len(), 1, "expected exactly one Easy Apply button");
     let el = &matches[0];
@@ -62,7 +61,7 @@ fn selector_does_not_match_external_apply_link() {
     // <a> must NOT match — otherwise the live path would click an
     // off-site link instead of opening Easy Apply.
     let doc = Html::parse_document(LINKEDIN_NO_EASY_APPLY_FIXTURE);
-    let sel = Selector::parse(SELECTOR_EXPR).unwrap();
+    let sel = Selector::parse(EASY_APPLY_SELECTOR).unwrap();
     let matches: Vec<_> = doc.select(&sel).collect();
     assert!(
         matches.is_empty(),

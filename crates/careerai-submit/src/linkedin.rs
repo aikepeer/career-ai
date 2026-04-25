@@ -37,8 +37,14 @@ const LINKEDIN_DOMAIN: &str = ".linkedin.com";
 const LINKEDIN_LI_AT: &str = "li_at";
 const LINKEDIN_BASE: &str = "https://www.linkedin.com";
 
+// Re-export the always-on selector const so this module's call sites
+// don't reach into `crate::linkedin_selectors`.
+use crate::linkedin_selectors::EASY_APPLY_SELECTOR;
+
 /// Configuration for `LinkedinSubmitter`. Mirrors the YAML shape under
-/// `config.linkedin.<...>` — Wave 3 wires this from `CoreConfig`.
+/// `submit.linkedin.<...>` (NOT a sibling of `submit:` — sub-block).
+/// `LinkedinConfig::from_core` lifts a `careerai_core::config::SubmitConfig`
+/// into this struct.
 #[derive(Debug, Clone)]
 pub struct LinkedinConfig {
     /// Where screenshots land. The submitter writes
@@ -101,8 +107,14 @@ impl LinkedinConfig {
     }
 }
 
-/// LinkedIn Easy Apply submitter. Holds a shared `RateLimiter` so
-/// concurrent invocations (e.g. `apply --all`) coordinate one bucket.
+/// LinkedIn Easy Apply submitter.
+///
+/// The `rate_limiter` field is an `Arc` clone of the process-shared
+/// singleton built in `careerai_submit::shared_rate_limiter()`.
+/// Concurrent `submit_application` calls (e.g. from `apply --all`)
+/// hold clones of the same `Arc` and coordinate one bucket per source —
+/// so day-cap, min-interval, and jitter actually gate fan-out
+/// submissions.
 pub struct LinkedinSubmitter {
     cfg: LinkedinConfig,
     rate_limiter: Arc<RateLimiter>,
@@ -217,7 +229,7 @@ impl Submitter for LinkedinSubmitter {
         // Build session config from our linkedin config.
         let mut session_cfg = BrowserSessionConfig {
             headless: self.cfg.headless,
-            launch_timeout_seconds: self.cfg.action_timeout_seconds,
+            request_timeout_seconds: self.cfg.action_timeout_seconds,
             ..BrowserSessionConfig::default()
         };
         if let Some(ua) = &self.cfg.user_agent {
@@ -235,10 +247,32 @@ impl Submitter for LinkedinSubmitter {
             }
         })?;
 
+        // From here on, every exit path (Ok or Err) must close the
+        // session so we don't leak Chromium processes across batch
+        // submits. `run_session` does the work; we always await
+        // `session.close()` even if `run_session` returns Err.
+        let outcome = self.run_session(&session, ctx, &li_at).await;
+        if let Err(e) = session.close().await {
+            tracing::warn!(target: "submit", error = %e, "linkedin browser close failed");
+        }
+        outcome
+    }
+}
+
+impl LinkedinSubmitter {
+    /// Inner submit flow. Owns no resources; `submit()` ensures the
+    /// `BrowserSession` is closed regardless of whether this returns
+    /// Ok or Err.
+    async fn run_session(
+        &self,
+        session: &BrowserSession,
+        ctx: &SubmitContext<'_>,
+        li_at: &str,
+    ) -> Result<String> {
         // Cookie must be set BEFORE navigating to a gated page;
         // otherwise LinkedIn redirects to /login and we lose state.
         session
-            .set_cookie(LINKEDIN_LI_AT, &li_at, LINKEDIN_DOMAIN, true)
+            .set_cookie(LINKEDIN_LI_AT, li_at, LINKEDIN_DOMAIN)
             .await?;
 
         // Same sanitizer as `would_submit_for` — prevents a malicious
@@ -272,7 +306,7 @@ impl Submitter for LinkedinSubmitter {
         // Easy Apply state machine. M5a only handles the happy path
         // (no screening questions). Screening-question handling lands
         // in M5b alongside the actual submit click.
-        click_easy_apply(&session, self.cfg.action_timeout_seconds).await?;
+        click_easy_apply(session, self.cfg.action_timeout_seconds).await?;
 
         // Pre-submit screenshot — we never click the final Submit
         // button in M5a even on the live path. The infrastructure is
@@ -304,21 +338,17 @@ async fn ensure_parent(p: &std::path::Path) -> std::io::Result<()> {
 }
 
 async fn click_easy_apply(session: &BrowserSession, timeout_seconds: u64) -> Result<()> {
-    // Match on attribute presence rather than exact class — LinkedIn
-    // ships a few CTA variants depending on which A/B bucket the
-    // account is in. A class rename should not break us silently.
-    const SELECTOR: &str = "button.jobs-apply-button, button[aria-label*='Easy Apply']";
     // Hard deadline so a missing CTA (closed listing, region gate,
     // CAPTCHA) bails with an actionable error instead of hanging on
     // chromiumoxide's internal CDP polling.
     let timeout = Duration::from_secs(timeout_seconds);
 
-    let element_fut = session.page().find_element(SELECTOR);
+    let element_fut = session.page().find_element(EASY_APPLY_SELECTOR);
     let element = match tokio::time::timeout(timeout, element_fut).await {
         Ok(Ok(el)) => el,
         Ok(Err(e)) => {
             return Err(SubmitError::SourceDisabled(format!(
-                "linkedin Easy Apply button not found ({SELECTOR}): {e}"
+                "linkedin Easy Apply button not found ({EASY_APPLY_SELECTOR}): {e}"
             )));
         }
         Err(_) => {

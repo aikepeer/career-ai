@@ -67,7 +67,14 @@ pub struct BrowserSessionConfig {
     pub window_width: u32,
     pub window_height: u32,
     pub user_agent: String,
-    pub launch_timeout_seconds: u64,
+    /// Per-CDP-request timeout. chromiumoxide's `request_timeout`
+    /// bounds every command (navigate, eval, screenshot) — not the
+    /// initial Chromium launch (the binary is spawned synchronously
+    /// and the first CDP handshake is already covered by the
+    /// `Browser::launch` call timeout). Named to match the underlying
+    /// API rather than the misleading "launch" framing it had at
+    /// first.
+    pub request_timeout_seconds: u64,
 }
 
 impl Default for BrowserSessionConfig {
@@ -81,7 +88,7 @@ impl Default for BrowserSessionConfig {
             user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
                          (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
                 .to_string(),
-            launch_timeout_seconds: 30,
+            request_timeout_seconds: 30,
         }
     }
 }
@@ -113,7 +120,7 @@ impl BrowserSession {
         // https://peter.sh/experiments/chromium-command-line-switches/.
         let mut builder = BrowserConfig::builder()
             .window_size(cfg.window_width, cfg.window_height)
-            .request_timeout(Duration::from_secs(cfg.launch_timeout_seconds))
+            .request_timeout(Duration::from_secs(cfg.request_timeout_seconds))
             .arg(format!("--user-agent={}", cfg.user_agent));
         builder = if cfg.headless {
             builder.headless_mode(HeadlessMode::True)
@@ -192,30 +199,18 @@ impl BrowserSession {
     /// Set a cookie for the current session. Used to install LinkedIn's
     /// `li_at` session cookie before navigating to gated pages.
     ///
-    /// The `secure` parameter is honored, but `SameSite=None` cookies
-    /// require `Secure=true` per browser policy — a `None`+`!secure`
-    /// cookie is silently rejected by every modern browser, looking
-    /// like a navigation bug. We surface a `BadCookie` error so callers
-    /// get an actionable message at construction time instead.
-    pub async fn set_cookie(
-        &self,
-        name: &str,
-        value: &str,
-        domain: &str,
-        secure: bool,
-    ) -> Result<()> {
-        if !secure {
-            return Err(SubmitError::Io(std::io::Error::other(
-                "set_cookie: SameSite=None requires Secure=true; \
-                 callers must pass secure=true for cross-site session cookies",
-            )));
-        }
+    /// `Secure=true` and `HttpOnly=true` are hard-coded — every cookie
+    /// installed via this API is a cross-site session credential
+    /// (`SameSite=None`), and browsers silently reject `SameSite=None`
+    /// cookies without `Secure`. The earlier shape took `secure: bool`
+    /// but unconditionally errored when false; the parameter was dead.
+    pub async fn set_cookie(&self, name: &str, value: &str, domain: &str) -> Result<()> {
         let params = SetCookieParams::builder()
             .name(name.to_string())
             .value(value.to_string())
             .domain(domain.to_string())
             .path("/".to_string())
-            .secure(secure)
+            .secure(true)
             .http_only(true)
             .same_site(CookieSameSite::None)
             .build()

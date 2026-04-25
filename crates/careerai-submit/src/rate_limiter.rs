@@ -132,6 +132,9 @@ impl RateLimiter {
     /// caller can mark the application Skipped without burning time.
     pub async fn acquire(&self, source: &str, policy: &RatePolicy) -> Result<(), RateLimitError> {
         // Quiet-hours check up-front: cheap and avoids waking governor.
+        // We recheck again AFTER the min-interval + jitter wait below
+        // so a permit started 1min before the window opens doesn't fire
+        // inside the window.
         if let Some((start, end)) = policy.quiet_hours_utc {
             let hour = Utc::now().hour();
             if in_window(hour, start, end) {
@@ -175,10 +178,21 @@ impl RateLimiter {
         // Random jitter on top, in addition to min-interval.
         if policy.jitter_seconds > 0 {
             let jitter = {
-                let mut rng = rand::thread_rng();
-                rng.gen_range(0..=policy.jitter_seconds)
+                let mut rng = rand::rng();
+                rng.random_range(0..=policy.jitter_seconds)
             };
             tokio::time::sleep(Duration::from_secs(u64::from(jitter))).await;
+        }
+
+        // Re-check quiet hours: a permit acquired just before the window
+        // opens would otherwise fire INSIDE the window (true if the wait
+        // straddled the start hour). Belt-and-suspenders with the
+        // up-front check.
+        if let Some((start, end)) = policy.quiet_hours_utc {
+            let hour = Utc::now().hour();
+            if in_window(hour, start, end) {
+                return Err(RateLimitError::QuietHours { start, end });
+            }
         }
 
         // Bump on success only. Cancel-leak avoided.
@@ -198,14 +212,17 @@ impl RateLimiter {
     }
 }
 
-/// Build a fresh `PerSource` for the given policy. Factored out so the
-/// `or_insert_with` closure stays readable and the `Quota` fallback
-/// logic has one home.
+/// Build a fresh `PerSource` for the given policy.
 fn build_per_source(policy: &RatePolicy) -> PerSource {
     // Clamp to >= 1 second so `Quota::with_period` never sees a zero
     // duration (it returns `None` in that case). `max_per_day=0` still
     // short-circuits via the day-cap check, so a 1s quota here is safe.
-    let period_secs = NonZeroU32::new(policy.min_seconds_between.max(1)).unwrap_or(NonZeroU32::MIN);
+    // `policy.min_seconds_between.max(1)` is always >= 1, so
+    // `NonZeroU32::new(...).expect()` is a true invariant — no fallible
+    // path actually exists here.
+    #[allow(clippy::expect_used)]
+    let period_secs = NonZeroU32::new(policy.min_seconds_between.max(1))
+        .expect("clamped >=1 by .max(1) on the previous line");
     let quota = Quota::with_period(Duration::from_secs(u64::from(period_secs.get())))
         .unwrap_or_else(|| Quota::per_minute(NonZeroU32::MIN));
     PerSource {
