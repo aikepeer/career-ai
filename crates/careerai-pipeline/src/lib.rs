@@ -678,6 +678,22 @@ pub async fn applied_show(
         .context("list submitted applications")
 }
 
+/// List all applications currently in the `drafted` state whose listing source
+/// is `linkedin`, oldest-first.
+///
+/// Consumed by `careerai review` to enumerate the queue of applications that
+/// the daemon parked in `Drafted` due to `interactive_only = true`. The
+/// operator is then prompted to confirm or skip each one.
+pub async fn list_drafted_linkedin(
+    root: &Path,
+    limit: i64,
+) -> Result<Vec<careerai_db::Application>> {
+    let pool = open_pool(root).await?;
+    queries::list_drafted_linkedin(&pool, limit)
+        .await
+        .context("list drafted linkedin applications")
+}
+
 /// Gather everything needed to render `careerai inspect <id>`.
 pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectReport> {
     let pool = open_pool(root).await?;
