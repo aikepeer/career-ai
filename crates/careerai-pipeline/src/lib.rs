@@ -572,6 +572,31 @@ pub async fn apply_one(
     let application = queries::find_application_by_id(&pool, application_id).await?;
     let listing = queries::find_by_id(&pool, &application.listing_id).await?;
 
+    // LinkedIn assist mode: when interactive_only is set (default true), the
+    // daemon never opens a browser session and never clicks Submit
+    // autonomously. Mark the application as Drafted and return a DryRun-shaped
+    // outcome. `careerai review` is the only path that turns Drafted →
+    // Submitted, by calling submit_application with interactive_only=false.
+    if listing.source == "linkedin" && cfg.submit.linkedin.interactive_only {
+        queries::transition_application_and_listing(
+            &pool,
+            &application.id,
+            &listing.id,
+            ListingState::Drafted.as_str(),
+            ListingState::Drafted,
+            Some("drafted: awaiting careerai review"),
+        )
+        .await
+        .context("transition application to drafted")?;
+        return Ok(AppliedOutcome {
+            application_id: application.id,
+            source: listing.source,
+            outcome: careerai_submit::SubmitOutcome::DryRun {
+                payload_summary: "drafted: awaiting careerai review".into(),
+            },
+        });
+    }
+
     let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
     let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
         .await
