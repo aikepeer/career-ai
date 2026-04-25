@@ -87,6 +87,7 @@ submit:
     jitter_seconds: 60
     quiet_hours_utc: [19, 1]
     action_timeout_seconds: 20
+    interactive_only: true   # daemon never auto-clicks; only `careerai review` does
 
 llm:
   tailor_model: "anthropic/claude-sonnet-4-6"

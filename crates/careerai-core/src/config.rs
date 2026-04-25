@@ -243,6 +243,17 @@ pub struct LinkedinSubmitConfig {
     /// AND the M5b code that replaces the inner `SourceDisabled`
     /// return with the actual `element.click()`.
     pub allow_submit_click: bool,
+    /// When `true` (default), the daemon never opens a LinkedIn browser
+    /// session and never clicks Submit autonomously. After rendering,
+    /// LinkedIn applications transition to `Drafted` instead. Operators
+    /// confirm submits one at a time via `careerai review`. Flip to
+    /// `false` only after weighing the account-restriction risk.
+    #[serde(default = "default_interactive_only")]
+    pub interactive_only: bool,
+}
+
+fn default_interactive_only() -> bool {
+    true
 }
 
 impl Default for LinkedinSubmitConfig {
@@ -260,6 +271,7 @@ impl Default for LinkedinSubmitConfig {
             action_timeout_seconds: 20,
             // Defense-in-depth default OFF — see field doc.
             allow_submit_click: false,
+            interactive_only: true,
         }
     }
 }
@@ -441,4 +453,20 @@ mod tests {
     // Env-var override is wired via the `config` crate (prefix CAREERAI,
     // separator `__`) but not unit-tested here — std::env::set_var is
     // unsafe in modern Rust and the workspace forbids unsafe blocks.
+
+    #[test]
+    fn linkedin_interactive_only_defaults_true() {
+        let cfg = LinkedinSubmitConfig::default();
+        assert!(
+            cfg.interactive_only,
+            "must default to assist-mode (true) so daemon never auto-clicks"
+        );
+    }
+
+    #[test]
+    fn linkedin_interactive_only_round_trips() {
+        let yaml = "interactive_only: false";
+        let cfg: LinkedinSubmitConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.interactive_only);
+    }
 }
