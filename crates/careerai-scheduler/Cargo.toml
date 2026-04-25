@@ -8,8 +8,21 @@ repository.workspace = true
 description = "tokio-cron-scheduler daemon driving the pipeline"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-pipeline = { path = "../careerai-pipeline" }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-cron-scheduler.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+careerai-scheduler = { path = ".", features = ["test-hooks"] }
+tempfile.workspace = true
+
+[features]
+# Exposes a `set_tick_counter` setter on `Scheduler` so integration tests
+# can observe cron ticks. Never compiled into release / production builds.
+test-hooks = []
 
 [lints]
 workspace = true

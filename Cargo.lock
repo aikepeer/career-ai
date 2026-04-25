@@ -305,15 +305,14 @@ dependencies = [
  "careerai-core",
  "careerai-db",
  "careerai-llm",
- "careerai-match",
+ "careerai-pipeline",
  "careerai-profile",
  "careerai-render",
- "careerai-sources",
+ "careerai-scheduler",
  "careerai-submit",
  "careerai-tailor",
  "clap",
  "docx-rs",
- "serde_json",
  "sqlx",
  "tempfile",
  "tokio",
@@ -387,6 +386,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "careerai-pipeline"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "careerai-core",
+ "careerai-db",
+ "careerai-llm",
+ "careerai-match",
+ "careerai-profile",
+ "careerai-render",
+ "careerai-sources",
+ "careerai-submit",
+ "careerai-tailor",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "careerai-profile"
 version = "0.1.0"
 dependencies = [
@@ -428,8 +447,14 @@ dependencies = [
 name = "careerai-scheduler"
 version = "0.1.0"
 dependencies = [
+ "careerai-core",
+ "careerai-pipeline",
+ "careerai-scheduler",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-cron-scheduler",
+ "tracing",
 ]
 
 [[package]]
@@ -755,6 +780,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "croner"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c344b0690c1ad1c7176fe18eb173e0c927008fdaaa256e40dfd43ddd149c0843"
+dependencies = [
+ "chrono",
 ]
 
 [[package]]
@@ -2209,6 +2243,17 @@ dependencies = [
  "rand 0.8.6",
  "smallvec",
  "zeroize",
+]
+
+[[package]]
+name = "num-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3711,6 +3756,21 @@ dependencies = [
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tokio-cron-scheduler"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a5597b569b4712cf78aa0c9ae29742461b7bda1e49c2a5fdad1d79bf022f8f0"
+dependencies = [
+ "chrono",
+ "croner",
+ "num-derive",
+ "num-traits",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

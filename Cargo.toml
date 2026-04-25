@@ -12,6 +12,7 @@ members = [
     "crates/careerai-render",
     "crates/careerai-submit",
     "crates/careerai-scheduler",
+    "crates/careerai-pipeline",
 ]
 
 [workspace.package]
@@ -51,6 +52,7 @@ wiremock = "0.6"
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 governor = "0.10"
 keyring = "3"
+tokio-cron-scheduler = "0.13"
 futures = "0.3"
 scraper = "0.26"
 

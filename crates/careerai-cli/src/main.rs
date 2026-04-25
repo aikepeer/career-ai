@@ -4,7 +4,7 @@
 //! `profile show`, `profile validate`, and `--help` are wired end-to-end at
 //! M1; the rest are stubs until M2+.
 
-use careerai_cli::pipeline;
+use careerai_pipeline as pipeline;
 
 use std::path::{Path, PathBuf};
 
@@ -209,7 +209,14 @@ async fn main() -> Result<()> {
             run_inspect(&cwd, &application_id).await?;
         }
         Command::Daemon => {
-            anyhow::bail!("subcommand not implemented yet (tracked in plan milestone M6)");
+            let cfg = load_cfg(&cwd)?;
+            let sched = careerai_scheduler::Scheduler::from_config(&cwd, &cfg)
+                .await
+                .context("init scheduler")?;
+            sched
+                .run_until_shutdown()
+                .await
+                .context("scheduler shutdown")?;
         }
     }
     Ok(())

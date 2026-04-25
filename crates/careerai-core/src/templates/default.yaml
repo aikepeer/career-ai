@@ -103,6 +103,12 @@ scheduler:
     naukri:     "0 15 */3 * * *"
     linkedin:   "0 0 */4 * * *"
     indeed:     "0 30 */4 * * *"
+  # Periodic dry-run apply sweep over rendered/prepared applications. The
+  # daemon hard-pins auto_submit=false on every tick — live submission is
+  # operator-driven only (`careerai apply --auto-submit ...`). Left unset
+  # by default so a fresh install never spins up apply ticks unprompted;
+  # uncomment to enable a 15-minute sweep.
+  # submit_cadence: "0 */15 * * * *"
 
 # Job-board instances to poll on `careerai discover`.
 # Greenhouse + Lever need one entry per company slug; Remotive and RemoteOK

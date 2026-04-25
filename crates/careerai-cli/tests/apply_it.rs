@@ -12,10 +12,10 @@
 use std::fs;
 use std::path::Path;
 
-use careerai_cli::pipeline;
 use careerai_core::config::{CoreConfig, SubmitSource};
 use careerai_db::models::{NewApplication, NewArtifact, NewListing};
 use careerai_db::{pool_from_path, queries};
+use careerai_pipeline as pipeline;
 use careerai_profile::schema::{Personal, Profile, Skills};
 
 fn fixture_profile() -> Profile {

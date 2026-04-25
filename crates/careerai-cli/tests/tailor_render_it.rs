@@ -10,10 +10,10 @@
 use std::fs;
 use std::path::Path;
 
-use careerai_cli::pipeline;
 use careerai_core::config::CoreConfig;
 use careerai_db::models::NewListing;
 use careerai_db::{pool_from_path, queries};
+use careerai_pipeline as pipeline;
 use careerai_profile::schema::{Experience, Personal, Profile, Project, Skills};
 use sqlx::Row;
 
