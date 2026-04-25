@@ -40,6 +40,10 @@ domains:
 match:
   embedding_model: "BAAI/bge-small-en-v1.5"
   score_threshold: 0.62
+  # Hard filter: a listing must contain at least one of these tokens
+  # (case-insensitive substring) somewhere in its title/description/skills,
+  # or it's filtered out before scoring. Leave empty for no filter.
+  must_include_skills: []
 
 # NOTE: `rates.*` predates M5a and drives the legacy submit-layer
 # guardrails. The M5a browser submitter reads `submit.linkedin.*`

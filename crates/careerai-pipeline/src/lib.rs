@@ -156,6 +156,17 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
     let profile = load_profile(root)?;
     let rules = FilterRules::load(root).context("load rules")?;
 
+    // Surface the must_include_skills filter at the top of every match
+    // run. Operators who typo a skill in local.yaml otherwise see
+    // "filtered_out: 100" with zero diagnostic. This one log line tells
+    // them which filter is active before any work starts.
+    if !cfg.matching.must_include_skills.is_empty() {
+        info!(
+            skills = ?cfg.matching.must_include_skills,
+            "must_include_skills filter active — listings missing all of these will be rejected before scoring",
+        );
+    }
+
     let discovered = queries::list_by_state(&pool, ListingState::Discovered, 10_000)
         .await
         .context("list discovered")?;
