@@ -122,6 +122,39 @@ Match the layer to what you're testing:
 - Post-merge: delete the local branch.
 - Semgrep baseline: `.claude/.semgrep-baseline.json` — create on first entry, re-scan after ≥20 changed files or dep bumps or auth/crypto/SQL/deserialization changes.
 
+## Token discipline (MANDATORY — Serena + context-mode)
+
+The full rule lives in `~/.claude/CLAUDE.md` ("Code Reading + Editing" + "Shell output" + "Subagent propagation" sections). It applies in this project without exception. Project-specific tightening:
+
+**Before reading any Rust source file, decide:**
+1. Known function/struct/method/trait/impl → `mcp__plugin_serena_serena__find_symbol(name_path, relative_path, include_body=true)`. NEVER `Read` the file.
+2. Surveying a 500+ LOC file (e.g., `careerai-pipeline/src/lib.rs` is 600+ LOC, `careerai-submit/src/rate_limiter.rs` is 500+) → `get_symbols_overview` first, then drill in. NEVER `Read` the whole file.
+3. "Who calls `discover_one`/`apply_all`/`Scheduler::from_config`/etc." → `find_referencing_symbols`. NEVER `grep -rn`.
+4. File ≤ 200 LOC (e.g., `linkedin_selectors.rs`, `error.rs` modules) → `Read` with `offset`+`limit` is fine.
+
+**Before running any cargo command, decide:**
+1. `cargo build --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo audit`, `cargo deny check` → `mcp__plugin_context-mode_context-mode__ctx_execute(language="shell", code="...", intent="test failures")`. The full output is indexed; you get a summary or matched sections.
+2. `cargo test -p single-crate --test single_test` (typically <50 lines output) → direct `Bash` with `tail -20` is fine.
+3. `git diff origin/main` (large diffs > 500 LOC) → `ctx_execute` with intent. Never let raw diff hunks flood context.
+
+**Forbidden in this project:**
+- `Read` of `careerai-pipeline/src/lib.rs`, `careerai-submit/src/rate_limiter.rs`, `careerai-submit/src/linkedin.rs`, `careerai-scheduler/src/lib.rs`, `careerai-cli/src/pipeline.rs` (now relocated), `careerai-core/src/config.rs` without `offset`+`limit` AND a specific symbol target. These are all 400+ LOC; use Serena.
+- `grep -r` to find call sites of any pipeline entry point, scheduler hook, or submit trait method.
+- Direct `Bash` for `cargo test --workspace` — use `ctx_execute`.
+
+**Subagent prompts in this project MUST include:**
+
+```
+## Token discipline (inherited from career-ai CLAUDE.md — non-negotiable)
+- Use mcp__plugin_serena_serena__find_symbol / get_symbols_overview / find_referencing_symbols / search_for_pattern for code reading. NEVER full-file Read for known-symbol queries.
+- Use mcp__plugin_serena_serena__replace_symbol_body / insert_after_symbol for symbol-scoped edits.
+- Use mcp__plugin_context-mode_context-mode__ctx_execute for cargo/build/test/find/grep commands. Direct Bash only for bounded one-liners.
+- Pre-load these tool schemas via ToolSearch at the start of your task. Cost ~2 KB; saves >10x on the first 5 reads.
+- Files in this project that are FORBIDDEN to Read in full (use Serena symbol-level tools): careerai-pipeline/src/lib.rs, careerai-submit/src/rate_limiter.rs, careerai-submit/src/linkedin.rs, careerai-scheduler/src/lib.rs, careerai-core/src/config.rs.
+```
+
+If a subagent's tool-call report shows full-file Reads of forbidden files, raw `grep -r` for symbol queries, or unbounded cargo dumps in its context — its work is suspect. Re-run with a tightened prompt, don't paper over.
+
 ## Gotchas
 
 - The `.remember/logs/` directory is required by a hookify PostToolUse hook; do not delete it.
