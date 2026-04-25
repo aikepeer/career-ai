@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
@@ -597,17 +597,32 @@ pub async fn apply_all(
         eligible.extend(rows);
     }
 
-    // Drop the local pool so `apply_one` opens its own — matches the
-    // established convention in `tailor_render_it.rs` and avoids holding a
-    // WAL writer across the loop.
-    drop(pool);
-
     let mut out = Vec::with_capacity(eligible.len());
     for app in eligible {
         match apply_one(root, cfg, &app.id, auto_submit_override).await {
             Ok(o) => out.push(o),
             Err(e) => {
-                warn!(application_id = %app.id, error = %e, "apply_one failed, continuing batch");
+                // H4: don't silently retry forever. A single corrupt
+                // artifact, persistent HTTP 500, or unknown-source error
+                // would otherwise re-fail every tick (every 15 min by
+                // default), polluting logs and burning rate-limit budget.
+                // Transition the application to `failed` so apply_all stops
+                // re-fetching it; operators who want to retry must
+                // explicitly re-shortlist via `careerai shortlist`.
+                warn!(
+                    application_id = %app.id,
+                    error = %e,
+                    "apply_one failed, marking application failed",
+                );
+                if let Err(transition_err) =
+                    queries::set_application_state(&pool, &app.id, "failed").await
+                {
+                    error!(
+                        application_id = %app.id,
+                        error = %transition_err,
+                        "failed to transition application to failed state",
+                    );
+                }
             }
         }
     }

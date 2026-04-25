@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use careerai_core::config::CoreConfig;
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
 use tracing::{error, info, info_span, warn, Instrument};
 
@@ -49,9 +50,17 @@ pub enum SchedulerError {
 
 /// Long-running daemon scaffolding around `tokio-cron-scheduler`.
 ///
-/// Wave 1 only registers cron entries from `scheduler.cadence` and logs ticks.
-/// Wave 2 will dispatch into the real pipeline from inside each registered
-/// closure.
+/// At construction time we mint a process-wide `match_lock`
+/// (`tokio::sync::Mutex`) that every per-source tick acquires before calling
+/// `careerai_pipeline::match_one`. `match_all` walks every
+/// `discovered`-state row regardless of source (deliberate global rescore
+/// behavior), so concurrent ticks from different sources would otherwise
+/// race on the SQLite UPDATE that transitions rows out of `discovered`. The
+/// lock serializes those write paths without affecting `discover_one`,
+/// which is naturally per-source and HTTP-bound. The lock itself is owned
+/// by each job closure (cloned `Arc`s) — we do not need to store it on
+/// `Self` because the registered jobs keep it alive for the daemon's
+/// lifetime.
 pub struct Scheduler {
     inner: JobScheduler,
 }
@@ -105,93 +114,106 @@ impl Scheduler {
         cfg: &CoreConfig,
         #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
     ) -> Result<Self, SchedulerError> {
-        let inner = JobScheduler::new().await?;
         let span = info_span!("scheduler");
-        let _enter = span.enter();
+        let root_buf = root.to_path_buf();
+        let cfg_clone = cfg.clone();
+        async move {
+            let inner = JobScheduler::new().await?;
 
-        if cfg.scheduler.cadence.is_empty() {
-            warn!("scheduler.cadence is empty — daemon will idle with no jobs");
-        }
+            if cfg_clone.scheduler.cadence.is_empty() {
+                warn!("scheduler.cadence is empty — daemon will idle with no jobs");
+            }
 
-        // Share root + cfg into every job closure via `Arc` so we don't
-        // clone the full `CoreConfig` once per tick. The closures are
-        // `'static` (required by tokio-cron-scheduler), so they each take
-        // their own `Arc` clone.
-        let root: Arc<PathBuf> = Arc::new(root.to_path_buf());
-        let cfg: Arc<CoreConfig> = Arc::new(cfg.clone());
+            // Share root + cfg into every job closure via `Arc` so we don't
+            // clone the full `CoreConfig` once per tick. The closures are
+            // `'static` (required by tokio-cron-scheduler), so they each take
+            // their own `Arc` clone.
+            let root: Arc<PathBuf> = Arc::new(root_buf);
+            let cfg: Arc<CoreConfig> = Arc::new(cfg_clone);
+            let match_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
 
-        // Sort to keep startup logs deterministic across runs (HashMap is not
-        // ordered). Helps a lot when diffing daemon logs in CI / local.
-        let mut entries: Vec<(&String, &String)> = cfg.scheduler.cadence.iter().collect();
-        entries.sort_by(|a, b| a.0.cmp(b.0));
+            // Sort to keep startup logs deterministic across runs (HashMap is
+            // not ordered). Helps a lot when diffing daemon logs in CI / local.
+            let mut entries: Vec<(&String, &String)> = cfg.scheduler.cadence.iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(b.0));
 
-        for (source_name, cron_expr) in entries {
-            let built = build_tick_job(
-                source_name,
-                cron_expr,
-                Arc::clone(&root),
-                Arc::clone(&cfg),
-                #[cfg(feature = "test-hooks")]
-                tick_counter.clone(),
-            );
-            match built {
-                Ok(job) => match inner.add(job).await {
-                    Ok(uuid) => info!(
-                        source = %source_name,
-                        cron = %cron_expr,
-                        job = %uuid,
-                        "registered cron job",
-                    ),
+            for (source_name, cron_expr) in entries {
+                let built = build_tick_job(
+                    source_name,
+                    cron_expr,
+                    Arc::clone(&root),
+                    Arc::clone(&cfg),
+                    Arc::clone(&match_lock),
+                    #[cfg(feature = "test-hooks")]
+                    tick_counter.clone(),
+                );
+                match built {
+                    Ok(job) => match inner.add(job).await {
+                        Ok(uuid) => info!(
+                            source = %source_name,
+                            cron = %cron_expr,
+                            job = %uuid,
+                            "registered cron job",
+                        ),
+                        Err(e) => error!(
+                            source = %source_name,
+                            cron = %cron_expr,
+                            error = %e,
+                            "failed to add cron job; skipping this source",
+                        ),
+                    },
                     Err(e) => error!(
                         source = %source_name,
                         cron = %cron_expr,
                         error = %e,
-                        "failed to add cron job; skipping this source",
+                        "invalid cron expression; skipping this source",
                     ),
-                },
-                Err(e) => error!(
-                    source = %source_name,
-                    cron = %cron_expr,
-                    error = %e,
-                    "invalid cron expression; skipping this source",
-                ),
+                }
             }
-        }
 
-        // Register the submit cron exactly once if configured. Unset means
-        // the daemon does not poll for apply at all — operators must run
-        // `careerai apply` manually. Same swallow-and-log pattern as the
-        // per-source jobs: never propagate, never panic.
-        if let Some(submit_cron) = cfg.scheduler.submit_cadence.as_deref() {
-            let built = build_submit_job(
-                submit_cron,
-                Arc::clone(&root),
-                Arc::clone(&cfg),
-                #[cfg(feature = "test-hooks")]
-                tick_counter.clone(),
-            );
-            match built {
-                Ok(job) => match inner.add(job).await {
-                    Ok(uuid) => info!(
-                        cron = %submit_cron,
-                        job = %uuid,
-                        "registered submit cron job (dry-run only)",
-                    ),
+            // Register the submit cron exactly once if configured. Unset means
+            // the daemon does not poll for apply at all — operators must run
+            // `careerai apply` manually. Same swallow-and-log pattern as the
+            // per-source jobs: never propagate, never panic.
+            if let Some(submit_cron) = cfg.scheduler.submit_cadence.as_deref() {
+                let built = build_submit_job(
+                    submit_cron,
+                    Arc::clone(&root),
+                    Arc::clone(&cfg),
+                    #[cfg(feature = "test-hooks")]
+                    tick_counter.clone(),
+                );
+                match built {
+                    Ok(job) => match inner.add(job).await {
+                        Ok(uuid) => info!(
+                            cron = %submit_cron,
+                            job = %uuid,
+                            "registered submit cron job (dry-run only)",
+                        ),
+                        Err(e) => error!(
+                            cron = %submit_cron,
+                            error = %e,
+                            "failed to add submit cron job; skipping",
+                        ),
+                    },
                     Err(e) => error!(
                         cron = %submit_cron,
                         error = %e,
-                        "failed to add submit cron job; skipping",
+                        "invalid submit_cadence cron expression; skipping",
                     ),
-                },
-                Err(e) => error!(
-                    cron = %submit_cron,
-                    error = %e,
-                    "invalid submit_cadence cron expression; skipping",
-                ),
+                }
+            } else {
+                // H5: never silent. Operators who typo `submit_cadence` (or set
+                // it under the wrong YAML key) need a visible startup line so
+                // they can tell the difference between "intentionally disabled"
+                // and "I thought I enabled this and it's quietly not running".
+                info!("submit cron disabled — set scheduler.submit_cadence to enable periodic dry-run apply sweeps");
             }
-        }
 
-        Ok(Self { inner })
+            Ok(Self { inner })
+        }
+        .instrument(span)
+        .await
     }
 
     /// Start the underlying scheduler in the background. Cron firings begin
@@ -230,18 +252,25 @@ impl Scheduler {
     pub async fn run_until_shutdown(mut self) -> Result<(), SchedulerError> {
         let span = info_span!("scheduler");
         async move {
+            // H2: install both signal handlers BEFORE starting the scheduler.
+            // `tokio::signal::ctrl_c` registers lazily on first poll, and the
+            // unix `signal()` call itself does the syscall, so any signal
+            // delivered between `start()` returning and the first `select!`
+            // poll could otherwise fall through to the default disposition
+            // (terminate without drain). Registering both here closes that
+            // window — the kernel queues SIGINT/SIGTERM into our handlers as
+            // soon as `signal()` returns.
+            let mut sigint = signal(SignalKind::interrupt())?;
+            let mut sigterm = signal(SignalKind::terminate())?;
+
             self.start().await?;
 
             // SIGTERM (e.g. systemd stop) and SIGINT (Ctrl-C) both initiate
             // graceful shutdown. Race them with `tokio::select!` so whichever
             // arrives first wins.
-            let mut sigterm = signal(SignalKind::terminate())?;
             tokio::select! {
-                res = tokio::signal::ctrl_c() => {
-                    match res {
-                        Ok(()) => info!("received SIGINT, shutting down"),
-                        Err(e) => error!(error = %e, "ctrl_c handler failed; shutting down anyway"),
-                    }
+                _ = sigint.recv() => {
+                    info!("received SIGINT, shutting down");
                 }
                 _ = sigterm.recv() => {
                     info!("received SIGTERM, shutting down");
@@ -270,11 +299,21 @@ impl Scheduler {
 /// pipeline crate, scoped to this single source. Errors from either stage
 /// are logged at `error` and swallowed — one source's failure must never
 /// propagate up and cancel sibling jobs registered with the same scheduler.
+///
+/// `match_lock` (H1) serializes the `match_one` call across all per-source
+/// jobs. `match_all` walks every `discovered`-state row regardless of
+/// source, so two sources ticking at the same minute (default greenhouse +
+/// lever both fire `0 0 */1 * * *`) would otherwise race on the SQLite
+/// UPDATE that transitions rows out of `discovered` — both would fetch the
+/// same set, both would try to set state, and one would clobber the other's
+/// score or hit a unique-state constraint. Discover stays unlocked: it's
+/// per-source, network-bound, and writes only its own source's rows.
 fn build_tick_job(
     source: &str,
     cron_expr: &str,
     root: Arc<PathBuf>,
     cfg: Arc<CoreConfig>,
+    match_lock: Arc<Mutex<()>>,
     #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
 ) -> Result<Job, JobSchedulerError> {
     let source_owned = source.to_owned();
@@ -282,6 +321,7 @@ fn build_tick_job(
         let source = source_owned.clone();
         let root = Arc::clone(&root);
         let cfg = Arc::clone(&cfg);
+        let match_lock = Arc::clone(&match_lock);
         #[cfg(feature = "test-hooks")]
         let tick_counter = tick_counter.clone();
         Box::pin(async move {
@@ -301,15 +341,21 @@ fn build_tick_job(
                 Err(e) => error!(source = %source, error = %e, "discover failed"),
             }
 
-            match careerai_pipeline::match_one(root.as_path(), cfg.as_ref(), &source).await {
-                Ok(report) => info!(
-                    source = %source,
-                    filtered_out = report.filtered_out,
-                    shortlisted = report.shortlisted,
-                    below_threshold = report.also_filtered,
-                    "match ok",
-                ),
-                Err(e) => error!(source = %source, error = %e, "match failed"),
+            // H1: serialize the global match write path across sources.
+            // Lock is acquired in its own scope so it drops as soon as
+            // `match_one` returns, never held across discover.
+            {
+                let _lock = match_lock.lock().await;
+                match careerai_pipeline::match_one(root.as_path(), cfg.as_ref(), &source).await {
+                    Ok(report) => info!(
+                        source = %source,
+                        filtered_out = report.filtered_out,
+                        shortlisted = report.shortlisted,
+                        below_threshold = report.also_filtered,
+                        "match ok",
+                    ),
+                    Err(e) => error!(source = %source, error = %e, "match failed"),
+                }
             }
 
             #[cfg(feature = "test-hooks")]
@@ -430,9 +476,7 @@ mod tests {
 
         let mut sched = Scheduler::from_config(tmp.path(), &cfg).await.unwrap();
         sched.start().await.unwrap();
-        // Shutdown directly without waiting for a signal — exercises the
-        // same drain path `run_until_shutdown` uses.
-        let drained = tokio::time::timeout(SHUTDOWN_DRAIN, sched.inner.shutdown()).await;
-        assert!(drained.is_ok(), "shutdown should not time out");
+        // Use the public shutdown API — same path `run_until_shutdown` uses.
+        sched.shutdown().await.expect("shutdown should not error");
     }
 }
