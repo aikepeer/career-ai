@@ -8,13 +8,26 @@
 
 pub mod ats_http;
 pub mod base;
+#[cfg(feature = "browser")]
+pub mod browser_session;
+pub mod credentials;
 pub mod dry_run;
 pub mod error;
+#[cfg(feature = "browser")]
+pub mod linkedin;
+pub mod linkedin_selectors;
+pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
 pub use base::{SubmitContext, SubmitDecision, SubmitOutcome, Submitter, WouldSubmit};
+#[cfg(feature = "browser")]
+pub use browser_session::{stealth_script_sha256, BrowserSession, BrowserSessionConfig};
+pub use credentials::Credential;
 pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
+#[cfg(feature = "browser")]
+pub use linkedin::{LinkedinConfig, LinkedinSubmitter};
+pub use rate_limiter::{RateLimitError, RateLimiter, RatePermit, RatePolicy};
 
 use std::path::Path;
 
@@ -24,6 +37,26 @@ use careerai_db::queries;
 use careerai_db::SqlitePool;
 use careerai_profile::Profile;
 use tracing::{info, warn};
+
+/// Process-wide rate limiter shared across every `submit_application`
+/// call. Per-source counters (day-cap, min-interval bucket) live here,
+/// not in a per-call instance, so two concurrent submits coordinate.
+/// Built lazily on first access; no state is persisted across process
+/// restarts (counters reset, which is the desired behavior at this
+/// scale).
+///
+/// The function itself is `#[cfg(feature = "browser")]` because today
+/// only `LinkedinSubmitter` consumes it. The `rate_limiter` module is
+/// always-on (its deps are non-optional in `careerai-submit`); when
+/// the next browser submitter lands (Indeed in M5b), the gate stays
+/// in the same place.
+#[cfg(feature = "browser")]
+fn shared_rate_limiter() -> std::sync::Arc<rate_limiter::RateLimiter> {
+    static RL: std::sync::OnceLock<std::sync::Arc<rate_limiter::RateLimiter>> =
+        std::sync::OnceLock::new();
+    RL.get_or_init(|| std::sync::Arc::new(rate_limiter::RateLimiter::new()))
+        .clone()
+}
 
 /// Submit a prepared application. Routes to the correct per-source
 /// `Submitter` based on the listing's `source` column. Honors dry-run
@@ -82,6 +115,31 @@ pub async fn submit_application(
         "greenhouse" => Box::new(GreenhouseSubmitter::new()),
         "lever" => Box::new(LeverSubmitter::new()),
         "ashby" => Box::new(AshbySubmitter::new()),
+        // Browser-based LinkedIn path. Only built in when the crate is
+        // compiled with `--features browser`; otherwise fall through to
+        // a Skipped transition with an actionable rebuild hint.
+        //
+        // The RateLimiter is now a process-shared singleton via
+        // `shared_rate_limiter()` so concurrent `submit_application`
+        // calls coordinate one bucket. Day-cap, min-interval, and
+        // jitter all do their job even when an `apply --all` batch
+        // fans out submissions in parallel.
+        #[cfg(feature = "browser")]
+        "linkedin" => Box::new(crate::linkedin::LinkedinSubmitter::new(
+            crate::linkedin::LinkedinConfig::from_core(cfg),
+            shared_rate_limiter(),
+        )),
+        #[cfg(not(feature = "browser"))]
+        "linkedin" => {
+            return mark_skipped(
+                pool,
+                &application,
+                &listing,
+                "linkedin requires --features browser; rebuild with \
+                 `cargo build -p careerai-cli --features browser`",
+            )
+            .await;
+        }
         // Feed-only sources don't have an HTTP submission API. Browser
         // submitters land in M5 for LinkedIn / Indeed; until then the
         // safe answer is to mark the application Skipped with a clear
@@ -109,6 +167,16 @@ pub async fn submit_application(
     }
 
     // 5. Choose live vs dry-run.
+    //
+    // Note: an earlier defense-in-depth gate at this point short-
+    // circuited LinkedIn live submits to Skipped before the submitter
+    // ran. That meant the audit screenshot was never produced — the
+    // operator lost the artifact M5a promises. The gate now lives
+    // INSIDE `LinkedinSubmitter::run_session` (`allow_submit_click`
+    // field), which lets the full state-machine + screenshot run and
+    // bails right before the actual click. Two locks remain (the
+    // inner allow_submit_click flag and the final unimplemented!()
+    // that ships only when M5b lands the click).
     let decision = if cfg.auto_submit {
         SubmitDecision::Live
     } else {
