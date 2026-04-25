@@ -31,7 +31,7 @@ use crate::base::{SubmitContext, Submitter, WouldSubmit};
 use crate::browser_session::{BrowserSession, BrowserSessionConfig};
 use crate::credentials::{self, Credential};
 use crate::error::{Result, SubmitError};
-use crate::rate_limiter::{RateLimiter, RatePolicy};
+use crate::rate_limiter::{RateLimiter, RatePermit, RatePolicy};
 
 const LINKEDIN_DOMAIN: &str = ".linkedin.com";
 const LINKEDIN_LI_AT: &str = "li_at";
@@ -228,10 +228,18 @@ impl Submitter for LinkedinSubmitter {
     /// 7. Take a pre-submit screenshot and bail with SourceDisabled
     ///    pointing at the screenshot — M5b will enable the final
     ///    Submit click in a separate commit.
+    ///
+    /// Day-cap accounting: the permit is acquired up-front but only
+    /// committed once `click_easy_apply` succeeds (the first real
+    /// LinkedIn-side action). Earlier failures (`load_li_at`, browser
+    /// launch, navigation, cookie set) drop the permit, refunding the
+    /// reserved slot — so a Chromium misinstall or stale cookie does
+    /// NOT consume the user's daily quota.
     async fn submit(&self, ctx: &SubmitContext<'_>) -> Result<String> {
         // Rate limit gate first — denied permits don't cost a browser
         // spawn.
-        self.rate_limiter
+        let permit = self
+            .rate_limiter
             .acquire(self.name(), &self.cfg.rate_policy)
             .await
             .map_err(|e| SubmitError::SourceDisabled(format!("rate-limited: {e}")))?;
@@ -263,7 +271,13 @@ impl Submitter for LinkedinSubmitter {
         // session so we don't leak Chromium processes across batch
         // submits. `run_session` does the work; we always await
         // `session.close()` even if `run_session` returns Err.
-        let outcome = self.run_session(&session, ctx, &li_at).await;
+        // `permit` is consumed inside run_session via Option::take after
+        // the first real LinkedIn interaction; if run_session bails
+        // before that, the permit drops here and refunds.
+        let mut permit_slot = Some(permit);
+        let outcome = self
+            .run_session(&session, ctx, &li_at, &mut permit_slot)
+            .await;
         if let Err(e) = session.close().await {
             tracing::warn!(target: "submit", error = %e, "linkedin browser close failed");
         }
@@ -280,6 +294,7 @@ impl LinkedinSubmitter {
         session: &BrowserSession,
         ctx: &SubmitContext<'_>,
         li_at: &str,
+        permit_slot: &mut Option<RatePermit<'_>>,
     ) -> Result<String> {
         // Cookie must be set BEFORE navigating to a gated page;
         // otherwise LinkedIn redirects to /login and we lose state.
@@ -319,6 +334,14 @@ impl LinkedinSubmitter {
         // (no screening questions). Screening-question handling lands
         // in M5b alongside the actual submit click.
         click_easy_apply(session, self.cfg.action_timeout_seconds).await?;
+
+        // First real LinkedIn-side action succeeded (modal opened) —
+        // commit the rate-limit permit so the day-cap counter reflects
+        // an actual interaction. Any error paths above this point
+        // dropped the permit and refunded the slot.
+        if let Some(permit) = permit_slot.take() {
+            permit.commit();
+        }
 
         // Pre-submit screenshot — we never click the final Submit
         // button in M5a even on the live path. The infrastructure is

@@ -27,7 +27,7 @@ pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
 #[cfg(feature = "browser")]
 pub use linkedin::{LinkedinConfig, LinkedinSubmitter};
-pub use rate_limiter::{RateLimitError, RateLimiter, RatePolicy};
+pub use rate_limiter::{RateLimitError, RateLimiter, RatePermit, RatePolicy};
 
 use std::path::Path;
 

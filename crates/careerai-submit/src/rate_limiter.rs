@@ -136,7 +136,19 @@ impl RateLimiter {
     /// Acquire a permit for `source`. Awaits up to the min-interval +
     /// jitter; returns immediately on `DayCap` / `QuietHours` so the
     /// caller can mark the application Skipped without burning time.
-    pub async fn acquire(&self, source: &str, policy: &RatePolicy) -> Result<(), RateLimitError> {
+    ///
+    /// Returns a [`RatePermit`] that the caller MUST commit (via
+    /// [`RatePermit::commit`]) after the work backed by the permit
+    /// actually happened. Dropping the permit without commit refunds
+    /// the day-cap slot — so an early failure after `acquire()` (e.g.
+    /// missing credentials, browser launch error) does not consume
+    /// the user's quota for the day. This keeps the day-cap measuring
+    /// "real LinkedIn interactions" instead of "function calls."
+    pub async fn acquire<'a>(
+        &'a self,
+        source: &str,
+        policy: &RatePolicy,
+    ) -> Result<RatePermit<'a>, RateLimitError> {
         // Quiet-hours check up-front. Rechecked again after the wait
         // below so a permit started 1min before the window opens
         // can't fire inside the window.
@@ -150,7 +162,7 @@ impl RateLimiter {
         // Reservation under the lock: bump count_today atomically with
         // the cap check so concurrent callers can't all observe
         // `count_today < cap` and collectively exceed the cap. Cancel
-        // safety is restored by the `PermitGuard` RAII handle below —
+        // safety is restored by the `RatePermit` RAII handle below —
         // it decrements on Drop unless `commit()` is called after the
         // submission succeeds.
         //
@@ -186,7 +198,9 @@ impl RateLimiter {
         };
         // Guard owns the reservation. If we panic / cancel before
         // commit(), Drop releases the slot — no permanent day-cap leak.
-        let mut guard = PermitGuard::new(self, source);
+        // Returned to the caller after all gates pass; the caller commits
+        // it once the underlying work has actually happened.
+        let permit = RatePermit::new(self, source.to_string());
 
         // Min-interval wait outside the mutex.
         limiter.until_ready().await;
@@ -207,7 +221,7 @@ impl RateLimiter {
         if let Some((start, end)) = policy.quiet_hours_utc {
             let hour = Utc::now().hour();
             if in_window(hour, start, end) {
-                // Guard releases the reservation on its way out.
+                // Permit releases the reservation on its way out.
                 return Err(RateLimitError::QuietHours { start, end });
             }
         }
@@ -245,10 +259,10 @@ impl RateLimiter {
             }
         }
 
-        // All gates passed — commit the reservation so it is NOT
-        // refunded when the guard drops.
-        guard.commit();
-        Ok(())
+        // All gates passed. Hand the permit to the caller; the slot
+        // stays reserved until the caller calls `permit.commit()` (work
+        // succeeded) or drops it (refund).
+        Ok(permit)
     }
 
     /// Internal: refund a reservation made by `acquire`. Called from
@@ -274,34 +288,55 @@ impl RateLimiter {
     }
 }
 
-/// RAII guard for a held reservation. `Drop` refunds the slot unless
-/// `commit()` was called. Keeps cap-as-hard-ceiling invariant under
-/// concurrent callers (the bump under the lock makes count_today the
-/// authoritative count) while restoring cancel-safety: dropping the
-/// `acquire` future mid-await still releases the reservation.
-struct PermitGuard<'a> {
+/// RAII permit for a reserved day-cap slot.
+///
+/// Returned by [`RateLimiter::acquire`]. Call [`RatePermit::commit`]
+/// after the work that the permit was acquired for has actually
+/// happened (e.g. a real interaction with the source's site). Dropping
+/// without commit refunds the slot — so an early failure between
+/// `acquire()` and the real interaction does NOT consume the user's
+/// daily quota.
+///
+/// This keeps cap-as-hard-ceiling invariant under concurrent callers
+/// (the bump under the lock makes count_today the authoritative count)
+/// while restoring cancel-safety: dropping the permit mid-await
+/// releases the reservation.
+pub struct RatePermit<'a> {
     rl: &'a RateLimiter,
-    source: &'a str,
+    source: String,
     committed: bool,
 }
 
-impl<'a> PermitGuard<'a> {
-    fn new(rl: &'a RateLimiter, source: &'a str) -> Self {
+impl<'a> RatePermit<'a> {
+    fn new(rl: &'a RateLimiter, source: String) -> Self {
         Self {
             rl,
             source,
             committed: false,
         }
     }
-    fn commit(&mut self) {
+
+    /// Commit the reservation. Must be called once the work backed by
+    /// this permit has actually happened. After commit, drop is a
+    /// no-op — the day-cap slot stays consumed.
+    pub fn commit(mut self) {
         self.committed = true;
     }
 }
 
-impl Drop for PermitGuard<'_> {
+impl std::fmt::Debug for RatePermit<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RatePermit")
+            .field("source", &self.source)
+            .field("committed", &self.committed)
+            .finish()
+    }
+}
+
+impl Drop for RatePermit<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.rl.refund(self.source);
+            self.rl.refund(&self.source);
         }
     }
 }
@@ -371,8 +406,8 @@ mod tests {
             jitter_seconds: 0,
             quiet_hours_utc: None,
         };
-        rl.acquire("test", &policy).await.unwrap();
-        rl.acquire("test", &policy).await.unwrap();
+        rl.acquire("test", &policy).await.unwrap().commit();
+        rl.acquire("test", &policy).await.unwrap().commit();
         let err = rl.acquire("test", &policy).await.unwrap_err();
         match err {
             RateLimitError::DayCap { source_name, cap } => {
@@ -398,5 +433,46 @@ mod tests {
         };
         let err = rl.acquire("test", &policy).await.unwrap_err();
         assert!(matches!(err, RateLimitError::QuietHours { .. }));
+    }
+
+    #[tokio::test]
+    async fn dropped_permit_refunds_day_cap_slot() {
+        // Cap of 2. Acquire+drop (no commit) twice — both should refund.
+        // A third acquire+commit must still succeed because the prior
+        // two never consumed real quota.
+        let rl = RateLimiter::new();
+        let policy = RatePolicy {
+            max_per_day: 2,
+            min_seconds_between: 1,
+            jitter_seconds: 0,
+            quiet_hours_utc: None,
+        };
+        for _ in 0..5 {
+            // Drop without commit — this is the "early failure after
+            // acquire" path. Slot must be refunded.
+            let _permit = rl.acquire("test", &policy).await.unwrap();
+        }
+        // Two committed acquires should still succeed; only commits
+        // count against the cap.
+        rl.acquire("test", &policy).await.unwrap().commit();
+        rl.acquire("test", &policy).await.unwrap().commit();
+        let err = rl.acquire("test", &policy).await.unwrap_err();
+        assert!(matches!(err, RateLimitError::DayCap { .. }));
+    }
+
+    #[tokio::test]
+    async fn committed_permit_consumes_day_cap_slot() {
+        // Cap of 1. After commit, the slot is consumed permanently —
+        // a second acquire must hit DayCap, no silent refund.
+        let rl = RateLimiter::new();
+        let policy = RatePolicy {
+            max_per_day: 1,
+            min_seconds_between: 1,
+            jitter_seconds: 0,
+            quiet_hours_utc: None,
+        };
+        rl.acquire("test", &policy).await.unwrap().commit();
+        let err = rl.acquire("test", &policy).await.unwrap_err();
+        assert!(matches!(err, RateLimitError::DayCap { .. }));
     }
 }

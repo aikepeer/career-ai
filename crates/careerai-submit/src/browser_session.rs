@@ -97,7 +97,12 @@ impl Default for BrowserSessionConfig {
 pub struct BrowserSession {
     browser: Browser,
     page: Page,
-    _handler: tokio::task::JoinHandle<()>,
+    /// CDP event-loop driver. `JoinHandle` does NOT cancel on drop —
+    /// dropping it just detaches. We `abort()` it explicitly in
+    /// `close()` and in `Drop` so a failure path that drops the
+    /// session without `close()` (or a forgotten `close()`) doesn't
+    /// leak a tokio task that keeps polling a dead CDP connection.
+    handler: tokio::task::JoinHandle<()>,
 }
 
 impl std::fmt::Debug for BrowserSession {
@@ -136,30 +141,51 @@ impl BrowserSession {
             .await
             .map_err(|e| SubmitError::Io(std::io::Error::other(format!("Browser::launch: {e}"))))?;
 
-        // Drive CDP events so the connection stays alive.
+        // Drive CDP events so the connection stays alive. Any error
+        // path between here and `Ok(Self { .. })` must `handler.abort()`
+        // — `JoinHandle::drop` does NOT cancel the task. Without an
+        // abort, a Chromium subprocess that survives `Browser::launch`
+        // but trips the next CDP call would leave this loop polling
+        // forever.
         let handler = tokio::spawn(async move { while let Some(_ev) = events.next().await {} });
 
-        let page = browser
-            .new_page("about:blank")
-            .await
-            .map_err(|e| SubmitError::Io(std::io::Error::other(format!("new_page: {e}"))))?;
+        let page = match browser.new_page("about:blank").await {
+            Ok(p) => p,
+            Err(e) => {
+                handler.abort();
+                return Err(SubmitError::Io(std::io::Error::other(format!(
+                    "new_page: {e}"
+                ))));
+            }
+        };
 
         // Inject stealth BEFORE any navigation. add_script_to_evaluate_on_new_document
         // makes Chromium run the script as the very first thing on every
         // new page load, which is the only way to neutralize detection
         // probes that fire on document-start.
-        let add_script = AddScriptToEvaluateOnNewDocumentParams::builder()
+        let add_script = match AddScriptToEvaluateOnNewDocumentParams::builder()
             .source(STEALTH_JS.to_string())
             .build()
-            .map_err(|e| SubmitError::Io(std::io::Error::other(format!("stealth params: {e}"))))?;
-        page.execute(add_script)
-            .await
-            .map_err(|e| SubmitError::Io(std::io::Error::other(format!("inject stealth: {e}"))))?;
+        {
+            Ok(s) => s,
+            Err(e) => {
+                handler.abort();
+                return Err(SubmitError::Io(std::io::Error::other(format!(
+                    "stealth params: {e}"
+                ))));
+            }
+        };
+        if let Err(e) = page.execute(add_script).await {
+            handler.abort();
+            return Err(SubmitError::Io(std::io::Error::other(format!(
+                "inject stealth: {e}"
+            ))));
+        }
 
         Ok(Self {
             browser,
             page,
-            _handler: handler,
+            handler,
         })
     }
 
@@ -225,18 +251,34 @@ impl BrowserSession {
 
     /// Close the browser. `Browser::close` needs `&mut self`, but
     /// BrowserSession owns the handle by value — take it by value on
-    /// close so the handler task gets dropped too.
+    /// close so the handler task gets aborted too.
     ///
     /// Propagates Chromium's close error to the caller so an orphaned
     /// process or hung CDP teardown is observable instead of silently
     /// swallowed. Callers may choose to log-and-continue (the LinkedIn
     /// submitter does this in its scope guard).
     pub async fn close(mut self) -> Result<()> {
-        self.browser
-            .close()
-            .await
+        let close_result = self.browser.close().await;
+        // Stop the CDP event-loop driver before returning. After
+        // `browser.close()` the events stream should drain and end the
+        // loop on its own, but explicit abort makes the teardown
+        // ordering deterministic and immune to chromiumoxide changes.
+        self.handler.abort();
+        close_result
             .map_err(|e| SubmitError::Io(std::io::Error::other(format!("browser close: {e}"))))?;
         Ok(())
+    }
+}
+
+impl Drop for BrowserSession {
+    fn drop(&mut self) {
+        // `close()` consumes self, so a forgotten close still leaves
+        // a live handler. Abort here so it doesn't outlive the
+        // session struct. `Browser::close` needs an async context, so
+        // we can't drive it here — operators are expected to call
+        // `close()` explicitly for that. This Drop only handles the
+        // task-leak half.
+        self.handler.abort();
     }
 }
 
