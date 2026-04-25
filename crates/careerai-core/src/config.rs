@@ -219,17 +219,22 @@ pub struct LinkedinSubmitConfig {
     pub jitter_seconds: u32,
     /// `[start_hour_utc, end_hour_utc)` window when the limiter refuses
     /// permits. Wraps across midnight (e.g. `[19, 1)` = late IST night).
+    /// Both values are validated to be in `0..=23` (start) and `0..=24`
+    /// (end inclusive) at config load via `LinkedinSubmitConfig::validated`;
+    /// out-of-range values emit a warning and clamp to the default
+    /// rather than silently disabling the gate.
     pub quiet_hours_utc: Option<(u32, u32)>,
     /// Per-action selector / click timeout in seconds.
     pub action_timeout_seconds: u64,
-    /// Defense-in-depth: explicit, default-OFF gate that the CLI
-    /// dispatcher checks BEFORE delegating to `LinkedinSubmitter`.
-    /// Even if `auto_submit=true` AND `per_source.linkedin.enabled=true`,
-    /// the live click is suppressed unless this flag is explicitly true.
-    /// M5a always returns `SourceDisabled` from inside the submitter as
-    /// the primary gate; this is the second lock so a future commit
-    /// that accidentally removes the inner stop still can't ship a ToS
-    /// violation without flipping a config field with this name.
+    /// Inner kill-switch enforced by `LinkedinSubmitter::run_session`:
+    /// even with `auto_submit=true` AND
+    /// `per_source.linkedin.enabled=true` AND a valid `li_at` cookie,
+    /// the final "Submit application" click stays suppressed unless
+    /// this flag is explicitly true. M5a never flips it (the submitter
+    /// returns `SourceDisabled` after the audit screenshot); M5b will.
+    /// Two locks must be lifted together to ship the click — this flag
+    /// AND the M5b code that replaces the inner `SourceDisabled`
+    /// return with the actual `element.click()`.
     pub allow_submit_click: bool,
 }
 
@@ -249,6 +254,36 @@ impl Default for LinkedinSubmitConfig {
             // Defense-in-depth default OFF — see field doc.
             allow_submit_click: false,
         }
+    }
+}
+
+impl LinkedinSubmitConfig {
+    /// Range-validate `quiet_hours_utc`. Out-of-range values silently
+    /// disabled the quiet-hours gate before, undermining the safety
+    /// posture; now we clamp them to the default window and log a
+    /// warning. Called from `from_core` in `careerai-submit::linkedin`
+    /// so every consumer gets a vetted policy.
+    ///
+    /// Range: start in `0..=23`, end in `0..=24`. Equal start+end is
+    /// also rejected (would mean "always quiet" or "never quiet"
+    /// depending on interpretation; either is a footgun).
+    #[must_use]
+    pub fn validated(mut self) -> Self {
+        if let Some((start, end)) = self.quiet_hours_utc {
+            let start_ok = start <= 23;
+            let end_ok = end <= 24;
+            let distinct = start != end;
+            if !(start_ok && end_ok && distinct) {
+                tracing::warn!(
+                    target: "config",
+                    submit_linkedin_quiet_hours = ?(start, end),
+                    "out-of-range quiet_hours_utc; clamping to default (19, 1) — \
+                     valid range is start in 0..=23, end in 0..=24, start != end"
+                );
+                self.quiet_hours_utc = Some((19, 1));
+            }
+        }
+        self
     }
 }
 

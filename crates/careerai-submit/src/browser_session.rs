@@ -83,8 +83,9 @@ impl Default for BrowserSessionConfig {
             headless: true,
             window_width: 1280,
             window_height: 800,
-            // A modern Chrome UA on Linux. Real submitters override
-            // this from config in M5b.
+            // A modern Chrome UA on Linux used as the session default.
+            // Per-source config (e.g. `submit.linkedin.user_agent`)
+            // already overrides this when set.
             user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
                          (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
                 .to_string(),

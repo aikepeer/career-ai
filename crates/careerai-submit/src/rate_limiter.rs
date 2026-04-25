@@ -212,6 +212,39 @@ impl RateLimiter {
             }
         }
 
+        // Re-validate UTC day. If `until_ready()` + jitter pushed past
+        // midnight, the reservation we made earlier was charged to the
+        // OLD day's counter; a fresh day's quota would otherwise let
+        // this caller exceed the cap on the new day. Refund the old
+        // day's slot and atomically reserve a fresh one against the
+        // new day. If the new day is already at cap, return DayCap.
+        let now_day = UtcDay::now();
+        {
+            let mut map = self.inner.lock().await;
+            if let Some(entry) = map.get_mut(source) {
+                if entry.day != now_day {
+                    // Refund the slot we held on the old day, then
+                    // reserve on the new day. Drop also has a refund
+                    // path, but committing without re-check would
+                    // leave count_today bumped against the WRONG day —
+                    // we must move the reservation explicitly.
+                    entry.count_today = entry.count_today.saturating_sub(1);
+                    entry.day = now_day;
+                    entry.count_today = 0;
+                    if entry.count_today >= policy.max_per_day {
+                        // Should be unreachable on a fresh day with
+                        // count_today=0 unless max_per_day=0; refund
+                        // path is correct either way.
+                        return Err(RateLimitError::DayCap {
+                            source_name: source.to_string(),
+                            cap: policy.max_per_day,
+                        });
+                    }
+                    entry.count_today = entry.count_today.saturating_add(1);
+                }
+            }
+        }
+
         // All gates passed — commit the reservation so it is NOT
         // refunded when the guard drops.
         guard.commit();
@@ -220,20 +253,24 @@ impl RateLimiter {
 
     /// Internal: refund a reservation made by `acquire`. Called from
     /// `PermitGuard::drop` when the future is dropped before commit.
-    /// Uses `try_lock` because `Drop` is sync; if the lock is contended
-    /// we fall back to a `tokio::spawn` so the refund still happens
-    /// (rare — only under contention, e.g. running guards on multiple
-    /// tasks targeting the same RateLimiter).
+    ///
+    /// Best-effort: `Drop` is sync, so we use `try_lock`. If the lock
+    /// is contended (e.g. another task is mid-`acquire` for the same
+    /// source) the refund is dropped silently — the slot stays
+    /// reserved for the rest of the UTC day. This is the same
+    /// fail-mode the earlier bump-after-success path had under
+    /// contention. We deliberately do NOT spawn a task to acquire
+    /// later, because that would tie refund correctness to runtime
+    /// liveness AND introduce a new ordering hazard (a refund firing
+    /// after a fresh acquire on the next call). Day-cap stays a hard
+    /// ceiling; under heavy contention the limiter may be slightly
+    /// stricter than `max_per_day`, never looser.
     fn refund(&self, source: &str) {
         if let Ok(mut map) = self.inner.try_lock() {
             if let Some(entry) = map.get_mut(source) {
                 entry.count_today = entry.count_today.saturating_sub(1);
             }
         }
-        // If `try_lock` fails, the slot stays reserved — same outcome
-        // as the previous bump-after-success path. Acceptable; the
-        // alternative (spawning a task to acquire later) would tie
-        // the refund to runtime liveness.
     }
 }
 

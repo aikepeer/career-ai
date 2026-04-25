@@ -96,9 +96,13 @@ impl LinkedinConfig {
     /// Reads the dedicated `submit.linkedin` block; all fields have
     /// `#[serde(default)]` so a missing block yields the same shape
     /// as `LinkedinConfig::default()`.
+    ///
+    /// Calls `LinkedinSubmitConfig::validated()` so out-of-range
+    /// `quiet_hours_utc` silently clamps to the default with a warning
+    /// (instead of disabling the gate).
     #[must_use]
     pub fn from_core(submit_cfg: &careerai_core::config::SubmitConfig) -> Self {
-        let lk = submit_cfg.linkedin.clone();
+        let lk = submit_cfg.linkedin.clone().validated();
         Self {
             screenshots_dir: lk.screenshots_dir,
             user_agent: lk.user_agent,
@@ -344,14 +348,19 @@ impl LinkedinSubmitter {
             )));
         }
 
-        // M5b will replace this `unimplemented!` with the actual
-        // element.click() on the Submit button. Reaching this branch
-        // in M5a means a developer flipped allow_submit_click=true
-        // without landing the M5b code; loud panic is intentional.
-        unimplemented!(
-            "M5a does not implement the final Submit click; \
-             allow_submit_click=true is reserved for M5b"
-        );
+        // M5b will replace this branch with the actual `element.click()`
+        // on the Submit button. Today we return a structured error
+        // instead of `unimplemented!()` panicking — `apply --all`
+        // batches must not abort just because an operator flipped
+        // `allow_submit_click=true` ahead of M5b landing. Defense-in-
+        // depth still holds: two separate edits (this branch + the
+        // flag) are required to ship a click.
+        Err(SubmitError::SourceDisabled(format!(
+            "linkedin submit reached pre-submit state (screenshot: {}); \
+             final Submit click is intentionally not implemented in M5a; \
+             allow_submit_click=true is reserved for M5b",
+            final_path.display()
+        )))
     }
 }
 
