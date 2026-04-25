@@ -13,6 +13,8 @@ pub mod browser_session;
 pub mod credentials;
 pub mod dry_run;
 pub mod error;
+#[cfg(feature = "browser")]
+pub mod linkedin;
 pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
@@ -22,6 +24,8 @@ pub use browser_session::{stealth_script_sha256, BrowserSession, BrowserSessionC
 pub use credentials::Credential;
 pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
+#[cfg(feature = "browser")]
+pub use linkedin::{LinkedinConfig, LinkedinSubmitter};
 pub use rate_limiter::{RateLimitError, RateLimiter, RatePolicy};
 
 use std::path::Path;
