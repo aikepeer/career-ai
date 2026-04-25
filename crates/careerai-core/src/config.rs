@@ -406,7 +406,8 @@ mod tests {
 
     #[test]
     fn match_config_parses_must_include_skills() {
-        let yaml = "embedding_model: \"x\"\nscore_threshold: 0.5\nmust_include_skills: [rust, async]";
+        let yaml =
+            "embedding_model: \"x\"\nscore_threshold: 0.5\nmust_include_skills: [rust, async]";
         let cfg: MatchConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.must_include_skills, vec!["rust", "async"]);
     }
