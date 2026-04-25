@@ -50,6 +50,16 @@ pub fn stealth_script_sha256() -> &'static str {
     })
 }
 
+/// Expected SHA of the in-tree `stealth-v2.js`. The test below pins
+/// equality so any edit to the script forces a visible commit that
+/// also bumps this constant — preventing silent mitigation regressions.
+/// To intentionally update: change the script, run
+/// `cargo test -p careerai-submit --features browser stealth_script_sha_matches_pin`,
+/// copy the actual SHA from the failure into this constant, and commit
+/// both changes together.
+pub const EXPECTED_STEALTH_SHA: &str =
+    "a3bbcc79d80f77099f4aa21611124653da6b9eecfc1c79fabedc76049a103c2f";
+
 /// Configuration for a `BrowserSession`.
 #[derive(Debug, Clone)]
 pub struct BrowserSessionConfig {
@@ -150,14 +160,17 @@ impl BrowserSession {
     }
 
     /// Navigate and wait until the page reaches "loaded" readyState.
+    ///
+    /// chromiumoxide's `Page::goto` already drives `Page.navigate` and
+    /// awaits the lifecycle event for DOMContentLoaded. A second call
+    /// to `wait_for_navigation()` waits for the *next* navigation event,
+    /// which never fires on a fully-loaded SPA — that path could hang
+    /// until the request_timeout. So we await `goto` only.
     pub async fn navigate(&self, url: &str) -> Result<()> {
         self.page
             .goto(url)
             .await
             .map_err(|e| SubmitError::Io(std::io::Error::other(format!("goto {url}: {e}"))))?;
-        self.page.wait_for_navigation().await.map_err(|e| {
-            SubmitError::Io(std::io::Error::other(format!("wait_for_navigation: {e}")))
-        })?;
         Ok(())
     }
 
@@ -178,6 +191,12 @@ impl BrowserSession {
 
     /// Set a cookie for the current session. Used to install LinkedIn's
     /// `li_at` session cookie before navigating to gated pages.
+    ///
+    /// The `secure` parameter is honored, but `SameSite=None` cookies
+    /// require `Secure=true` per browser policy — a `None`+`!secure`
+    /// cookie is silently rejected by every modern browser, looking
+    /// like a navigation bug. We surface a `BadCookie` error so callers
+    /// get an actionable message at construction time instead.
     pub async fn set_cookie(
         &self,
         name: &str,
@@ -185,6 +204,12 @@ impl BrowserSession {
         domain: &str,
         secure: bool,
     ) -> Result<()> {
+        if !secure {
+            return Err(SubmitError::Io(std::io::Error::other(
+                "set_cookie: SameSite=None requires Secure=true; \
+                 callers must pass secure=true for cross-site session cookies",
+            )));
+        }
         let params = SetCookieParams::builder()
             .name(name.to_string())
             .value(value.to_string())
@@ -222,6 +247,20 @@ mod tests {
         let b = stealth_script_sha256();
         assert_eq!(a, b);
         assert_eq!(a.len(), 64); // SHA-256 hex
+    }
+
+    #[test]
+    fn stealth_script_sha_matches_pin() {
+        // Pin the SHA against `EXPECTED_STEALTH_SHA`. Any edit to
+        // browser/stealth-v2.js must bump that constant in the same
+        // commit — silent mitigation drops are caught here, not after
+        // an operator runs against real LinkedIn.
+        assert_eq!(
+            stealth_script_sha256(),
+            EXPECTED_STEALTH_SHA,
+            "stealth-v2.js changed without bumping EXPECTED_STEALTH_SHA — \
+             review the diff and update the constant deliberately"
+        );
     }
 
     #[test]

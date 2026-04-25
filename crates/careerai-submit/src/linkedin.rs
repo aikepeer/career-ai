@@ -26,6 +26,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Serialize;
 
+use crate::ats_http::sanitize_external_id;
 use crate::base::{SubmitContext, Submitter, WouldSubmit};
 use crate::browser_session::{BrowserSession, BrowserSessionConfig};
 use crate::credentials::{self, Credential};
@@ -130,7 +131,13 @@ impl LinkedinSubmitter {
     /// add config-driven preview shaping here.
     #[allow(clippy::unused_self)]
     fn would_submit_for(&self, ctx: &SubmitContext<'_>) -> WouldSubmit {
-        let url = format!("{LINKEDIN_BASE}/jobs/view/{}/", ctx.listing.external_id);
+        // Sanitize before interpolating into URL path. A malicious feed
+        // could supply `external_id="../../settings"` and escape the
+        // /jobs/view/ prefix once URL canonicalization runs. Mirrors
+        // the M4 ATS submitter posture (CRITICAL finding from M5a
+        // review).
+        let safe_id = sanitize_external_id(&ctx.listing.external_id);
+        let url = format!("{LINKEDIN_BASE}/jobs/view/{safe_id}/");
         // Body preview is structural only — the submit-layer logging
         // policy says we never put email/phone/cover-letter text into
         // log lines; payload stays in the application_payloads DB row.
@@ -234,7 +241,11 @@ impl Submitter for LinkedinSubmitter {
             .set_cookie(LINKEDIN_LI_AT, &li_at, LINKEDIN_DOMAIN, true)
             .await?;
 
-        let url = format!("{LINKEDIN_BASE}/jobs/view/{}/", ctx.listing.external_id);
+        // Same sanitizer as `would_submit_for` — prevents a malicious
+        // feed from steering the live browser to a non-listing path
+        // through URL canonicalization of `..` segments.
+        let safe_id = sanitize_external_id(&ctx.listing.external_id);
+        let url = format!("{LINKEDIN_BASE}/jobs/view/{safe_id}/");
         session.navigate(&url).await?;
 
         // Audit screenshot before any interaction. Captures the listing
@@ -297,20 +308,36 @@ async fn click_easy_apply(session: &BrowserSession, timeout_seconds: u64) -> Res
     // ships a few CTA variants depending on which A/B bucket the
     // account is in. A class rename should not break us silently.
     const SELECTOR: &str = "button.jobs-apply-button, button[aria-label*='Easy Apply']";
-    // Reserved for future explicit poll-loops; kept for parity with
-    // the spec and so a follow-up wave can reuse the deadline without
-    // changing this signature.
-    let _deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_seconds);
+    // Hard deadline so a missing CTA (closed listing, region gate,
+    // CAPTCHA) bails with an actionable error instead of hanging on
+    // chromiumoxide's internal CDP polling.
+    let timeout = Duration::from_secs(timeout_seconds);
 
-    let element = session.page().find_element(SELECTOR).await.map_err(|e| {
-        SubmitError::SourceDisabled(format!(
-            "linkedin Easy Apply button not found ({SELECTOR}): {e}"
-        ))
-    })?;
-    element.click().await.map_err(|e| {
-        SubmitError::SourceDisabled(format!("linkedin Easy Apply click failed: {e}"))
-    })?;
-    Ok(())
+    let element_fut = session.page().find_element(SELECTOR);
+    let element = match tokio::time::timeout(timeout, element_fut).await {
+        Ok(Ok(el)) => el,
+        Ok(Err(e)) => {
+            return Err(SubmitError::SourceDisabled(format!(
+                "linkedin Easy Apply button not found ({SELECTOR}): {e}"
+            )));
+        }
+        Err(_) => {
+            return Err(SubmitError::SourceDisabled(format!(
+                "linkedin Easy Apply button not found within {timeout_seconds}s; \
+                 listing may be closed, region-gated, or a CAPTCHA appeared"
+            )));
+        }
+    };
+    let click_fut = element.click();
+    match tokio::time::timeout(timeout, click_fut).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(SubmitError::SourceDisabled(format!(
+            "linkedin Easy Apply click failed: {e}"
+        ))),
+        Err(_) => Err(SubmitError::SourceDisabled(format!(
+            "linkedin Easy Apply click stalled ({timeout_seconds}s)"
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -404,6 +431,38 @@ mod tests {
             would.body_preview.contains("Acme"),
             "missing company: {}",
             would.body_preview
+        );
+    }
+
+    #[test]
+    fn prepare_sanitizes_external_id_against_path_traversal() {
+        // Adversarial: feed claims external_id="../../settings". Without
+        // sanitization, the URL resolves to /settings (gated page with
+        // li_at cookie installed).  With sanitization, dots become `_`
+        // so the URL stays anchored at /jobs/view/.
+        let mut listing = fixture_listing();
+        listing.external_id = "../../settings?tab=account".into();
+        let application = fixture_application(&listing.id);
+        let profile = fixture_profile();
+        let artifacts: Vec<Artifact> = Vec::new();
+        let ctx = SubmitContext {
+            application: &application,
+            listing: &listing,
+            profile: &profile,
+            artifacts: &artifacts,
+            cover_letter_text: "x",
+        };
+        let sub = LinkedinSubmitter::new(LinkedinConfig::default(), Arc::new(RateLimiter::new()));
+        let would = sub.prepare(&ctx).unwrap();
+        // No `..`, no `?`, no `=`, no `&` — all collapsed to `_`.
+        assert!(!would.url.contains(".."), "url leaked '..': {}", would.url);
+        assert!(!would.url.contains('?'), "url leaked '?': {}", would.url);
+        assert!(!would.url.contains('='), "url leaked '=': {}", would.url);
+        // URL must still be anchored under /jobs/view/.
+        assert!(
+            would.url.starts_with("https://www.linkedin.com/jobs/view/"),
+            "url escaped origin: {}",
+            would.url
         );
     }
 

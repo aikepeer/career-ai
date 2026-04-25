@@ -222,6 +222,15 @@ pub struct LinkedinSubmitConfig {
     pub quiet_hours_utc: Option<(u32, u32)>,
     /// Per-action selector / click timeout in seconds.
     pub action_timeout_seconds: u64,
+    /// Defense-in-depth: explicit, default-OFF gate that the CLI
+    /// dispatcher checks BEFORE delegating to `LinkedinSubmitter`.
+    /// Even if `auto_submit=true` AND `per_source.linkedin.enabled=true`,
+    /// the live click is suppressed unless this flag is explicitly true.
+    /// M5a always returns `SourceDisabled` from inside the submitter as
+    /// the primary gate; this is the second lock so a future commit
+    /// that accidentally removes the inner stop still can't ship a ToS
+    /// violation without flipping a config field with this name.
+    pub allow_submit_click: bool,
 }
 
 impl Default for LinkedinSubmitConfig {
@@ -237,6 +246,8 @@ impl Default for LinkedinSubmitConfig {
             // late IST night when no human is reviewing submissions.
             quiet_hours_utc: Some((19, 1)),
             action_timeout_seconds: 20,
+            // Defense-in-depth default OFF — see field doc.
+            allow_submit_click: false,
         }
     }
 }

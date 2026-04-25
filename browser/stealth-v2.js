@@ -23,10 +23,16 @@
     ? navigator.permissions.query.bind(navigator.permissions)
     : null;
   if (originalQuery) {
-    navigator.permissions.query = (params) =>
-      params && params.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission })
-        : originalQuery(params);
+    // Guard `Notification` — it's undefined inside cross-origin iframes
+    // with restrictive feature policy. Calling `Notification.permission`
+    // would throw a louder ReferenceError than the original 'denied'.
+    navigator.permissions.query = (params) => {
+      if (params && params.name === 'notifications') {
+        const state = (typeof Notification !== 'undefined') ? Notification.permission : 'denied';
+        return Promise.resolve({ state });
+      }
+      return originalQuery(params);
+    };
   }
 
   // 4) Plugins length — 0 is a tell. Synthesize a minimal plugins array.

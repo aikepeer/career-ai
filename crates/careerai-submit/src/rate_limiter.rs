@@ -139,15 +139,22 @@ impl RateLimiter {
             }
         }
 
-        // Day-cap check + counter bump (atomic under mutex). Clone out
-        // the governor handle so min-interval wait happens outside the
-        // lock.
+        // Day-cap CHECK (no bump) + clone governor handle. Bumping
+        // before `until_ready().await` was the original posture, but
+        // it leaks a day-cap slot when the caller drops the future
+        // mid-await (panic, timeout, ctrl-c). The fix: only bump on
+        // success, accepting a tiny race where two concurrent callers
+        // could both observe count_today < cap before either bumps.
+        // governor's direct limiter still serializes cell issuance, so
+        // min-interval is enforced regardless. For M5a (auto_submit
+        // false, click never fires) the race is harmless; for M5b/M6
+        // it's an acceptable trade vs the cancel-leak alternative.
         let limiter = {
-            let mut map = self.inner.lock().await;
+            let map = self.inner.lock().await;
+            let mut map = map;
             let entry = map
                 .entry(source.to_string())
                 .or_insert_with(|| build_per_source(policy));
-            // Roll over if a new UTC day has started.
             let today = UtcDay::now();
             if entry.day != today {
                 entry.day = today;
@@ -159,15 +166,10 @@ impl RateLimiter {
                     cap: policy.max_per_day,
                 });
             }
-            // Reserve the permit before awaiting min-interval — caller
-            // can't sneak past the day-cap by dropping the future.
-            entry.count_today += 1;
             Arc::clone(&entry.limiter)
         };
 
-        // Min-interval wait outside the mutex — don't block other
-        // sources while this source's bucket fills. governor's
-        // until_ready() is the canonical wait API.
+        // Min-interval wait outside the mutex.
         limiter.until_ready().await;
 
         // Random jitter on top, in addition to min-interval.
@@ -177,6 +179,19 @@ impl RateLimiter {
                 rng.gen_range(0..=policy.jitter_seconds)
             };
             tokio::time::sleep(Duration::from_secs(u64::from(jitter))).await;
+        }
+
+        // Bump on success only. Cancel-leak avoided.
+        {
+            let mut map = self.inner.lock().await;
+            if let Some(entry) = map.get_mut(source) {
+                let today = UtcDay::now();
+                if entry.day != today {
+                    entry.day = today;
+                    entry.count_today = 0;
+                }
+                entry.count_today = entry.count_today.saturating_add(1);
+            }
         }
 
         Ok(())

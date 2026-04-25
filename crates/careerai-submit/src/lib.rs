@@ -153,6 +153,25 @@ pub async fn submit_application(
         SubmitDecision::DryRun
     };
 
+    // 5a. Defense-in-depth for the LinkedIn browser submitter. Even
+    // with auto_submit + per_source enabled + a valid li_at cookie,
+    // the live click stays suppressed unless cfg.linkedin.allow_submit_click
+    // is explicitly true. The inner submitter ALSO returns SourceDisabled
+    // before clicking — this is the second lock so a single line edit
+    // in linkedin.rs can't ship a ToS violation.
+    if matches!(decision, SubmitDecision::Live)
+        && source_lc == "linkedin"
+        && !cfg.linkedin.allow_submit_click
+    {
+        return mark_skipped(
+            pool,
+            &application,
+            &listing,
+            "linkedin live submit gated: set submit.linkedin.allow_submit_click=true to enable (M5a default-off; M5b lifts after audit)",
+        )
+        .await;
+    }
+
     match decision {
         SubmitDecision::Live => run_live(pool, submitter.as_ref(), &ctx).await,
         SubmitDecision::DryRun => {

@@ -294,14 +294,17 @@ fn slugify(s: &str) -> String {
 /// Sanitize an external job id before interpolating it into a URL path.
 ///
 /// The `external_id` field comes from third-party feeds (Greenhouse,
-/// Lever, Naukri, ...). A malicious feed could supply
+/// Lever, Naukri, LinkedIn, ...). A malicious feed could supply
 /// `../../admin` or `foo?bar=baz#frag` and have the URL parser route the
-/// POST to an unintended endpoint when live submission lands. Allowed
-/// characters: alphanumerics, `-`, `_`. Dots are deliberately rejected
-/// because `..` segments are interpreted by URL parsers as parent
-/// directories. Real job ids in observed feeds are alphanumeric with
-/// hyphens/underscores; the strict allowlist costs nothing.
-fn sanitize_external_id(s: &str) -> String {
+/// request to an unintended endpoint. Allowed characters: alphanumerics,
+/// `-`, `_`. Dots are deliberately rejected because `..` segments are
+/// interpreted by URL parsers as parent directories. Real job ids in
+/// observed feeds are alphanumeric with hyphens/underscores; the strict
+/// allowlist costs nothing.
+///
+/// `pub(crate)` so the LinkedIn browser submitter can reuse the same
+/// guard before passing `ctx.listing.external_id` to `Page::goto`.
+pub(crate) fn sanitize_external_id(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
