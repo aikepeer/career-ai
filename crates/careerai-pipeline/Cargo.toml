@@ -26,5 +26,9 @@ default = []
 live-llm = ["careerai-llm/live-llm"]
 browser = ["careerai-submit/browser"]
 
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true }
+
 [lints]
 workspace = true

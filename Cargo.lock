@@ -400,6 +400,8 @@ dependencies = [
  "careerai-submit",
  "careerai-tailor",
  "serde_json",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 
