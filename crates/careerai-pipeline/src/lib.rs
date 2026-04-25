@@ -694,6 +694,44 @@ pub async fn list_drafted_linkedin(
         .context("list drafted linkedin applications")
 }
 
+/// Confirm-submit a drafted LinkedIn application via the browser, called
+/// from `careerai review` after the operator approves. Overrides
+/// `interactive_only` to `false` for this single invocation so the daemon-
+/// path short-circuit in `apply_one` doesn't fire.
+///
+/// The operator config on disk is **not** modified; only an ephemeral clone
+/// is used.  Errors if the application is not currently in `Drafted` state
+/// to guard against a race between `careerai review` and the daemon.
+pub async fn confirm_linkedin_submit(
+    root: &Path,
+    cfg: &CoreConfig,
+    application_id: &str,
+) -> Result<AppliedOutcome> {
+    // Clone config and lift the assist-mode gate just for this call.
+    let mut effective_cfg = cfg.clone();
+    effective_cfg.submit.linkedin.interactive_only = false;
+
+    // Verify the application is actually in Drafted state — guards against a
+    // race where `careerai review` and the daemon both try to act on the same
+    // row concurrently.
+    let pool = open_pool(root).await?;
+    let app = queries::find_application_by_id(&pool, application_id).await?;
+    drop(pool);
+
+    if app.state != "drafted" {
+        return Err(anyhow::anyhow!(
+            "application {} is in state '{}', expected 'drafted'",
+            application_id,
+            app.state,
+        ));
+    }
+
+    // Delegate to apply_one. Because effective_cfg has interactive_only=false,
+    // the daemon-path short-circuit is bypassed and the normal LinkedIn
+    // submitter runs.
+    apply_one(root, &effective_cfg, application_id, None).await
+}
+
 /// Gather everything needed to render `careerai inspect <id>`.
 pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectReport> {
     let pool = open_pool(root).await?;

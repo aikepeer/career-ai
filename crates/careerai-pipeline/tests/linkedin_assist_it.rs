@@ -181,3 +181,25 @@ async fn list_drafted_linkedin_round_trips_via_pipeline() {
     assert_eq!(drafts[0].id, application_id);
     assert_eq!(drafts[0].state, "drafted");
 }
+
+#[tokio::test]
+async fn confirm_linkedin_submit_rejects_non_drafted_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    scaffold_project(tmp.path());
+
+    // seed_rendered_linkedin_application leaves the application in `rendered`.
+    let (_listing_id, application_id) = seed_rendered_linkedin_application(tmp.path()).await;
+
+    let cfg = CoreConfig::load(tmp.path()).unwrap();
+
+    // confirm_linkedin_submit must reject applications that are not in Drafted.
+    let err = pipeline::confirm_linkedin_submit(tmp.path(), &cfg, &application_id)
+        .await
+        .expect_err("should fail because application is in rendered, not drafted");
+
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("expected 'drafted'"),
+        "error message should mention expected state; got: {msg}",
+    );
+}
