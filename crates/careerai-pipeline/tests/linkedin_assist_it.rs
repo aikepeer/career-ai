@@ -126,3 +126,58 @@ async fn linkedin_apply_with_interactive_only_transitions_to_drafted() {
         panic!("interactive_only=true must never report Submitted from the daemon path");
     }
 }
+
+#[tokio::test]
+async fn list_drafted_linkedin_round_trips_via_pipeline() {
+    let tmp = tempfile::tempdir().unwrap();
+    scaffold_project(tmp.path());
+
+    // Seed a drafted linkedin application via the DB helpers.
+    let (_listing_id, application_id) = seed_rendered_linkedin_application(tmp.path()).await;
+
+    // Set it to drafted (simulating what apply_one does with interactive_only).
+    let db_path = tmp.path().join("data").join("careerai.sqlite");
+    let pool = pool_from_path(&db_path).await.unwrap();
+    queries::set_application_state(&pool, &application_id, "drafted")
+        .await
+        .unwrap();
+
+    // Seed a second listing from greenhouse in drafted state — should not appear.
+    let (gh_id, _) = queries::insert_or_ignore(
+        &pool,
+        &NewListing {
+            source: "greenhouse".into(),
+            external_id: "gh-pipeline-wrapper-1".into(),
+            title: "Staff Engineer".into(),
+            company: "Gamma Corp".into(),
+            location: Some("Remote".into()),
+            url: "https://greenhouse.io/jobs/1".into(),
+            description: "Build distributed systems.".into(),
+            raw_json: None,
+        },
+    )
+    .await
+    .unwrap();
+    let gh_app = queries::create_application(
+        &pool,
+        &NewApplication {
+            listing_id: gh_id,
+            profile_hash: "sha256:gh-wrapper".into(),
+            prompt_version: "tailor.v1".into(),
+            llm_model: "mock".into(),
+        },
+    )
+    .await
+    .unwrap();
+    queries::set_application_state(&pool, &gh_app.id, "drafted")
+        .await
+        .unwrap();
+    drop(pool);
+
+    let drafts = pipeline::list_drafted_linkedin(tmp.path(), 100)
+        .await
+        .unwrap();
+    assert_eq!(drafts.len(), 1, "only the linkedin draft must appear");
+    assert_eq!(drafts[0].id, application_id);
+    assert_eq!(drafts[0].state, "drafted");
+}
