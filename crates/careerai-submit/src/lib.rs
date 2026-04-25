@@ -8,6 +8,8 @@
 
 pub mod ats_http;
 pub mod base;
+#[cfg(feature = "browser")]
+pub mod browser_session;
 pub mod credentials;
 pub mod dry_run;
 pub mod error;
@@ -15,6 +17,8 @@ pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
 pub use base::{SubmitContext, SubmitDecision, SubmitOutcome, Submitter, WouldSubmit};
+#[cfg(feature = "browser")]
+pub use browser_session::{stealth_script_sha256, BrowserSession, BrowserSessionConfig};
 pub use credentials::Credential;
 pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
