@@ -313,6 +313,7 @@ dependencies = [
  "careerai-tailor",
  "clap",
  "docx-rs",
+ "keyring",
  "sqlx",
  "tempfile",
  "tokio",
