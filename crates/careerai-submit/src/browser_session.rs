@@ -225,8 +225,16 @@ impl BrowserSession {
     /// Close the browser. `Browser::close` needs `&mut self`, but
     /// BrowserSession owns the handle by value — take it by value on
     /// close so the handler task gets dropped too.
+    ///
+    /// Propagates Chromium's close error to the caller so an orphaned
+    /// process or hung CDP teardown is observable instead of silently
+    /// swallowed. Callers may choose to log-and-continue (the LinkedIn
+    /// submitter does this in its scope guard).
     pub async fn close(mut self) -> Result<()> {
-        let _ = self.browser.close().await;
+        self.browser
+            .close()
+            .await
+            .map_err(|e| SubmitError::Io(std::io::Error::other(format!("browser close: {e}"))))?;
         Ok(())
     }
 }

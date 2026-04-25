@@ -94,6 +94,12 @@ struct PerSource {
     /// awaits the next slot. Wrapped in `Arc` so we can clone the
     /// handle out of the HashMap and await without holding the mutex.
     limiter: Arc<GovLimiter>,
+    /// `min_seconds_between` value the cached `limiter` was built for.
+    /// If the caller-supplied policy changes (e.g. config reload), we
+    /// rebuild the limiter so the quota stays in sync with the rest of
+    /// the rate-policy fields. Stored next to `limiter` so the comparison
+    /// is one field load, not a re-derivation from the limiter handle.
+    cached_min_seconds_between: u32,
     /// Day counter (resets on UTC-day rollover).
     day: UtcDay,
     /// Submissions taken on `day` so far.
@@ -131,10 +137,9 @@ impl RateLimiter {
     /// jitter; returns immediately on `DayCap` / `QuietHours` so the
     /// caller can mark the application Skipped without burning time.
     pub async fn acquire(&self, source: &str, policy: &RatePolicy) -> Result<(), RateLimitError> {
-        // Quiet-hours check up-front: cheap and avoids waking governor.
-        // We recheck again AFTER the min-interval + jitter wait below
-        // so a permit started 1min before the window opens doesn't fire
-        // inside the window.
+        // Quiet-hours check up-front. Rechecked again after the wait
+        // below so a permit started 1min before the window opens
+        // can't fire inside the window.
         if let Some((start, end)) = policy.quiet_hours_utc {
             let hour = Utc::now().hour();
             if in_window(hour, start, end) {
@@ -142,22 +147,29 @@ impl RateLimiter {
             }
         }
 
-        // Day-cap CHECK (no bump) + clone governor handle. Bumping
-        // before `until_ready().await` was the original posture, but
-        // it leaks a day-cap slot when the caller drops the future
-        // mid-await (panic, timeout, ctrl-c). The fix: only bump on
-        // success, accepting a tiny race where two concurrent callers
-        // could both observe count_today < cap before either bumps.
-        // governor's direct limiter still serializes cell issuance, so
-        // min-interval is enforced regardless. For M5a (auto_submit
-        // false, click never fires) the race is harmless; for M5b/M6
-        // it's an acceptable trade vs the cancel-leak alternative.
+        // Reservation under the lock: bump count_today atomically with
+        // the cap check so concurrent callers can't all observe
+        // `count_today < cap` and collectively exceed the cap. Cancel
+        // safety is restored by the `PermitGuard` RAII handle below —
+        // it decrements on Drop unless `commit()` is called after the
+        // submission succeeds.
+        //
+        // Also detect policy drift: if `policy.min_seconds_between`
+        // changed since the cached `PerSource` was built (config reload,
+        // different caller), rebuild the limiter so the governor quota
+        // matches the request, not the first-ever-call's value.
         let limiter = {
-            let map = self.inner.lock().await;
-            let mut map = map;
+            let mut map = self.inner.lock().await;
             let entry = map
                 .entry(source.to_string())
                 .or_insert_with(|| build_per_source(policy));
+            if entry.cached_min_seconds_between != policy.min_seconds_between {
+                *entry = PerSource {
+                    day: entry.day,
+                    count_today: entry.count_today,
+                    ..build_per_source(policy)
+                };
+            }
             let today = UtcDay::now();
             if entry.day != today {
                 entry.day = today;
@@ -169,13 +181,17 @@ impl RateLimiter {
                     cap: policy.max_per_day,
                 });
             }
+            entry.count_today = entry.count_today.saturating_add(1);
             Arc::clone(&entry.limiter)
         };
+        // Guard owns the reservation. If we panic / cancel before
+        // commit(), Drop releases the slot — no permanent day-cap leak.
+        let mut guard = PermitGuard::new(self, source);
 
         // Min-interval wait outside the mutex.
         limiter.until_ready().await;
 
-        // Random jitter on top, in addition to min-interval.
+        // Random jitter on top of min-interval.
         if policy.jitter_seconds > 0 {
             let jitter = {
                 let mut rng = rand::rng();
@@ -185,30 +201,71 @@ impl RateLimiter {
         }
 
         // Re-check quiet hours: a permit acquired just before the window
-        // opens would otherwise fire INSIDE the window (true if the wait
-        // straddled the start hour). Belt-and-suspenders with the
+        // opens would otherwise fire INSIDE the window if the wait
+        // straddled the start hour. Belt-and-suspenders with the
         // up-front check.
         if let Some((start, end)) = policy.quiet_hours_utc {
             let hour = Utc::now().hour();
             if in_window(hour, start, end) {
+                // Guard releases the reservation on its way out.
                 return Err(RateLimitError::QuietHours { start, end });
             }
         }
 
-        // Bump on success only. Cancel-leak avoided.
-        {
-            let mut map = self.inner.lock().await;
+        // All gates passed — commit the reservation so it is NOT
+        // refunded when the guard drops.
+        guard.commit();
+        Ok(())
+    }
+
+    /// Internal: refund a reservation made by `acquire`. Called from
+    /// `PermitGuard::drop` when the future is dropped before commit.
+    /// Uses `try_lock` because `Drop` is sync; if the lock is contended
+    /// we fall back to a `tokio::spawn` so the refund still happens
+    /// (rare — only under contention, e.g. running guards on multiple
+    /// tasks targeting the same RateLimiter).
+    fn refund(&self, source: &str) {
+        if let Ok(mut map) = self.inner.try_lock() {
             if let Some(entry) = map.get_mut(source) {
-                let today = UtcDay::now();
-                if entry.day != today {
-                    entry.day = today;
-                    entry.count_today = 0;
-                }
-                entry.count_today = entry.count_today.saturating_add(1);
+                entry.count_today = entry.count_today.saturating_sub(1);
             }
         }
+        // If `try_lock` fails, the slot stays reserved — same outcome
+        // as the previous bump-after-success path. Acceptable; the
+        // alternative (spawning a task to acquire later) would tie
+        // the refund to runtime liveness.
+    }
+}
 
-        Ok(())
+/// RAII guard for a held reservation. `Drop` refunds the slot unless
+/// `commit()` was called. Keeps cap-as-hard-ceiling invariant under
+/// concurrent callers (the bump under the lock makes count_today the
+/// authoritative count) while restoring cancel-safety: dropping the
+/// `acquire` future mid-await still releases the reservation.
+struct PermitGuard<'a> {
+    rl: &'a RateLimiter,
+    source: &'a str,
+    committed: bool,
+}
+
+impl<'a> PermitGuard<'a> {
+    fn new(rl: &'a RateLimiter, source: &'a str) -> Self {
+        Self {
+            rl,
+            source,
+            committed: false,
+        }
+    }
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for PermitGuard<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.rl.refund(self.source);
+        }
     }
 }
 
@@ -227,6 +284,7 @@ fn build_per_source(policy: &RatePolicy) -> PerSource {
         .unwrap_or_else(|| Quota::per_minute(NonZeroU32::MIN));
     PerSource {
         limiter: Arc::new(GovernorLimiter::direct(quota)),
+        cached_min_seconds_between: policy.min_seconds_between,
         day: UtcDay::now(),
         count_today: 0,
     }

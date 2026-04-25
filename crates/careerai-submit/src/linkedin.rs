@@ -62,6 +62,12 @@ pub struct LinkedinConfig {
     pub rate_policy: RatePolicy,
     /// Selector / action timeout in seconds. Default 20s.
     pub action_timeout_seconds: u64,
+    /// Inner kill-switch for the final "Submit application" click.
+    /// Default `false` — even with `auto_submit=true` and per-source
+    /// enabled, the click stays suppressed and the submitter returns
+    /// `SourceDisabled` after taking the audit screenshot. M5b will
+    /// flip this to true in a deliberate, auditable change.
+    pub allow_submit_click: bool,
 }
 
 impl Default for LinkedinConfig {
@@ -80,6 +86,7 @@ impl Default for LinkedinConfig {
                 quiet_hours_utc: Some((19, 1)),
             },
             action_timeout_seconds: 20,
+            allow_submit_click: false,
         }
     }
 }
@@ -103,6 +110,7 @@ impl LinkedinConfig {
                 quiet_hours_utc: lk.quiet_hours_utc,
             },
             action_timeout_seconds: lk.action_timeout_seconds,
+            allow_submit_click: lk.allow_submit_click,
         }
     }
 }
@@ -321,12 +329,29 @@ impl LinkedinSubmitter {
             );
         }
 
-        Err(SubmitError::SourceDisabled(format!(
-            "linkedin submit reached pre-submit state (screenshot: {}); \
-             clicking the final Submit button is gated to M5b — see CLAUDE.md \
-             ToS notes",
-            final_path.display()
-        )))
+        // Inner kill-switch: even with auto_submit=true and per-source
+        // enabled and a valid li_at cookie, the click is suppressed
+        // unless `allow_submit_click` is explicitly true. M5a never
+        // flips it; M5b will. The audit screenshot above is produced
+        // either way so operators can verify the state machine reached
+        // the right place before the click would have fired.
+        if !self.cfg.allow_submit_click {
+            return Err(SubmitError::SourceDisabled(format!(
+                "linkedin submit reached pre-submit state (screenshot: {}); \
+                 final Submit click gated by submit.linkedin.allow_submit_click=false — \
+                 see CLAUDE.md ToS notes (M5b lifts after audit)",
+                final_path.display()
+            )));
+        }
+
+        // M5b will replace this `unimplemented!` with the actual
+        // element.click() on the Submit button. Reaching this branch
+        // in M5a means a developer flipped allow_submit_click=true
+        // without landing the M5b code; loud panic is intentional.
+        unimplemented!(
+            "M5a does not implement the final Submit click; \
+             allow_submit_click=true is reserved for M5b"
+        );
     }
 }
 

@@ -43,8 +43,13 @@ use tracing::{info, warn};
 /// not in a per-call instance, so two concurrent submits coordinate.
 /// Built lazily on first access; no state is persisted across process
 /// restarts (counters reset, which is the desired behavior at this
-/// scale). Only consulted by browser-feature submitters; gated to keep
-/// the default build off the rate-limiter dependency graph.
+/// scale).
+///
+/// The function itself is `#[cfg(feature = "browser")]` because today
+/// only `LinkedinSubmitter` consumes it. The `rate_limiter` module is
+/// always-on (its deps are non-optional in `careerai-submit`); when
+/// the next browser submitter lands (Indeed in M5b), the gate stays
+/// in the same place.
 #[cfg(feature = "browser")]
 fn shared_rate_limiter() -> std::sync::Arc<rate_limiter::RateLimiter> {
     static RL: std::sync::OnceLock<std::sync::Arc<rate_limiter::RateLimiter>> =
@@ -162,30 +167,21 @@ pub async fn submit_application(
     }
 
     // 5. Choose live vs dry-run.
+    //
+    // Note: an earlier defense-in-depth gate at this point short-
+    // circuited LinkedIn live submits to Skipped before the submitter
+    // ran. That meant the audit screenshot was never produced — the
+    // operator lost the artifact M5a promises. The gate now lives
+    // INSIDE `LinkedinSubmitter::run_session` (`allow_submit_click`
+    // field), which lets the full state-machine + screenshot run and
+    // bails right before the actual click. Two locks remain (the
+    // inner allow_submit_click flag and the final unimplemented!()
+    // that ships only when M5b lands the click).
     let decision = if cfg.auto_submit {
         SubmitDecision::Live
     } else {
         SubmitDecision::DryRun
     };
-
-    // 5a. Defense-in-depth for the LinkedIn browser submitter. Even
-    // with auto_submit + per_source enabled + a valid li_at cookie,
-    // the live click stays suppressed unless cfg.linkedin.allow_submit_click
-    // is explicitly true. The inner submitter ALSO returns SourceDisabled
-    // before clicking — this is the second lock so a single line edit
-    // in linkedin.rs can't ship a ToS violation.
-    if matches!(decision, SubmitDecision::Live)
-        && source_lc == "linkedin"
-        && !cfg.linkedin.allow_submit_click
-    {
-        return mark_skipped(
-            pool,
-            &application,
-            &listing,
-            "linkedin live submit gated: set submit.linkedin.allow_submit_click=true to enable (M5a default-off; M5b lifts after audit)",
-        )
-        .await;
-    }
 
     match decision {
         SubmitDecision::Live => run_live(pool, submitter.as_ref(), &ctx).await,
