@@ -14,8 +14,7 @@ const NAUKRI_FIXTURE_HTML: &str = include_str!("fixtures/naukri_jd.html");
 #[test]
 fn apply_button_selector_pattern_is_well_formed() {
     // Sanity: the union selector compiles to valid CSS that scraper accepts.
-    Selector::parse(APPLY_BUTTON_SELECTOR)
-        .expect("APPLY_BUTTON_SELECTOR must be valid CSS");
+    Selector::parse(APPLY_BUTTON_SELECTOR).expect("APPLY_BUTTON_SELECTOR must be valid CSS");
     assert!(APPLY_BUTTON_SELECTOR.contains("apply-button"));
     assert!(APPLY_BUTTON_SELECTOR.contains("aria-label"));
 }
@@ -50,8 +49,7 @@ fn login_required_indicator_includes_login() {
     // Structural check: the selector references known Naukri login DOM anchors.
     assert!(LOGIN_REQUIRED_INDICATOR.contains("login"));
     // Validate it parses as CSS.
-    Selector::parse(LOGIN_REQUIRED_INDICATOR)
-        .expect("LOGIN_REQUIRED_INDICATOR must be valid CSS");
+    Selector::parse(LOGIN_REQUIRED_INDICATOR).expect("LOGIN_REQUIRED_INDICATOR must be valid CSS");
 }
 
 #[test]

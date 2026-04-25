@@ -57,12 +57,8 @@ fn provider_info(provider: &str) -> Option<ProviderInfo> {
 /// DevTools, then writes it to the OS keyring. The running daemon and
 /// future `careerai apply` invocations pick it up immediately.
 pub fn refresh(provider: &str) -> Result<()> {
-    let info = provider_info(provider).ok_or_else(|| {
-        anyhow!(
-            "unknown provider '{}' (supported: linkedin, naukri)",
-            provider
-        )
-    })?;
+    let info = provider_info(provider)
+        .ok_or_else(|| anyhow!("unknown provider '{provider}' (supported: linkedin, naukri)"))?;
 
     println!("Refreshing {provider} cookie ({}).", info.cookie_name);
     println!("  Where to find it: {}", info.where_to_find);
@@ -82,8 +78,6 @@ pub fn refresh(provider: &str) -> Result<()> {
         .set_password(value)
         .map_err(|e| anyhow!("keyring write failed: {e}"))?;
 
-    println!(
-        "Stored. Daemon will pick this up on next {provider} apply tick."
-    );
+    println!("Stored. Daemon will pick this up on next {provider} apply tick.");
     Ok(())
 }

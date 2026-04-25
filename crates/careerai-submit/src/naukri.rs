@@ -10,11 +10,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::base::{SubmitContext, Submitter, WouldSubmit};
-use crate::error::Result;
 use crate::browser_session::{BrowserSession, BrowserSessionConfig};
 use crate::credentials::{self, Credential};
+use crate::error::Result;
 use crate::error::SubmitError;
-use crate::naukri_selectors::*;
+use crate::naukri_selectors::{
+    APPLIED_SUCCESS_SELECTOR, APPLY_BUTTON_SELECTOR, CONFIRM_APPLY_SELECTOR,
+    LOGIN_REQUIRED_INDICATOR,
+};
 use crate::rate_limiter::{RateLimiter, RatePermit, RatePolicy};
 
 /// Naukri keyring key name.
@@ -97,6 +100,7 @@ impl NaukriSubmitter {
 
     /// Build a `WouldSubmit` envelope. Pure (no I/O) so the dry-run path can
     /// call this without spawning a browser.
+    #[allow(clippy::unused_self)]
     fn would_submit_for(&self, ctx: &SubmitContext<'_>) -> WouldSubmit {
         WouldSubmit {
             source: "naukri",
@@ -139,6 +143,9 @@ impl NaukriSubmitter {
     ///   8. Screenshot pre-submit state → `<screenshots_dir>/<id>-pre-submit.png`
     ///   9. Wait for APPLIED_SUCCESS_SELECTOR.
     ///  10. Return `ctx.listing.external_id` as the remote submission ID.
+    // Async signature is required for the follow-up implementer who will
+    // replace the stub body with real `await` calls on chromiumoxide.
+    #[allow(clippy::unused_async)]
     async fn run_session(
         &self,
         session: &BrowserSession,
@@ -164,7 +171,6 @@ impl NaukriSubmitter {
         ))
     }
 }
-
 
 #[async_trait]
 impl Submitter for NaukriSubmitter {
@@ -208,14 +214,14 @@ impl Submitter for NaukriSubmitter {
             session_cfg.user_agent.clone_from(ua);
         }
 
-        let session = BrowserSession::launch(&session_cfg).await.map_err(|e| {
-            match e {
+        let session = BrowserSession::launch(&session_cfg)
+            .await
+            .map_err(|e| match e {
                 SubmitError::Io(io) => SubmitError::SourceDisabled(format!(
                     "naukri browser launch failed (is Chromium installed?): {io}"
                 )),
                 other => other,
-            }
-        })?;
+            })?;
 
         // Every exit path must close the session so we don't leak Chromium
         // processes across batch submits.
