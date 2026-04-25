@@ -193,6 +193,11 @@ pub struct SubmitConfig {
     /// so pre-M5a `local.yaml` files keep parsing.
     #[serde(default)]
     pub linkedin: LinkedinSubmitConfig,
+    /// Naukri.com browser submitter knobs (M5b Tasks 2.5+2.6). Mirrors the
+    /// LinkedIn block — all fields have `#[serde(default)]` so a missing
+    /// block parses to `NaukriSubmitConfig::default()`.
+    #[serde(default)]
+    pub naukri: NaukriSubmitConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -317,6 +322,55 @@ impl LinkedinSubmitConfig {
             }
         }
         self
+    }
+}
+
+/// Naukri.com browser-driven submitter configuration. Loaded from
+/// `submit.naukri.*` in `config/{default,local}.yaml`. Mirrors
+/// `LinkedinSubmitConfig` but without the `interactive_only` /
+/// `allow_submit_click` LinkedIn-specific gates — Naukri's risk profile
+/// is low enough that full daemon-driven auto-submit is acceptable when
+/// the operator opts in via `submit.per_source.naukri.enabled=true` and
+/// `submit.auto_submit=true`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NaukriSubmitConfig {
+    /// Where the submitter writes pre-submit screenshots. Relative paths
+    /// resolve against the process cwd (typically the repo root).
+    pub screenshots_dir: std::path::PathBuf,
+    /// Optional Chromium user-agent override. `None` → use
+    /// `BrowserSessionConfig` default.
+    pub user_agent: Option<String>,
+    /// Headless Chromium. Default `true`.
+    pub headless: bool,
+    /// Rate-limit policy — max submissions per UTC day.
+    pub max_per_day: u32,
+    /// Minimum seconds between two submissions.
+    pub min_seconds_between: u32,
+    /// Uniform random jitter (seconds) added after the min-interval
+    /// wait to avoid burst fingerprinting.
+    pub jitter_seconds: u32,
+    /// `[start_hour_utc, end_hour_utc)` window when the limiter refuses
+    /// permits. Same semantics as `LinkedinSubmitConfig::quiet_hours_utc`.
+    /// Set to `null` to disable the gate.
+    pub quiet_hours_utc: Option<(u32, u32)>,
+    /// Per-action selector / click timeout in seconds.
+    pub action_timeout_seconds: u64,
+}
+
+impl Default for NaukriSubmitConfig {
+    fn default() -> Self {
+        Self {
+            screenshots_dir: std::path::PathBuf::from("artifacts/naukri-audit"),
+            user_agent: None,
+            headless: true,
+            max_per_day: 10,
+            min_seconds_between: 60,
+            jitter_seconds: 15,
+            // 19:00 UTC = 00:30 IST; align with LinkedIn pattern.
+            quiet_hours_utc: Some((19, 1)),
+            action_timeout_seconds: 30,
+        }
     }
 }
 
@@ -468,5 +522,28 @@ mod tests {
         let yaml = "interactive_only: false";
         let cfg: LinkedinSubmitConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(!cfg.interactive_only);
+    }
+
+    #[test]
+    fn naukri_submit_config_defaults_are_safe() {
+        let cfg = NaukriSubmitConfig::default();
+        assert!(cfg.headless);
+        assert!(cfg.max_per_day <= 50, "default cap should be conservative");
+        assert!(cfg.min_seconds_between >= 30);
+    }
+
+    #[test]
+    fn naukri_submit_config_round_trips() {
+        let yaml = r"
+headless: false
+max_per_day: 5
+min_seconds_between: 90
+jitter_seconds: 10
+action_timeout_seconds: 45
+";
+        let cfg: NaukriSubmitConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.headless);
+        assert_eq!(cfg.max_per_day, 5);
+        assert_eq!(cfg.min_seconds_between, 90);
     }
 }
