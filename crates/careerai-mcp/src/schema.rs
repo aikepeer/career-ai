@@ -57,6 +57,32 @@ pub struct ShortlistResult {
     pub entries: Vec<ShortlistEntry>,
 }
 
+/// Compact projection of a `careerai_db::Listing` for the
+/// `careerai://shortlist/{date}` MCP resource. The DB row carries a
+/// free-form `description` (HTML/text JD body) and `raw_json` (full ATS
+/// payload) that bloat the resource for LLM consumption — a single
+/// shortlist response can blow past the model's context window. This
+/// struct keeps only the fields a tailoring/triage LLM actually needs:
+/// id, headline (`title`/`company`/`location`), provenance (`source`,
+/// `url`), and the match `score`.
+///
+/// Mirrors the shape of `ShortlistEntry` (which the `careerai_shortlist`
+/// tool returns) plus `location`. They are kept as separate types
+/// because tool results and resource bodies have separate JSON Schemas
+/// in MCP and may evolve independently.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CompactListing {
+    pub listing_id: String,
+    pub title: String,
+    pub company: String,
+    pub url: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+}
+
 // ---------- careerai_tailor ----------
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -302,5 +328,44 @@ mod tests {
             "would_submit should be skipped: {s}"
         );
         assert!(s.contains("note"));
+    }
+
+    /// `CompactListing` is the projection used by the
+    /// `careerai://shortlist/{date}` resource. The whole reason the
+    /// type exists is to keep the bulky `description` (free-form HTML/text
+    /// JD) and `raw_json` (full ATS payload) fields off the wire — those
+    /// can be tens of kilobytes per row and blow the LLM context. This
+    /// test pins that contract: serializing a `CompactListing` must not
+    /// produce keys `description` or `raw_json`, and `None` optional
+    /// fields are skipped.
+    #[test]
+    fn compact_listing_excludes_bulky_fields() {
+        let c = CompactListing {
+            listing_id: "L-1".into(),
+            title: "Staff ML Engineer".into(),
+            company: "ACME".into(),
+            url: "https://example.test/j/1".into(),
+            source: "greenhouse".into(),
+            score: Some(0.87),
+            location: None,
+        };
+        let s = serde_json::to_string(&c).unwrap();
+        assert!(
+            !s.contains("description"),
+            "description must not appear in compact resource body: {s}"
+        );
+        assert!(
+            !s.contains("raw_json"),
+            "raw_json must not appear in compact resource body: {s}"
+        );
+        // None optional fields are skipped.
+        assert!(
+            !s.contains("location"),
+            "None location must be skipped: {s}"
+        );
+        // Required fields are present.
+        for key in ["listing_id", "title", "company", "url", "source", "score"] {
+            assert!(s.contains(key), "expected key {key} in {s}");
+        }
     }
 }

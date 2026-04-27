@@ -28,10 +28,10 @@ use careerai_pipeline as pipeline;
 use crate::digest::{format_digest_markdown, parse_since};
 use crate::error::McpServerError;
 use crate::schema::{
-    ApplyArgs, ApplyResult, DigestArgs, DigestResult, DiscoverArgs, DiscoverResult, InspectArgs,
-    InspectArtifact, InspectEvent, InspectResult, ProfileStatusArgs, ProfileStatusResult,
-    RenderArgs, RenderResult, ShortlistArgs, ShortlistEntry, ShortlistResult, TailorArgs,
-    TailorResult,
+    ApplyArgs, ApplyResult, CompactListing, DigestArgs, DigestResult, DiscoverArgs, DiscoverResult,
+    InspectArgs, InspectArtifact, InspectEvent, InspectResult, ProfileStatusArgs,
+    ProfileStatusResult, RenderArgs, RenderResult, ShortlistArgs, ShortlistEntry, ShortlistResult,
+    TailorArgs, TailorResult,
 };
 
 /// Career-ai MCP server. Holds the project root and a re-usable rmcp
@@ -454,11 +454,15 @@ impl CareerAiServer {
     /// via `resources/templates/list` — see `list_resource_templates_static`.
     #[allow(clippy::unused_self)]
     fn list_resources_static(&self) -> Vec<Resource> {
-        vec![
-            RawResource::new("careerai://profile", "profile.yaml").no_annotation(),
-            RawResource::new("careerai://shortlist/today", "today's shortlist (JSON)")
-                .no_annotation(),
-        ]
+        // Only the truly concrete `careerai://profile` URI lives here.
+        // Date-parameterized shortlist URIs and per-application artifacts
+        // URIs are advertised via `resources/templates/list` instead;
+        // listing both shapes confused MCP clients about which is
+        // canonical (Copilot review on PR #18). The friendly alias
+        // `careerai://shortlist/today` is still accepted by
+        // `read_resource` for backwards compat — it just isn't
+        // duplicated in the discovery surface.
+        vec![RawResource::new("careerai://profile", "profile.yaml").no_annotation()]
     }
 
     /// Resource templates (URI patterns) advertised via
@@ -528,7 +532,32 @@ impl CareerAiServer {
         let rows = pipeline::shortlist_show(self.root(), 500)
             .await
             .map_err(McpServerError::from)?;
-        let body = serde_json::to_string_pretty(&rows)
+
+        // Project to the compact shape: drop `description` (free-form
+        // HTML/text JD) and `raw_json` (full ATS payload) which are
+        // bulky and not useful for LLM triage. Same fields the
+        // `careerai_shortlist` tool returns, plus `location`.
+        let compact: Vec<CompactListing> = rows
+            .into_iter()
+            .map(|l| {
+                // f64 -> f32 lossy conversion is fine here: scores are
+                // [0.0, 1.0] cosine similarities; f32's ~7-digit
+                // precision is more than sufficient for display.
+                #[allow(clippy::cast_possible_truncation)]
+                let score = l.score.map(|s| s as f32);
+                CompactListing {
+                    listing_id: l.id,
+                    title: l.title,
+                    company: l.company,
+                    url: l.url,
+                    source: l.source,
+                    score,
+                    location: l.location,
+                }
+            })
+            .collect();
+
+        let body = serde_json::to_string_pretty(&compact)
             .map_err(|e| McpServerError::Pipeline(format!("serialize shortlist: {e}")))?;
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
             body,

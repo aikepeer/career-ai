@@ -21,14 +21,15 @@ Resources:
 
 - `careerai://profile` &mdash; full contents of `profile/profile.yaml`.
   Discoverable via `resources/list`.
-- `careerai://shortlist/today` &mdash; today's shortlist as JSON.
-  Discoverable via `resources/list`.
 - `careerai://shortlist/{date}` &mdash; shortlist for a specific date.
   Advertised via `resources/templates/list`. The `{date}` segment must
   be either the literal `today` or a `YYYY-MM-DD` date; malformed
   segments return an `invalid_params` error. The pipeline does not yet
   filter by date, so a valid past date is logged + ignored and the
   current shortlist is returned (warning emitted on stderr).
+  `careerai://shortlist/today` is accepted by `read_resource` as a
+  friendly alias but is NOT separately advertised in `resources/list`
+  (it's redundant with the template).
 - `careerai://artifacts/{application_id}` &mdash; the artifact list
   (paths + sizes) for one application, plus its current state.
   Advertised via `resources/templates/list`.
