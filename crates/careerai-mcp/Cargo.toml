@@ -1,0 +1,47 @@
+[package]
+name = "careerai-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MCP (Model Context Protocol) server exposing the career-ai pipeline as tool calls"
+
+[[bin]]
+name = "careerai-mcp"
+path = "src/main.rs"
+
+[dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-db = { path = "../careerai-db" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-pipeline = { path = "../careerai-pipeline" }
+careerai-submit = { path = "../careerai-submit" }
+
+anyhow.workspace = true
+chrono.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+# Tests drive the server in-process via rmcp's client API; that requires
+# the `client` feature which the bin doesn't need at runtime.
+rmcp = { workspace = true, features = ["client"] }
+
+[features]
+default = []
+# Mirror careerai-cli feature gates so the MCP binary can be built with the
+# same backends.
+live-llm = ["careerai-pipeline/live-llm"]
+browser = ["careerai-pipeline/browser"]
+
+[lints]
+workspace = true

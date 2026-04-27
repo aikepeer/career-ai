@@ -13,6 +13,7 @@ members = [
     "crates/careerai-submit",
     "crates/careerai-scheduler",
     "crates/careerai-pipeline",
+    "crates/careerai-mcp",
 ]
 
 [workspace.package]
@@ -56,6 +57,8 @@ tokio-cron-scheduler = "0.13"
 futures = "0.3"
 scraper = "0.26"
 base64 = "0.22"
+rmcp = { version = "1.5", default-features = false, features = ["server", "macros", "transport-io", "schemars"] }
+schemars = "1"
 
 [profile.release]
 opt-level = 3
