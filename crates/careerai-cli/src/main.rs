@@ -119,6 +119,20 @@ enum Command {
         #[arg(long, default_value = "24h")]
         since: String,
     },
+    /// Tools for MCP-server discovery sources.
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    /// Probe configured `kind: mcp` sources for reachability. Reports
+    /// per-source: tool count, whether a known job-search tool name
+    /// is advertised, and any spawn / handshake error. Read-only;
+    /// never sends a real query and never writes anything sensitive.
+    Probe,
 }
 
 #[derive(Debug, Subcommand)]
@@ -176,6 +190,7 @@ fn init_tracing(log_flag: Option<&str>) {
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log.as_deref());
@@ -258,6 +273,12 @@ async fn main() -> Result<()> {
             let cfg = load_cfg(&cwd)?;
             digest::run_digest(&cwd, &cfg, &since).await?;
         }
+        Command::Mcp { command } => match command {
+            McpCommand::Probe => {
+                let cfg = load_cfg(&cwd)?;
+                run_mcp_probe(&cfg).await?;
+            }
+        },
         Command::Inspect { application_id } => {
             run_inspect(&cwd, &application_id).await?;
         }
@@ -271,6 +292,54 @@ async fn main() -> Result<()> {
                 .await
                 .context("scheduler shutdown")?;
         }
+    }
+    Ok(())
+}
+
+async fn run_mcp_probe(cfg: &CoreConfig) -> Result<()> {
+    if cfg.sources.mcp.is_empty() {
+        println!("no `sources.mcp` entries configured");
+        return Ok(());
+    }
+    let mut any_unreachable = false;
+    for src_cfg in &cfg.sources.mcp {
+        if !src_cfg.enabled {
+            println!(
+                "{name}: (disabled) command={cmd} args={args:?}",
+                name = src_cfg.name,
+                cmd = src_cfg.mcp.command,
+                args = src_cfg.mcp.args,
+            );
+            continue;
+        }
+        match careerai_sources::probe_mcp_source(src_cfg).await {
+            Ok(report) => {
+                let matched = report.matched_tool.as_deref().map_or_else(
+                    || "no job-search tool".to_string(),
+                    |t| format!("{t} available"),
+                );
+                println!(
+                    "{name}: reachable ({count} tools, {matched})",
+                    name = report.source_name,
+                    count = report.tool_count,
+                );
+                if report.tool_count <= 12 {
+                    println!("  tools: {:?}", report.tools);
+                }
+            }
+            Err(e) => {
+                any_unreachable = true;
+                println!("{name}: unreachable -- {err}", name = src_cfg.name, err = e,);
+                println!(
+                    "  hint: install/run `{cmd} {args}` and retry",
+                    cmd = src_cfg.mcp.command,
+                    args = src_cfg.mcp.args.join(" "),
+                );
+            }
+        }
+    }
+    if any_unreachable {
+        std::process::exit(2);
     }
     Ok(())
 }
