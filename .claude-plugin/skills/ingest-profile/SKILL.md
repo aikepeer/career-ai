@@ -36,12 +36,16 @@ Activate when the user:
 
 3. **Run import.**
    ```
-   careerai profile import --use-llm <resume_path> [<linkedin_zip>]
+   careerai profile import <resume_path> [<linkedin_zip>]
    careerai profile validate
    ```
-   - `--use-llm` auto-detects: enabled when a key is reachable, otherwise
-     falls back to the regex heuristic. Force the heuristic with
-     `--use-llm=false` if the user prefers it.
+   - If the user built `careerai` with `cargo install --features
+     live-llm`, pass `--use-llm` to route PDF/DOCX text through the LLM
+     extractor; in that build the flag auto-detects (enabled when an
+     Anthropic key is reachable, regex heuristic otherwise) and
+     `--use-llm=false` forces the heuristic. In non-`live-llm` builds
+     the regex heuristic always runs and the `--use-llm` flag is
+     rejected — confirm the build flavor before suggesting it.
    - `--force` overwrites an existing `profile/profile.yaml`. Do not pass
      it without explicit user consent.
 
