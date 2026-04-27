@@ -57,7 +57,7 @@ tokio-cron-scheduler = "0.13"
 futures = "0.3"
 scraper = "0.26"
 base64 = "0.22"
-rmcp = { version = "1.5", default-features = false, features = ["server", "macros", "transport-io", "schemars"] }
+rmcp = { version = "1.5", default-features = false, features = ["server", "macros", "transport-io", "schemars", "client", "transport-child-process"] }
 schemars = "1"
 
 [profile.release]

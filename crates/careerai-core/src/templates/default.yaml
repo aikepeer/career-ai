@@ -149,6 +149,28 @@ sources:
       - "robotics"
     location: "Delhi / NCR"
     max_results: 20
+  # Community / third-party Model-Context-Protocol servers used as
+  # discovery sources. Each entry spawns a stdio MCP server (the same
+  # way Claude itself spawns one), runs `tools/list`, and invokes the
+  # first tool whose name matches `search_jobs` / `discover_jobs` /
+  # `find_jobs` / `list_jobs` / `jobs.search`. Default empty;
+  # uncomment and flip `enabled: true` to opt in.
+  #
+  # mcp:
+  #   - name: linkedin-jobs-mcp
+  #     enabled: false           # default off — user must opt in (ToS)
+  #     submit_enabled: false    # discovery only; this MCP doesn't submit
+  #     cron: "0 0 */6 * * *"
+  #     rate_per_minute: 5
+  #     mcp:
+  #       command: "uvx"
+  #       args: ["linkedin-jobs-mcp-server"]
+  #       env:
+  #         RAPIDAPI_KEY: "${LINKEDIN_RAPIDAPI_KEY}"
+  #       query:
+  #         keywords: "AI engineer remote"
+  #         location: "Worldwide"
+  #         limit: 25
 
 render:
   artifacts_dir: "artifacts"
