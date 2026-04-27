@@ -203,3 +203,42 @@ async fn confirm_linkedin_submit_rejects_non_drafted_state() {
         "error message should mention expected state; got: {msg}",
     );
 }
+
+/// Positive-path test: a Drafted LinkedIn application must NOT be
+/// rejected by `submit_application`'s state guard. The earlier guard
+/// allowed only `Rendered | Prepared`, so `confirm_linkedin_submit`
+/// always returned `BadState { state: "drafted" }` — see PR #11 review
+/// (P0). The test calls `submit_application` directly with a Drafted row
+/// and asserts the error (if any) is anything other than `BadState`. Any
+/// downstream failure (e.g. missing payload row) is unrelated to the
+/// state guard and outside the P0's scope.
+#[tokio::test]
+async fn submit_application_accepts_drafted_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    scaffold_project(tmp.path());
+
+    let (_listing_id, application_id) = seed_rendered_linkedin_application(tmp.path()).await;
+
+    let db_path = tmp.path().join("data/careerai.sqlite");
+    let pool = pool_from_path(&db_path).await.unwrap();
+    queries::set_application_state(&pool, &application_id, "drafted")
+        .await
+        .unwrap();
+
+    let mut cfg = CoreConfig::load(tmp.path()).unwrap();
+    cfg.submit.auto_submit = false;
+    cfg.submit.per_source.insert(
+        "linkedin".into(),
+        careerai_core::config::SubmitSource { enabled: true },
+    );
+
+    let result =
+        careerai_submit::submit_application(&pool, &cfg.submit, tmp.path(), &application_id).await;
+
+    // The state guard must not reject Drafted. Any other error variant
+    // (Db, Io, etc.) means the guard let us through, which is the P0
+    // contract under test.
+    if let Err(careerai_submit::SubmitError::BadState { state }) = &result {
+        panic!("submit_application rejected Drafted state with BadState({state}); P0 regression");
+    }
+}

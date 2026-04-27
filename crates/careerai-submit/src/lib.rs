@@ -88,9 +88,15 @@ pub async fn submit_application(
     application_id: &str,
 ) -> Result<SubmitOutcome> {
     // 1. Load the application and assert it's ready to submit.
+    //    `Drafted` is accepted because `pipeline::confirm_linkedin_submit`
+    //    routes through this function after the operator approves a
+    //    drafted LinkedIn application in `careerai review`. The pipeline
+    //    layer does its own `state == Drafted` precheck before calling.
     let application = queries::find_application_by_id(pool, application_id).await?;
     let state_str = application.state.as_str();
-    if state_str != ListingState::Rendered.as_str() && state_str != ListingState::Prepared.as_str()
+    if state_str != ListingState::Rendered.as_str()
+        && state_str != ListingState::Prepared.as_str()
+        && state_str != ListingState::Drafted.as_str()
     {
         return Err(SubmitError::BadState {
             state: application.state.clone(),
