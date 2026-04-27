@@ -92,6 +92,14 @@ pub async fn submit_application(
     //    routes through this function after the operator approves a
     //    drafted LinkedIn application in `careerai review`. The pipeline
     //    layer does its own `state == Drafted` precheck before calling.
+    //
+    //    INVARIANT: `Drafted` is currently only produced by the LinkedIn
+    //    interactive_only short-circuit in `pipeline::apply_one`. No
+    //    other source writes Drafted today. Any future submitter that
+    //    introduces a draft-then-confirm flow MUST add an equivalent
+    //    pre-check in the pipeline layer before calling this function;
+    //    the source-agnostic allowlist here is a defensive accept, not
+    //    an authorisation to draft from arbitrary sources.
     let application = queries::find_application_by_id(pool, application_id).await?;
     let state_str = application.state.as_str();
     if state_str != ListingState::Rendered.as_str()

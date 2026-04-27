@@ -18,7 +18,7 @@ pub enum SubmitError {
     Serde(#[from] serde_json::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("application is in state '{state}'; expected 'rendered' or 'prepared'")]
+    #[error("application is in state '{state}'; expected 'rendered', 'prepared', or 'drafted'")]
     BadState { state: String },
     #[error("unknown source: {0}")]
     UnknownSource(String),
