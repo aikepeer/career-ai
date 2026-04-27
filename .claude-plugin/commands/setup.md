@@ -31,13 +31,12 @@ filesystem paths to their resume and LinkedIn data export.
    careerai profile import <resume_path> [<linkedin_zip>]
    careerai profile validate
    ```
-   If the build was produced with `cargo install --features live-llm`
-   (or `cargo build --features live-llm`), pass `--use-llm` to route the
-   PDF/DOCX text through the LLM extractor; in non-`live-llm` builds the
-   regex heuristic always runs and `--use-llm` is unsupported. Surface
-   any `LinkedInMissingColumn` or schema-drift warnings prominently —
-   those indicate LinkedIn changed its export format and need a
-   code-side fix rather than a user fix.
+   The current CLI on `main` only supports `--force` on
+   `careerai profile import`; the regex heuristic is the only import
+   path. Surface any `LinkedInMissingColumn` or schema-drift warnings
+   prominently — those indicate LinkedIn changed its export format and
+   need a code-side fix rather than a user fix. (See Notes for the
+   future LLM-extractor flag.)
 5. **Print next steps.** Suggest:
    - `/career:discover` to pull listings from configured sources
    - `/career:status` to see pipeline counts
@@ -46,12 +45,15 @@ filesystem paths to their resume and LinkedIn data export.
 
 ## Notes
 
-- The `--use-llm` flag is only available in builds compiled with the
-  `live-llm` cargo feature. In those builds it auto-detects: enabled
-  when an Anthropic key is reachable, and falls back to the regex
-  heuristic otherwise. Pass `--use-llm=false` to force the heuristic.
-  In non-`live-llm` builds the heuristic is always used and the flag is
-  rejected.
+- **Future: LLM extractor (PR #16, `feat/profile-llm-extract`).** An
+  LLM-backed PDF/DOCX extractor is in review. Until that PR merges,
+  the regex heuristic is the only import path on `main` and the
+  `careerai profile import` CLI does not accept a `--use-llm` flag.
+  Once PR #16 merges, builds produced with `cargo install --features
+  live-llm` will accept `--use-llm` (auto-detected when an Anthropic
+  key is reachable; pass `--use-llm=false` to force the heuristic). Do
+  not suggest the flag before the PR lands — the current CLI rejects
+  it.
 - This command is idempotent — re-running it will not overwrite an existing
   `profile/profile.yaml` unless the user passes `--force` to the underlying
   CLI.
