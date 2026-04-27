@@ -22,6 +22,7 @@ careerai-submit = { path = "../careerai-submit" }
 careerai-scheduler = { path = "../careerai-scheduler" }
 careerai-pipeline = { path = "../careerai-pipeline" }
 anyhow.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 clap.workspace = true
 keyring.workspace = true
@@ -39,7 +40,7 @@ sqlx.workspace = true
 
 [features]
 default = []
-live-llm = ["careerai-pipeline/live-llm"]
+live-llm = ["careerai-pipeline/live-llm", "careerai-llm/live-llm"]
 # Enables the LinkedIn browser submitter path in careerai-submit.
 # Build: `cargo build -p careerai-cli --features browser`.
 browser = ["careerai-pipeline/browser"]
