@@ -68,19 +68,24 @@ fn merge_experience(base: Vec<Experience>, other: Vec<Experience>) -> Vec<Experi
         }
         // Two-stage match. First try the strict (company, title, start)
         // key — that's the historical contract used by snapshot tests.
-        // Fall back to (company, start) so that a structured upstream
-        // (LinkedIn) entry collapses with a heuristic-parsed one whose
-        // title got garbled into a date-string ("Jan 2025"). The LinkedIn
-        // entry, having been folded in first, owns the `title` field.
+        // Fall back to (company, start) ONLY when at least one side has
+        // a date-garbage title (e.g. PDF heuristic stuffed "Jan 2025"
+        // into the title field). Without that gate, two genuinely
+        // distinct roles at the same company that happen to share a
+        // start date — internal transfers, dual titles — would be
+        // incorrectly collapsed.
         let strict_key = exp_key(&new);
         let loose_key = exp_loose_key(&new);
         let mut idx = out
             .iter()
             .position(|e| !e.start.is_empty() && exp_key(e) == strict_key);
         if idx.is_none() {
-            idx = out
-                .iter()
-                .position(|e| !e.start.is_empty() && exp_loose_key(e) == loose_key);
+            let new_title_garbage = looks_like_date_garbage(&new.title);
+            idx = out.iter().position(|e| {
+                !e.start.is_empty()
+                    && exp_loose_key(e) == loose_key
+                    && (new_title_garbage || looks_like_date_garbage(&e.title))
+            });
         }
         if let Some(i) = idx {
             let existing = &mut out[i];

@@ -296,7 +296,10 @@ pub async fn extract_profile_from_text(
         Ok(t) => t,
         Err(e) => {
             warn!(target: "profile.llm_extract", error = %e, "retry call failed");
-            return Err(ExtractError::MaxRetries);
+            // Transport failure on retry isn't a schema-validation
+            // exhaustion — surface it as `LlmCall` so callers can
+            // distinguish upstream I/O from grammar mismatches.
+            return Err(ExtractError::LlmCall(e));
         }
     };
 

@@ -621,22 +621,26 @@ fn profile_import(paths: &[PathBuf], force: bool, use_llm: Option<bool>) -> Resu
 
     // Decide whether to run the LLM extractor. Resolution order:
     //   1. Explicit `--use-llm=<bool>` always wins.
-    //   2. Otherwise: enabled iff an Anthropic key is reachable
-    //      (keyring or env). On a fresh box with no key the heuristic
-    //      stays the default and we print an actionable warning.
+    //   2. Otherwise: enabled iff this binary was built with `live-llm`
+    //      AND an Anthropic key is reachable. Without the feature flag
+    //      we cannot actually call the LLM; auto-enabling on key
+    //      detection alone would route into a hard error.
     let want_llm = match use_llm {
         Some(v) => v,
-        None => anthropic_key_reachable(),
+        None => cfg!(feature = "live-llm") && anthropic_key_reachable(),
     };
 
     let profile = if want_llm {
         run_profile_import_with_llm(&refs)?
     } else {
-        if use_llm.is_none() {
+        if use_llm.is_none() && !cfg!(feature = "live-llm") {
+            // Built without `live-llm`; nothing the user can do at
+            // runtime to improve this. Stay quiet on the heuristic
+            // fallback unless they explicitly asked for LLM.
+        } else if use_llm.is_none() {
             eprintln!(
                 "warning: no Anthropic key configured; falling back to heuristic parser. \
-                 Run `careerai cookies refresh anthropic` or set ANTHROPIC_API_KEY for \
-                 better results."
+                 Set ANTHROPIC_API_KEY for better results."
             );
         }
         careerai_profile::import_paths(&refs).context("parsing profile sources")?

@@ -134,19 +134,41 @@ fn parse_text_with_optional_llm(
     // Synchronously drive the async extractor. We're called from a sync
     // function (`import_paths*`) which itself is invoked by the CLI's
     // `#[tokio::main]` runtime, so a tokio Handle is usually already in
-    // scope. Use `block_in_place` to step out of the worker; fall back
-    // to a fresh single-threaded runtime when no Handle exists (e.g.
-    // a sync test).
-    let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
-        tokio::task::block_in_place(|| handle.block_on(fut))
-    } else {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(ProfileError::Io)?;
-        let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
-        rt.block_on(fut)
+    // scope. `block_in_place` is only valid on the multi-thread runtime
+    // — calling it under a current-thread runtime panics. Spawn a fresh
+    // single-thread runtime on a side thread in that case so we don't
+    // deadlock the caller's reactor either.
+    let result = match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
+            tokio::task::block_in_place(|| handle.block_on(fut))
+        }
+        Ok(_) => {
+            // Current-thread runtime in scope — `block_in_place` would
+            // panic. Drive the future on a dedicated thread with its
+            // own single-threaded runtime so we don't reenter the
+            // caller's reactor.
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| ExtractError::LlmCall(format!("build runtime: {e}")))?;
+                    let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
+                    rt.block_on(fut)
+                })
+                .join()
+                .unwrap_or_else(|_| Err(ExtractError::LlmCall("extractor thread panicked".into())))
+            })
+        }
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(ProfileError::Io)?;
+            let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
+            rt.block_on(fut)
+        }
     };
 
     match result {
