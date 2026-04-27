@@ -45,10 +45,14 @@ impl NaukriConfig {
     /// as `NaukriConfig::default()`.
     #[must_use]
     pub fn from_core(submit_cfg: &careerai_core::config::SubmitConfig) -> Self {
-        let nk = &submit_cfg.naukri;
+        // .validated() clamps out-of-range / full-coverage quiet_hours_utc
+        // to the default window with a warning. Mirrors the LinkedIn
+        // pattern so a misconfigured `submit.naukri` block never reaches
+        // the rate-limiter.
+        let nk = submit_cfg.naukri.clone().validated();
         Self {
-            screenshots_dir: nk.screenshots_dir.clone(),
-            user_agent: nk.user_agent.clone(),
+            screenshots_dir: nk.screenshots_dir,
+            user_agent: nk.user_agent,
             headless: nk.headless,
             rate_policy: RatePolicy {
                 max_per_day: nk.max_per_day,

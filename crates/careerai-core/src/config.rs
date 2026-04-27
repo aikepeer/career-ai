@@ -358,6 +358,34 @@ pub struct NaukriSubmitConfig {
     pub action_timeout_seconds: u64,
 }
 
+impl NaukriSubmitConfig {
+    /// Sanitise quiet-hours config. Same semantics as
+    /// `LinkedinSubmitConfig::validated()` — clamps out-of-range or
+    /// full-coverage values back to the default `(19, 1)` window with a
+    /// warning. Call this before constructing `NaukriConfig` from this
+    /// struct so the runtime sees only sane values.
+    #[must_use]
+    pub fn validated(mut self) -> Self {
+        if let Some((start, end)) = self.quiet_hours_utc {
+            let start_ok = start <= 23;
+            let end_ok = end <= 24;
+            let distinct = start != end;
+            let not_full_coverage = !(start == 0 && end == 24);
+            if !(start_ok && end_ok && distinct && not_full_coverage) {
+                tracing::warn!(
+                    target: "config",
+                    submit_naukri_quiet_hours = ?(start, end),
+                    "out-of-range or full-coverage quiet_hours_utc; clamping to default (19, 1) — \
+                     valid range is start in 0..=23, end in 0..=24, start != end, and (0, 24) is reserved \
+                     (use `quiet_hours_utc: null` to disable the gate, or `submit.naukri.enabled = false`)"
+                );
+                self.quiet_hours_utc = Some((19, 1));
+            }
+        }
+        self
+    }
+}
+
 impl Default for NaukriSubmitConfig {
     fn default() -> Self {
         Self {
@@ -476,6 +504,39 @@ mod tests {
             "embedding_model: \"x\"\nscore_threshold: 0.5\nmust_include_skills: [rust, async]";
         let cfg: MatchConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.must_include_skills, vec!["rust", "async"]);
+    }
+
+    #[test]
+    fn naukri_validated_clamps_full_coverage_quiet_hours() {
+        let mut cfg = NaukriSubmitConfig::default();
+        cfg.quiet_hours_utc = Some((0, 24));
+        let v = cfg.validated();
+        assert_eq!(v.quiet_hours_utc, Some((19, 1)));
+    }
+
+    #[test]
+    fn naukri_validated_clamps_out_of_range_quiet_hours() {
+        let mut cfg = NaukriSubmitConfig::default();
+        cfg.quiet_hours_utc = Some((25, 30));
+        let v = cfg.validated();
+        assert_eq!(v.quiet_hours_utc, Some((19, 1)));
+    }
+
+    #[test]
+    fn naukri_validated_keeps_valid_wrap_window() {
+        // 19:00 UTC → 01:00 UTC is a valid wrap (matches the default).
+        let mut cfg = NaukriSubmitConfig::default();
+        cfg.quiet_hours_utc = Some((19, 1));
+        let v = cfg.validated();
+        assert_eq!(v.quiet_hours_utc, Some((19, 1)));
+    }
+
+    #[test]
+    fn naukri_validated_passes_through_none() {
+        let mut cfg = NaukriSubmitConfig::default();
+        cfg.quiet_hours_utc = None;
+        let v = cfg.validated();
+        assert_eq!(v.quiet_hours_utc, None);
     }
 
     #[test]
