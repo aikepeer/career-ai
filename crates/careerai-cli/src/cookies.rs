@@ -16,8 +16,6 @@
 //! This ensures the daemon can immediately pick up the refreshed cookie
 //! on the next apply tick without restarting.
 
-use std::io::{self, Write};
-
 use anyhow::{anyhow, Result};
 
 /// Keyring service name — MUST match `careerai_submit::credentials::SERVICE`.
@@ -62,11 +60,12 @@ pub fn refresh(provider: &str) -> Result<()> {
 
     println!("Refreshing {provider} cookie ({}).", info.cookie_name);
     println!("  Where to find it: {}", info.where_to_find);
-    print!("  Paste cookie value: ");
-    io::stdout().flush().ok();
 
-    let mut value = String::new();
-    io::stdin().read_line(&mut value)?;
+    // rpassword reads from the terminal with echo disabled — prevents the
+    // pasted cookie from showing up in scrollback, screen-share, or shoulder-
+    // surf. This is a session-equivalent secret and must be treated as one.
+    let value = rpassword::prompt_password("  Paste cookie value (input hidden): ")
+        .map_err(|e| anyhow!("read cookie failed: {e}"))?;
     let value = value.trim();
     if value.is_empty() {
         return Err(anyhow!("empty cookie value — aborting"));
