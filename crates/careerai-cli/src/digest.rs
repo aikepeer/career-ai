@@ -94,7 +94,10 @@ fn collect_cookie_warnings() -> Vec<String> {
 pub async fn run_digest(root: &Path, _cfg: &CoreConfig, since_arg: &str) -> Result<()> {
     let since = parse_since(since_arg)?;
     let mut report = pipeline::digest_summary(root, since).await?;
-    // Populate cookie warnings here — pipeline doesn't link careerai-submit.
+    // Populate cookie warnings here so `digest_summary` itself stays
+    // focused on pipeline state and never calls keyring/submit code.
+    // (`careerai-pipeline` links `careerai-submit` for the apply path,
+    // but the digest read path stays clean.)
     report.cookie_warnings = collect_cookie_warnings();
 
     println!(

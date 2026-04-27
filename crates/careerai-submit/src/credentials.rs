@@ -181,10 +181,11 @@ pub enum CookieHealth {
 /// CLI can surface the right warning instead of silently dropping every
 /// failure mode into `None`.
 ///
-/// Read-only on the keyring; never logs the token value. Naukri (and
-/// other opaque-cookie providers) currently return `NotStored` when
-/// absent and `Unparseable` when present (no JWT shape) — the digest
-/// caller skips Naukri entirely.
+/// Read-only on the keyring; never logs the token value. Only LinkedIn
+/// is currently diagnosed — other providers (Naukri, Indeed, etc.)
+/// short-circuit to `NotStored` without probing the keyring, because
+/// their cookies are opaque and have no decodable expiry. The digest
+/// caller skips non-LinkedIn providers entirely.
 #[must_use]
 pub fn cookie_health(provider: &str) -> CookieHealth {
     let key = match provider {

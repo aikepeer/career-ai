@@ -889,11 +889,14 @@ pub async fn digest_summary(root: &Path, since: chrono::Duration) -> Result<Dige
     }
 
     // Per-source: distinct listings with any transition in window.
-    // COLLATE NOCASE merges "linkedin" / "LinkedIn" / "LINKEDIN" into a
-    // single bucket. Same convention as `list_drafted_linkedin` in
-    // careerai-db (PR #14): listings.source isn't lowercase-enforced by
-    // the schema, and submit_application's dispatch already does
-    // to_ascii_lowercase, so we follow suit.
+    // LOWER(l.source) merges "linkedin" / "LinkedIn" / "LINKEDIN" into
+    // a single bucket and lower-cases the result key (so the CLI doesn't
+    // have to). LOWER() is the function form vs PR #14's `COLLATE
+    // NOCASE` predicate trick — both produce the same merge, but here
+    // we're projecting (SELECT) rather than filtering (WHERE), so
+    // function form is the natural choice. listings.source isn't
+    // lowercase-enforced by the schema, and submit_application's
+    // dispatch already does to_ascii_lowercase, so we follow suit.
     let source_rows = sqlx::query(
         "SELECT LOWER(l.source) AS source, COUNT(DISTINCT e.listing_id) AS n
          FROM events e
