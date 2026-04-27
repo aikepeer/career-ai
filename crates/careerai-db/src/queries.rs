@@ -477,15 +477,27 @@ pub async fn list_artifacts(pool: &SqlitePool, application_id: &str) -> Result<V
 /// oldest first (so operators review in submission order).
 ///
 /// Used by `careerai review` to enumerate the queue of applications that the
-/// daemon has parked in `Drafted` due to `interactive_only = true`. The limit
-/// prevents an unbounded SELECT on large databases.
+/// daemon has parked in `Drafted` due to `interactive_only = true`.
+///
+/// `limit` is clamped to `[1, 1_000]` before binding. Without this, a
+/// negative value would disable the LIMIT in SQLite and a zero-or-negative
+/// would silently return nothing — both surprising for a "bounded" query.
+///
+/// `LOWER(l.source) = 'linkedin'` mirrors the case-insensitive lookup in
+/// `careerai-submit::submit_application`. The schema doesn't enforce
+/// lowercase on `listings.source`, so a row inserted as `"LinkedIn"`
+/// would otherwise be invisible to `careerai review`.
 pub async fn list_drafted_linkedin(pool: &SqlitePool, limit: i64) -> Result<Vec<Application>> {
+    const MIN_LIMIT: i64 = 1;
+    const MAX_LIMIT: i64 = 1_000;
+    let limit = limit.clamp(MIN_LIMIT, MAX_LIMIT);
+
     let rows = sqlx::query_as::<_, Application>(
         "SELECT a.id, a.listing_id, a.state, a.profile_hash, a.prompt_version, a.llm_model,
                 a.created_at, a.updated_at
          FROM applications a
          JOIN listings l ON l.id = a.listing_id
-         WHERE a.state = 'drafted' AND l.source = 'linkedin'
+         WHERE a.state = 'drafted' AND LOWER(l.source) = 'linkedin'
          ORDER BY a.created_at ASC
          LIMIT ?",
     )
@@ -493,6 +505,34 @@ pub async fn list_drafted_linkedin(pool: &SqlitePool, limit: i64) -> Result<Vec<
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+/// Atomically "claim" a Drafted application for submission by transitioning
+/// it to `Rendered`. Returns `true` iff the claim won.
+///
+/// This is the race guard for `careerai review`: two operators (or two
+/// review processes) can both call `confirm_linkedin_submit` on the same
+/// row, see `state = 'drafted'`, and try to submit. SQLite serializes
+/// writes, so the conditional UPDATE matches the row exactly once; the
+/// loser sees `rows_affected == 0` and bails before launching a browser.
+///
+/// `Rendered` is reused (rather than introducing a new `Submitting` state)
+/// because `submit_application`'s state guard already accepts it and the
+/// downstream success/failure transitions remain coherent. After a
+/// successful submit the row goes to `Submitted`; on failure to `Failed`.
+/// A crashed-mid-submission application ends up `Failed` and won't be
+/// re-listed by `list_drafted_linkedin` — operator must intervene.
+pub async fn claim_drafted_application(pool: &SqlitePool, application_id: &str) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE applications
+         SET state = 'rendered',
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ? AND state = 'drafted'",
+    )
+    .bind(application_id)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
 }
 
 #[cfg(test)]
