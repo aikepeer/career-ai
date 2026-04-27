@@ -718,18 +718,25 @@ pub async fn confirm_linkedin_submit(
     let app = queries::find_application_by_id(&pool, application_id).await?;
     drop(pool);
 
-    if app.state != "drafted" {
+    let expected_state = ListingState::Drafted.as_str();
+    if app.state != expected_state {
         return Err(anyhow::anyhow!(
-            "application {} is in state '{}', expected 'drafted'",
+            "application {} is in state '{}', expected '{}'",
             application_id,
             app.state,
+            expected_state,
         ));
     }
 
     // Delegate to apply_one. Because effective_cfg has interactive_only=false,
     // the daemon-path short-circuit is bypassed and the normal LinkedIn
-    // submitter runs.
-    apply_one(root, &effective_cfg, application_id, None).await
+    // submitter runs. Force live submission (Some(true)) rather than
+    // inheriting cfg.submit.auto_submit — `careerai review` is the
+    // explicit operator-confirmation path; if it took the dry-run path
+    // when auto_submit=false, the operator typing 'y' would see a
+    // success message but no actual submission, contradicting the docs
+    // and silently leaving the application in `drafted`.
+    apply_one(root, &effective_cfg, application_id, Some(true)).await
 }
 
 /// Gather everything needed to render `careerai inspect <id>`.

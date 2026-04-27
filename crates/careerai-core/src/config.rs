@@ -296,7 +296,7 @@ impl LinkedinSubmitConfig {
     ///   the wrap-across-midnight pair `[0:00, 24:00)` covering every
     ///   hour — i.e. always quiet, indistinguishable from leaving the
     ///   submitter disabled. Operators who want "never submit" should
-    ///   set `submit.linkedin.enabled = false` instead.
+    ///   set `submit.per_source.linkedin.enabled = false` instead.
     /// - To disable the quiet-hours gate entirely, set
     ///   `quiet_hours_utc: null` (None).
     #[must_use]
@@ -308,7 +308,7 @@ impl LinkedinSubmitConfig {
             // (0, 24) is a degenerate full-coverage wrap — same as
             // "always quiet". Surface it as out-of-range so operators
             // notice they probably wanted `null` or
-            // `submit.linkedin.enabled = false`.
+            // `submit.per_source.linkedin.enabled = false`.
             let not_full_coverage = !(start == 0 && end == 24);
             if !(start_ok && end_ok && distinct && not_full_coverage) {
                 tracing::warn!(
@@ -316,7 +316,7 @@ impl LinkedinSubmitConfig {
                     submit_linkedin_quiet_hours = ?(start, end),
                     "out-of-range or full-coverage quiet_hours_utc; clamping to default (19, 1) — \
                      valid range is start in 0..=23, end in 0..=24, start != end, and (0, 24) is reserved \
-                     (use `quiet_hours_utc: null` to disable the gate, or `submit.linkedin.enabled = false`)"
+                     (use `quiet_hours_utc: null` to disable the gate, or `submit.per_source.linkedin.enabled = false`)"
                 );
                 self.quiet_hours_utc = Some((19, 1));
             }
@@ -377,7 +377,7 @@ impl NaukriSubmitConfig {
                     submit_naukri_quiet_hours = ?(start, end),
                     "out-of-range or full-coverage quiet_hours_utc; clamping to default (19, 1) — \
                      valid range is start in 0..=23, end in 0..=24, start != end, and (0, 24) is reserved \
-                     (use `quiet_hours_utc: null` to disable the gate, or `submit.naukri.enabled = false`)"
+                     (use `quiet_hours_utc: null` to disable the gate, or `submit.per_source.naukri.enabled = false`)"
                 );
                 self.quiet_hours_utc = Some((19, 1));
             }
