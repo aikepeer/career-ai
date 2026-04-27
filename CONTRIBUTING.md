@@ -6,14 +6,16 @@ welcome.
 
 ## Ground rules (before you open a PR)
 
-- **No direct commits to `main`.** Branch off and open a PR. The hook
-  blocks unsigned pushes.
+- **No direct commits to `main`.** Branch off and open a PR.
 - **Branch names:** `feat/`, `fix/`, `chore/`, `docs/`, `issues/<n>-<slug>`.
 - **Commits:**
   - 50/72 rule (≤50 char subject, ≤72 char body wrap).
   - Generic subject — no "Claude" / "AI" mentions.
-  - SSH-signed (`commit.gpgsign = true`, `gpg.format = ssh`).
-  - Sign-off required: `git commit -s` (DCO).
+  - SSH-signed (`commit.gpgsign = true`, `gpg.format = ssh`). The
+    project doesn't ship a pre-push hook; signing is enforced via the
+    maintainer's local git config and reviewed at merge time.
+  - Sign-off required: `git commit -s` (DCO). There is no automated
+    DCO CI check yet — sign-offs are validated at review.
 - **CI must be green** before review: `rustfmt`, `clippy -D warnings`,
   tests, `cargo audit`. The `clippy` gate is strict — fix warnings, do
   not `#[allow]` them away unless you can justify it in a comment.
@@ -37,8 +39,10 @@ back.
 | Snapshot | `insta` + the in-tree fixtures | Render artifacts, filter outputs, prompt bodies. |
 | Browser | `chromiumoxide` + `tiny-http` against captured HTML | LinkedIn / Indeed selector regression. CI never hits real sites. |
 
-`cargo nextest run --workspace` is preferred (faster, better output).
-`cargo test --workspace` works without `nextest` installed.
+`cargo nextest run --workspace` is the preferred runner if you have it
+installed (faster, better output); the project does not ship a
+`nextest.toml` so default settings apply. `cargo test --workspace`
+works equivalently without `nextest`.
 
 `INSTA_UPDATE=always cargo test` accepts intentional snapshot changes —
 review the diff before accepting.
@@ -46,8 +50,9 @@ review the diff before accepting.
 ## Adding a new job source
 
 1. Create `crates/careerai-sources/src/<source>.rs`.
-2. Implement the `Source` trait (see existing `greenhouse.rs` / `lever.rs` /
-   `mcp_jobs.rs`).
+2. Implement the `Source` trait from `crates/careerai-sources/src/base.rs`
+   (see existing `greenhouse.rs`, `lever.rs`, `naukri.rs`, `remoteok.rs`,
+   `remotive.rs`).
 3. Register the new variant in the source factory.
 4. Add a config entry to `config/default.yaml` (commented-out, default
    `enabled: false` if the source has any ToS gray area).
@@ -77,10 +82,12 @@ The `careerai-mcp::apply` tool refuses live submissions without
 
 ## Security checks
 
-The project keeps a Semgrep baseline at `.claude/.semgrep-baseline.json`.
-Re-run `semgrep scan --config auto` after:
+`semgrep scan --config auto` is part of the baseline workflow; the
+project will track findings in `.claude/.semgrep-baseline.json` once a
+clean baseline is captured. Re-run `semgrep scan --config auto` and
+refresh the baseline after:
 - ≥20 changed files in one PR
-- Dependency manifest changes
+- Dependency manifest changes (`Cargo.toml`, lockfile bumps)
 - Anything touching auth / crypto / SQL / deserialization
 
 ## Release process
