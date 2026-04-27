@@ -311,6 +311,7 @@ dependencies = [
  "careerai-scheduler",
  "careerai-submit",
  "careerai-tailor",
+ "chrono",
  "clap",
  "docx-rs",
  "keyring",
@@ -401,7 +402,9 @@ dependencies = [
  "careerai-sources",
  "careerai-submit",
  "careerai-tailor",
+ "chrono",
  "serde_json",
+ "sqlx",
  "tempfile",
  "tokio",
  "tracing",
@@ -479,6 +482,7 @@ name = "careerai-submit"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64",
  "careerai-core",
  "careerai-db",
  "careerai-profile",

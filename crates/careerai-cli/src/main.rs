@@ -5,6 +5,7 @@
 //! M1; the rest are stubs until M2+.
 
 mod cookies;
+mod digest;
 mod review;
 
 use careerai_pipeline as pipeline;
@@ -109,6 +110,14 @@ enum Command {
     Cookies {
         #[command(subcommand)]
         command: CookiesCommand,
+    },
+    /// Print a daily summary of pipeline activity (counts by state +
+    /// per-source breakdown + last cron tick + cookie expiry warnings).
+    Digest {
+        /// Time window. Accepts `24h`, `7d`, `2w`, or a number-of-hours
+        /// integer. Default: `24h`.
+        #[arg(long, default_value = "24h")]
+        since: String,
     },
 }
 
@@ -236,6 +245,10 @@ async fn main() -> Result<()> {
                 cookies::refresh(&provider)?;
             }
         },
+        Command::Digest { since } => {
+            let cfg = load_cfg(&cwd)?;
+            digest::run_digest(&cwd, &cfg, &since).await?;
+        }
         Command::Inspect { application_id } => {
             run_inspect(&cwd, &application_id).await?;
         }

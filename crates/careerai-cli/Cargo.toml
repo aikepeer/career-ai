@@ -22,6 +22,7 @@ careerai-submit = { path = "../careerai-submit" }
 careerai-scheduler = { path = "../careerai-scheduler" }
 careerai-pipeline = { path = "../careerai-pipeline" }
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 keyring.workspace = true
 rpassword = "7"
