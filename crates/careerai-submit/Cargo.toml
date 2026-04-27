@@ -29,6 +29,7 @@ chromiumoxide = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 governor = { workspace = true }
 rand = "0.9"
+base64 = { workspace = true }
 
 [features]
 default = []
