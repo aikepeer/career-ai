@@ -302,6 +302,7 @@ name = "careerai-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "careerai-core",
  "careerai-db",
  "careerai-llm",
@@ -414,15 +415,18 @@ dependencies = [
 name = "careerai-profile"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "csv",
  "insta",
  "pdf-extract",
  "quick-xml 0.37.5",
  "regex",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "validator",
  "zip 2.4.2",

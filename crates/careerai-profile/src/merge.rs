@@ -66,14 +66,32 @@ fn merge_experience(base: Vec<Experience>, other: Vec<Experience>) -> Vec<Experi
             out.push(new);
             continue;
         }
-        let key = exp_key(&new);
-        if let Some(existing) = out
-            .iter_mut()
-            .find(|e| !e.start.is_empty() && exp_key(e) == key)
-        {
+        // Two-stage match. First try the strict (company, title, start)
+        // key — that's the historical contract used by snapshot tests.
+        // Fall back to (company, start) so that a structured upstream
+        // (LinkedIn) entry collapses with a heuristic-parsed one whose
+        // title got garbled into a date-string ("Jan 2025"). The LinkedIn
+        // entry, having been folded in first, owns the `title` field.
+        let strict_key = exp_key(&new);
+        let loose_key = exp_loose_key(&new);
+        let mut idx = out
+            .iter()
+            .position(|e| !e.start.is_empty() && exp_key(e) == strict_key);
+        if idx.is_none() {
+            idx = out
+                .iter()
+                .position(|e| !e.start.is_empty() && exp_loose_key(e) == loose_key);
+        }
+        if let Some(i) = idx {
+            let existing = &mut out[i];
             existing.bullets = dedup_keep_order(merge_vecs(existing.bullets.clone(), new.bullets));
             existing.location = prefer_nonempty(existing.location.clone(), new.location);
             existing.end = prefer_nonempty(existing.end.clone(), new.end);
+            // Title preference: keep base unless it looks like a date-
+            // garbage title and `new` has a real one.
+            if looks_like_date_garbage(&existing.title) && !looks_like_date_garbage(&new.title) {
+                existing.title = new.title;
+            }
         } else {
             out.push(new);
         }
@@ -112,6 +130,33 @@ fn exp_key(e: &Experience) -> (String, String, String) {
         e.title.to_lowercase(),
         e.start.clone(),
     )
+}
+
+fn exp_loose_key(e: &Experience) -> (String, String) {
+    (e.company.to_lowercase(), e.start.clone())
+}
+
+fn looks_like_date_garbage(title: &str) -> bool {
+    let t = title.trim();
+    if t.is_empty() {
+        return true;
+    }
+    date_like_re().is_match(t)
+}
+
+fn date_like_re() -> &'static regex::Regex {
+    static DATE_LIKE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    DATE_LIKE.get_or_init(|| {
+        // Patterns the heuristic has been observed to emit:
+        //   "Jan 2025", "January 2025", "2022", "2022 - Present",
+        //   "Jan 2022 - Dec 2024", "2022-01", "2022-01 - 2024-12".
+        // Whole-string match (DOTALL doesn't matter — single line).
+        #[allow(clippy::expect_used)]
+        regex::Regex::new(
+            r"(?i)^\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+)?\d{4}(?:[-/]\d{1,2})?(?:\s*[-–]\s*(?:present|(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+)?\d{4}(?:[-/]\d{1,2})?))?\s*$",
+        )
+        .expect("date_like regex compiles")
+    })
 }
 
 fn edu_key(e: &Education) -> (String, String) {
@@ -307,5 +352,76 @@ mod tests {
         };
         let merged = merge_pair(base, other);
         assert_eq!(merged.experience.len(), 2);
+    }
+
+    #[test]
+    fn linkedin_title_wins_over_pdf_date_garbage() {
+        // Mirrors the real-world failure: PDF heuristic stuffed "Jan 2025"
+        // into the title field. LinkedIn (folded in as base) has the real
+        // title. After the merge, the LinkedIn title must survive.
+        let linkedin = Profile {
+            experience: vec![exp(
+                "Acme Robotics",
+                "Senior Embedded Developer",
+                "2022-01",
+                &["Led migration"],
+            )],
+            ..Default::default()
+        };
+        let pdf_garbage = Profile {
+            experience: vec![exp(
+                "Acme Robotics",
+                "Jan 2025",
+                "2022-01",
+                &["Cut latency"],
+            )],
+            ..Default::default()
+        };
+        let merged = merge_pair(linkedin, pdf_garbage);
+        assert_eq!(merged.experience.len(), 1);
+        assert_eq!(merged.experience[0].title, "Senior Embedded Developer");
+        // Bullets from both sources still merge.
+        assert!(merged.experience[0]
+            .bullets
+            .iter()
+            .any(|b| b.contains("migration")));
+        assert!(merged.experience[0]
+            .bullets
+            .iter()
+            .any(|b| b.contains("latency")));
+    }
+
+    #[test]
+    fn pdf_title_wins_when_linkedin_is_garbage() {
+        // Symmetry check: if the *base* has the date-garbage title and
+        // the second source has a real one, prefer the real title.
+        let bad_base = Profile {
+            experience: vec![exp("Acme", "Jan 2022", "2022-01", &[])],
+            ..Default::default()
+        };
+        let good_other = Profile {
+            experience: vec![exp("Acme", "Engineer", "2022-01", &[])],
+            ..Default::default()
+        };
+        let merged = merge_pair(bad_base, good_other);
+        assert_eq!(merged.experience.len(), 1);
+        assert_eq!(merged.experience[0].title, "Engineer");
+    }
+
+    #[test]
+    fn looks_like_date_garbage_classifies_known_shapes() {
+        assert!(looks_like_date_garbage(""));
+        assert!(looks_like_date_garbage("Jan 2025"));
+        assert!(looks_like_date_garbage("January 2025"));
+        assert!(looks_like_date_garbage("2022"));
+        assert!(looks_like_date_garbage("2022-01"));
+        assert!(looks_like_date_garbage("2022 - Present"));
+        assert!(looks_like_date_garbage("Jan 2022 - Dec 2024"));
+        assert!(!looks_like_date_garbage("Senior Embedded Developer"));
+        assert!(!looks_like_date_garbage("Engineer III"));
+        // Words containing month-prefix substrings must NOT match (the
+        // pattern requires the month token followed by whitespace +
+        // digits, so a plain word like "Marketing" stays a real title).
+        assert!(!looks_like_date_garbage("Marketing Lead"));
     }
 }

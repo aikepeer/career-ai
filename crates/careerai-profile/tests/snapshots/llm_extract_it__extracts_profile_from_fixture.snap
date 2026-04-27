@@ -1,0 +1,55 @@
+---
+source: crates/careerai-profile/tests/llm_extract_it.rs
+expression: profile
+---
+personal:
+  name: Alice Kumar
+  email: alice@example.com
+  phone: +91 98765 43210
+  location: Delhi NCR
+  links:
+    github: "https://github.com/alicek"
+    linkedin: "https://linkedin.com/in/alicek"
+summary: Senior embedded developer with 8 years building real-time control loops on STM32 and Linux ARM. Recently shipped an LLM-powered debug assistant that cut on-call MTTR by 40%.
+skills:
+  languages:
+    - Rust
+    - C
+    - C++
+    - Python
+  frameworks:
+    - Tokio
+    - Zephyr
+    - FreeRTOS
+  tools:
+    - Git
+    - Docker
+    - JTAG
+    - CAN bus analyzers
+experience:
+  - title: Senior Embedded Developer
+    company: Acme Robotics
+    location: Remote
+    start: 2022-01
+    end: Present
+    bullets:
+      - "Led migration of motor-control firmware from FreeRTOS to Zephyr, cutting binary size 30% and boot time 2x."
+      - Designed CAN bus arbitration scheme adopted across three product lines.
+  - title: Embedded Engineer
+    company: BetaCorp
+    location: Bangalore
+    start: 2019-06
+    end: 2021-12
+    bullets:
+      - Built ingest pipeline processing 12k events/sec from on-vehicle telemetry.
+      - Mentored two junior engineers through firmware bring-up.
+education:
+  - degree: "B.Tech, Computer Science Engineering"
+    institution: IIT Delhi
+    start: "2015"
+    end: "2019"
+projects:
+  - name: embedded-llm-helper
+    url: "https://github.com/alicek/embedded-llm-helper"
+    bullets:
+      - On-device tinyllama for firmware debugging on Cortex-M7.
