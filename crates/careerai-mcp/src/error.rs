@@ -22,10 +22,28 @@ pub enum McpServerError {
     AutoSubmitNotConfirmed,
 
     /// `careerai_profile_status` was called but `profile/profile.yaml` is
-    /// missing or unreadable.
+    /// missing or unreadable. Used by the **tool** path: a tool caller
+    /// gets back `invalid_request` so the LLM treats it as a workflow
+    /// problem ("import the profile first") rather than a missing
+    /// resource. The **resource** path uses `ResourceMissing` instead so
+    /// MCP clients can distinguish "absent resource" from "bad request".
     #[error("profile not found at {path}: {source}")]
     ProfileMissing {
         path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// MCP `read_resource` was called against a URI whose backing file is
+    /// absent or unreadable (e.g. `careerai://profile` when
+    /// `profile/profile.yaml` does not exist). Surfaces as MCP
+    /// `resource_not_found`, which is the semantically correct code per
+    /// the MCP spec — distinct from `invalid_request` (used by the
+    /// tool-call path) and from `ResourceNotFound` (used when the URI
+    /// scheme/shape itself is unknown).
+    #[error("resource missing at {uri}: {source}")]
+    ResourceMissing {
+        uri: String,
         #[source]
         source: std::io::Error,
     },
@@ -45,8 +63,9 @@ pub enum McpServerError {
         source: std::io::Error,
     },
 
-    /// A resource URI was malformed (e.g. `careerai://artifacts/abc` with
-    /// a non-existent application id).
+    /// A resource URI was malformed or its scheme/shape is unknown
+    /// (e.g. `careerai://artifacts/abc` with a non-existent application id,
+    /// or a URI that doesn't match any registered scheme at all).
     #[error("resource not found: {0}")]
     ResourceNotFound(String),
 
@@ -97,6 +116,18 @@ impl From<McpServerError> for ErrorData {
             ),
             McpServerError::ProfileMissing { path, .. } => {
                 ErrorData::invalid_request(message, Some(json!({ "path": path })))
+            }
+            // ResourceMissing (file IO failure on a known URI) and
+            // ResourceNotFound (URI shape/scheme is unknown) currently
+            // both map to MCP `resource_not_found` — the wire-level
+            // error code is the same, but the variants stay separate
+            // because `ResourceMissing` carries the underlying
+            // `io::Error` as `#[source]` for `tracing`/diagnostics
+            // while `ResourceNotFound` only carries the URI string.
+            // Silencing `clippy::match_same_arms` is intentional.
+            #[allow(clippy::match_same_arms)]
+            McpServerError::ResourceMissing { uri, .. } => {
+                ErrorData::resource_not_found(message, Some(json!({ "uri": uri })))
             }
             McpServerError::ProfileInvalid(_) => ErrorData::invalid_request(message, None),
             McpServerError::ProfileIo { path, .. } => {
