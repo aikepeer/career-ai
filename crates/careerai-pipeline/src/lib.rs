@@ -577,7 +577,11 @@ pub async fn apply_one(
     // autonomously. Mark the application as Drafted and return a DryRun-shaped
     // outcome. `careerai review` is the only path that turns Drafted →
     // Submitted, by calling submit_application with interactive_only=false.
-    if listing.source == "linkedin" && cfg.submit.linkedin.interactive_only {
+    // listings.source is conventionally lowercase but the schema doesn't
+    // enforce it; submit_application uses to_ascii_lowercase too. Match
+    // case-insensitively here so a "LinkedIn" or "LINKEDIN" row doesn't
+    // silently bypass the assist-mode short-circuit.
+    if listing.source.eq_ignore_ascii_case("linkedin") && cfg.submit.linkedin.interactive_only {
         queries::transition_application_and_listing(
             &pool,
             &application.id,
@@ -591,8 +595,8 @@ pub async fn apply_one(
         return Ok(AppliedOutcome {
             application_id: application.id,
             source: listing.source,
-            outcome: careerai_submit::SubmitOutcome::DryRun {
-                payload_summary: "drafted: awaiting careerai review".into(),
+            outcome: careerai_submit::SubmitOutcome::Drafted {
+                note: "awaiting careerai review".into(),
             },
         });
     }
@@ -700,8 +704,13 @@ pub async fn list_drafted_linkedin(
 /// path short-circuit in `apply_one` doesn't fire.
 ///
 /// The operator config on disk is **not** modified; only an ephemeral clone
-/// is used.  Errors if the application is not currently in `Drafted` state
-/// to guard against a race between `careerai review` and the daemon.
+/// is used.
+///
+/// Race guard: uses an atomic conditional UPDATE
+/// (`queries::claim_drafted_application`) to transition Drafted → Rendered
+/// before the browser launch. Two concurrent `careerai review` processes
+/// serialize via SQLite's write lock; only one wins the claim. The loser
+/// returns a clear error and never spawns a Chromium session.
 pub async fn confirm_linkedin_submit(
     root: &Path,
     cfg: &CoreConfig,
@@ -711,31 +720,31 @@ pub async fn confirm_linkedin_submit(
     let mut effective_cfg = cfg.clone();
     effective_cfg.submit.linkedin.interactive_only = false;
 
-    // Verify the application is actually in Drafted state — guards against a
-    // race where `careerai review` and the daemon both try to act on the same
-    // row concurrently.
     let pool = open_pool(root).await?;
-    let app = queries::find_application_by_id(&pool, application_id).await?;
-    drop(pool);
-
-    let expected_state = ListingState::Drafted.as_str();
-    if app.state != expected_state {
+    let claimed = queries::claim_drafted_application(&pool, application_id)
+        .await
+        .context("claim drafted application")?;
+    if !claimed {
+        // Read the current state for an actionable error. The claim
+        // already failed, so this read is purely diagnostic.
+        let app = queries::find_application_by_id(&pool, application_id).await?;
+        drop(pool);
+        let expected_state = ListingState::Drafted.as_str();
         return Err(anyhow::anyhow!(
-            "application {} is in state '{}', expected '{}'",
+            "application {} is in state '{}', expected '{}' \
+             (already submitted, already failed, or another `careerai review` won the claim)",
             application_id,
             app.state,
             expected_state,
         ));
     }
+    drop(pool);
 
-    // Delegate to apply_one. Because effective_cfg has interactive_only=false,
-    // the daemon-path short-circuit is bypassed and the normal LinkedIn
-    // submitter runs. Force live submission (Some(true)) rather than
-    // inheriting cfg.submit.auto_submit — `careerai review` is the
-    // explicit operator-confirmation path; if it took the dry-run path
-    // when auto_submit=false, the operator typing 'y' would see a
-    // success message but no actual submission, contradicting the docs
-    // and silently leaving the application in `drafted`.
+    // Claim won — application is now in Rendered state. Delegate to
+    // apply_one with Some(true) to force live submission.  `careerai
+    // review` is the explicit operator-confirmation path; inheriting
+    // cfg.submit.auto_submit (which defaults to false) would silently
+    // dry-run after the operator typed 'y'.
     apply_one(root, &effective_cfg, application_id, Some(true)).await
 }
 

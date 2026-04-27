@@ -28,8 +28,14 @@ pub enum SubmitOutcome {
     /// back (a candidate id, an application id, etc.) — used to
     /// correlate follow-ups at M7.
     Submitted { remote_id: String },
-    /// Dry-run logged a `would_submit` event but sent no bytes.
+    /// Dry-run logged a `would_submit` event but sent no bytes AND made
+    /// no state change. Distinct from `Drafted`, which writes Drafted
+    /// to the DB but defers the network click to `careerai review`.
     DryRun { payload_summary: String },
+    /// LinkedIn assist mode: the application was transitioned to
+    /// `Drafted` and is awaiting operator confirmation in
+    /// `careerai review`. State HAS changed; no network submission yet.
+    Drafted { note: String },
     /// Skipped before even attempting (source disabled, gated off).
     Skipped { reason: String },
 }
