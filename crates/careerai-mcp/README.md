@@ -20,11 +20,18 @@ tailoring, rendering, and (gated) auto-apply.
 Resources:
 
 - `careerai://profile` &mdash; full contents of `profile/profile.yaml`.
-- `careerai://shortlist/{date}` &mdash; current shortlist as JSON. (Date
-  segment is parsed but not yet used to filter; the pipeline only stores
-  the live shortlist.)
+  Discoverable via `resources/list`.
+- `careerai://shortlist/today` &mdash; today's shortlist as JSON.
+  Discoverable via `resources/list`.
+- `careerai://shortlist/{date}` &mdash; shortlist for a specific date.
+  Advertised via `resources/templates/list`. The `{date}` segment must
+  be either the literal `today` or a `YYYY-MM-DD` date; malformed
+  segments return an `invalid_params` error. The pipeline does not yet
+  filter by date, so a valid past date is logged + ignored and the
+  current shortlist is returned (warning emitted on stderr).
 - `careerai://artifacts/{application_id}` &mdash; the artifact list
   (paths + sizes) for one application, plus its current state.
+  Advertised via `resources/templates/list`.
 
 ## Safety gates
 
@@ -105,7 +112,12 @@ in-process `tokio::io::duplex` to verify:
 3. `careerai_profile_status` against an empty tempdir returns
    `{exists: false}` rather than erroring.
 4. `careerai_apply` with `dry_run: false` and no `confirm` token is
-   rejected with an `InvalidParams`-shaped error.
+   rejected, AND the user-facing error text mentions all three of
+   `confirm`, `I_UNDERSTAND_TOS_RISK`, and `dry_run` &mdash; guarding
+   against a regression to a generic "internal error" string.
+5. The spawned server task is joined on test exit (`ServerGuard`) so
+   server-side panics or pipeline errors fail the test instead of
+   being swallowed by a detached `JoinHandle`.
 
 ## Smoke test from the shell
 

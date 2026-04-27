@@ -192,7 +192,10 @@ pub struct ProfileStatusResult {
     pub path: String,
     pub exists: bool,
     pub valid: bool,
-    /// `None` when the file doesn't exist or fails parsing.
+    /// RFC 3339 UTC timestamp from the file's `mtime`. `None` only when
+    /// the file does not exist; parse / validation failures still
+    /// populate it (the on-disk timestamp is useful diagnostic info
+    /// even if the contents won't deserialize).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
     /// One human-readable line per validation issue. Empty when valid.

@@ -11,7 +11,12 @@
 //!    (no profile.yaml) returns a structured "exists: false" result —
 //!    not an error.
 //! 4. `tools/call` for `careerai_apply` with `dry_run: false` and no
-//!    `confirm` token is REJECTED with an InvalidParams error.
+//!    `confirm` token is REJECTED, AND the user-facing error text
+//!    actually mentions the `confirm` / `I_UNDERSTAND_TOS_RISK` /
+//!    `dry_run` triad — guarding against silent regression to a
+//!    generic "internal error" message.
+//! 5. The server task does not panic during normal client cancel
+//!    (`ServerGuard` joins it on drop and asserts a clean exit).
 
 use std::time::Duration;
 
@@ -29,15 +34,89 @@ struct TestClient;
 
 impl ClientHandler for TestClient {}
 
+/// RAII guard for the spawned server `JoinHandle`. Without this, a
+/// detached server task can swallow panics or pipeline errors silently
+/// — the test harness only sees the client side and prints PASS even
+/// though the server crashed mid-handshake.
+///
+/// On drop:
+/// 1. Wait up to ~2 s for the server task to finish naturally (the
+///    client should already have cancelled, which closes the duplex
+///    and lets `svc.waiting()` resolve).
+/// 2. If it's still running, abort it.
+/// 3. Inspect the join result and panic if the server task itself
+///    panicked or returned an error — surfacing it on the test thread.
+struct ServerGuard {
+    handle: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
+}
+
+impl ServerGuard {
+    fn new(handle: tokio::task::JoinHandle<anyhow::Result<()>>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for ServerGuard {
+    fn drop(&mut self) {
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+
+        // We're inside a tokio runtime (every `#[tokio::test]`
+        // provides one), so calling `block_on` here would panic with
+        // "Cannot start a runtime from within a runtime". Drive the
+        // join from a fresh thread that has its own tiny single-thread
+        // runtime; that thread is not driven by the test's runtime.
+        let abort = handle.abort_handle();
+        let join_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .expect("build join runtime");
+            rt.block_on(async { tokio::time::timeout(Duration::from_secs(2), handle).await })
+        });
+
+        // If the join takes too long here too (e.g. the runtime was
+        // already torn down with the server task still alive), give up
+        // and abort. We bound the wall-clock to ~3 s.
+        let Ok(join_result) = join_thread.join() else {
+            abort.abort();
+            return;
+        };
+
+        match join_result {
+            Ok(Ok(Ok(()))) => { /* clean shutdown */ }
+            Ok(Ok(Err(e))) => panic!("server task returned error: {e:#}"),
+            Ok(Err(join_err)) => {
+                if join_err.is_panic() {
+                    panic!("server task panicked: {join_err}");
+                } else {
+                    // cancelled/aborted: no panic to surface.
+                }
+            }
+            Err(_elapsed) => {
+                // Server still running after client cancel + 2 s
+                // grace. Abort and move on; this is not itself a
+                // failure (the duplex may still be draining).
+                abort.abort();
+            }
+        }
+    }
+}
+
 /// Bring up an in-process server + client pair. The harness mirrors the
 /// upstream rmcp `counter` example: a `tokio::io::duplex` connects the
 /// two halves, `Counter::new().serve(...)` becomes
-/// `CareerAiServer::new(...).serve(...)`.
+/// `CareerAiServer::new(...).serve(...)`. Returns a `ServerGuard` that
+/// joins the server task on drop and surfaces any panic on the test
+/// thread.
 async fn spawn_pair(
     root: std::path::PathBuf,
 ) -> (
     rmcp::service::RunningService<rmcp::RoleClient, TestClient>,
-    tokio::task::JoinHandle<anyhow::Result<()>>,
+    ServerGuard,
 ) {
     let (server_io, client_io) = tokio::io::duplex(1 << 16);
 
@@ -49,13 +128,13 @@ async fn spawn_pair(
     });
 
     let client = TestClient.serve(client_io).await.expect("client connect");
-    (client, server_handle)
+    (client, ServerGuard::new(server_handle))
 }
 
 #[tokio::test]
 async fn initialize_and_list_tools() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (client, _server) = spawn_pair(tmp.path().to_path_buf()).await;
+    let (client, _guard) = spawn_pair(tmp.path().to_path_buf()).await;
 
     // peer_info() returns the server's announced ServerInfo from the
     // initialize handshake.
@@ -99,7 +178,7 @@ async fn initialize_and_list_tools() {
 #[tokio::test]
 async fn profile_status_against_empty_root() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (client, _server) = spawn_pair(tmp.path().to_path_buf()).await;
+    let (client, _guard) = spawn_pair(tmp.path().to_path_buf()).await;
 
     let result = client
         .call_tool(
@@ -124,7 +203,7 @@ async fn profile_status_against_empty_root() {
 #[tokio::test]
 async fn apply_without_confirm_token_is_rejected() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (client, _server) = spawn_pair(tmp.path().to_path_buf()).await;
+    let (client, _guard) = spawn_pair(tmp.path().to_path_buf()).await;
 
     let mut args = serde_json::Map::new();
     args.insert("application_id".into(), json!("does-not-exist"));
@@ -138,20 +217,40 @@ async fn apply_without_confirm_token_is_rejected() {
     // Either: (a) the call returned a transport-level error (the handler
     // converted McpServerError::AutoSubmitNotConfirmed into an
     // InvalidParams ErrorData), or (b) the call returned a successful
-    // CallToolResult with `isError: true`. Either path is acceptable as
-    // long as the user-facing message mentions the confirm token.
+    // CallToolResult with `isError: true`. In BOTH cases the
+    // user-facing message must mention the confirm token, the literal
+    // I_UNDERSTAND_TOS_RISK, AND the dry_run gate — otherwise a
+    // regression to a generic "internal error" string would silently
+    // pass.
+    let assert_contains_kill_switch = |msg: &str| {
+        assert!(
+            msg.contains("confirm"),
+            "missing `confirm` in error message: {msg}"
+        );
+        assert!(
+            msg.contains("I_UNDERSTAND_TOS_RISK"),
+            "missing `I_UNDERSTAND_TOS_RISK` in error message: {msg}"
+        );
+        assert!(
+            msg.contains("dry_run"),
+            "missing `dry_run` in error message: {msg}"
+        );
+    };
+
     match outcome {
         Err(e) => {
             let msg = format!("{e:#}");
-            assert!(
-                msg.contains("confirm")
-                    || msg.contains("I_UNDERSTAND_TOS_RISK")
-                    || msg.contains("dry_run"),
-                "expected confirm/dry_run rejection, got: {msg}"
-            );
+            assert_contains_kill_switch(&msg);
         }
         Ok(result) => {
             assert_eq!(result.is_error, Some(true), "expected isError=true");
+            // Parse the text content (same shape as
+            // `profile_status_against_empty_root`): rmcp packs the
+            // ErrorData message into a text content block when
+            // `is_error` is true.
+            let text =
+                first_text(&result.content).expect("expected text content with error message");
+            assert_contains_kill_switch(text);
         }
     }
 
