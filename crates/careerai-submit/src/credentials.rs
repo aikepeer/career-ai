@@ -101,24 +101,7 @@ pub fn load(cred: &Credential) -> Result<String> {
     }
 }
 
-/// Decode the `exp` claim of a stored JWT-shaped cookie. LinkedIn's
-/// `li_at` is a signed JWT; the middle segment (base64url-encoded JSON)
-/// carries an `exp: <unix-seconds>` field. We DON'T verify the signature
-/// here — we only inspect the timestamp. The cookie is already trusted
-/// (it's our own session); the question is solely "is it about to
-/// expire?".
-///
-/// Returns `None` when:
-///   - the cookie isn't in the keyring (operator never refreshed),
-///   - the cookie isn't JWT-shaped (Naukri's `nauk_at` is opaque),
-///   - the middle segment doesn't decode as JSON,
-///   - or the JSON has no numeric `exp` field.
-///
-/// Always read-only on the keyring; never logs the cookie value.
-#[must_use]
 pub fn cookie_expiry(provider: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    use base64::Engine;
-
     let key = match provider {
         "linkedin" => "li_at",
         // Naukri cookies are opaque session strings, not JWTs.
@@ -126,12 +109,37 @@ pub fn cookie_expiry(provider: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     };
     let cred = Credential::for_source(provider, key);
     let token = load(&cred).ok()?;
+    parse_jwt_exp(&token)
+}
 
-    // JWT format: header.payload.signature  (3 base64url segments)
+/// Parse the `exp` claim out of a JWT string. Extracted so unit tests can
+/// exercise the production parser directly (without touching the OS
+/// keyring). `cookie_expiry` is then a 4-line wrapper around the
+/// keyring-read + this function.
+///
+/// Returns `None` when:
+///   - the token isn't JWT-shaped (3 dot-separated segments),
+///   - the middle segment isn't valid base64url,
+///   - the decoded payload isn't valid JSON,
+///   - or the JSON has no numeric `exp` field.
+///
+/// **Never logs the input token** — the JWT is a session-equivalent
+/// secret. Errors are reduced to `None` deliberately; the caller
+/// (`collect_cookie_warnings`) compensates by surfacing a different
+/// warning when the cookie is present in the keyring but unparseable.
+#[must_use]
+pub fn parse_jwt_exp(token: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    use base64::Engine;
+
+    // JWT format: header.payload.signature (3 base64url segments).
     let mut parts = token.split('.');
     let _header = parts.next()?;
     let payload_b64 = parts.next()?;
-    let _sig = parts.next()?; // presence-check only
+    let _sig = parts.next()?;
+    if parts.next().is_some() {
+        // 4+ segments → not a JWT.
+        return None;
+    }
 
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload_b64)
@@ -148,6 +156,58 @@ pub fn cookie_expiry(provider: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 pub fn cookie_remaining(provider: &str) -> Option<chrono::Duration> {
     let exp = cookie_expiry(provider)?;
     Some(exp - chrono::Utc::now())
+}
+
+/// Cookie health classification used by `careerai digest` to surface
+/// actionable warnings. Splits the `cookie_remaining`-returns-`None`
+/// case (silent today) into "absent" vs "present-but-unparseable" so
+/// the operator gets a different fix instruction in each case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CookieHealth {
+    /// No keyring entry. Operator never ran `careerai cookies refresh`.
+    NotStored,
+    /// Keyring entry exists but couldn't decode `exp` from the JWT.
+    /// Either the token isn't a JWT or it's been corrupted.
+    Unparseable,
+    /// `now > exp`. The duration is positive (`now - exp`).
+    Expired(chrono::Duration),
+    /// `exp - now < 48h`. The duration is positive (`exp - now`).
+    ExpiringSoon(chrono::Duration),
+    /// Healthy: more than 48h until expiry.
+    Healthy(chrono::Duration),
+}
+
+/// Diagnose the LinkedIn `li_at` cookie. Returns `CookieHealth` so the
+/// CLI can surface the right warning instead of silently dropping every
+/// failure mode into `None`.
+///
+/// Read-only on the keyring; never logs the token value. Naukri (and
+/// other opaque-cookie providers) currently return `NotStored` when
+/// absent and `Unparseable` when present (no JWT shape) — the digest
+/// caller skips Naukri entirely.
+#[must_use]
+pub fn cookie_health(provider: &str) -> CookieHealth {
+    let key = match provider {
+        "linkedin" => "li_at",
+        _ => return CookieHealth::NotStored,
+    };
+    let cred = Credential::for_source(provider, key);
+    let Ok(token) = load(&cred) else {
+        return CookieHealth::NotStored;
+    };
+    let Some(exp) = parse_jwt_exp(&token) else {
+        return CookieHealth::Unparseable;
+    };
+    let now = chrono::Utc::now();
+    if exp <= now {
+        return CookieHealth::Expired(now - exp);
+    }
+    let remaining = exp - now;
+    if remaining < chrono::Duration::hours(48) {
+        CookieHealth::ExpiringSoon(remaining)
+    } else {
+        CookieHealth::Healthy(remaining)
+    }
 }
 
 /// Store a credential in the keychain. Used by an `init` / `setup`
@@ -224,44 +284,65 @@ mod tests {
         format!("{header}.{payload}.{sig}")
     }
 
-    /// `cookie_expiry` ignores the signature segment and decodes the
-    /// `exp` claim. We bypass the keyring path by exercising the JWT
-    /// parser directly (test would otherwise depend on a real
-    /// keyring entry).
+    /// `parse_jwt_exp` decodes the `exp` claim from a JWT regardless of
+    /// signature validity. Exercising the production parser directly
+    /// (rather than reproducing the inline logic) means a refactor that
+    /// breaks the JWT split or base64 decode can't pass tests.
     #[test]
-    fn cookie_expiry_decodes_jwt_exp_claim() {
-        use base64::Engine;
+    fn parse_jwt_exp_decodes_valid_jwt() {
         let exp = 2_000_000_000_i64; // 2033-05-18 UTC
         let jwt = fake_jwt_with_exp(exp);
-
-        // Reproduce the inner parsing logic — the public function reads
-        // from the keyring, which we can't easily mock here.
-        let payload_b64 = jwt.split('.').nth(1).unwrap();
-        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(payload_b64)
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        let parsed = json.get("exp").unwrap().as_i64().unwrap();
-        assert_eq!(parsed, exp);
-
-        let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(exp, 0).unwrap();
-        assert_eq!(dt.timestamp(), exp);
+        let parsed = parse_jwt_exp(&jwt).expect("valid JWT must decode");
+        assert_eq!(parsed.timestamp(), exp);
     }
 
     #[test]
-    fn cookie_expiry_returns_none_for_naukri_opaque_cookie() {
+    fn parse_jwt_exp_rejects_non_jwt_shapes() {
+        // Not enough dots.
+        assert!(parse_jwt_exp("opaque-cookie").is_none());
+        assert!(parse_jwt_exp("a.b").is_none());
+        // Too many dots.
+        assert!(parse_jwt_exp("a.b.c.d").is_none());
+    }
+
+    #[test]
+    fn parse_jwt_exp_rejects_unparseable_payload() {
+        use base64::Engine;
+        // Valid JWT shape but middle segment isn't base64url.
+        assert!(parse_jwt_exp("header.notbase64!@#.sig").is_none());
+        // base64url decodes but isn't JSON.
+        let bad_payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"not json");
+        assert!(parse_jwt_exp(&format!("h.{bad_payload}.s")).is_none());
+    }
+
+    #[test]
+    fn parse_jwt_exp_rejects_payload_without_exp_claim() {
+        use base64::Engine;
+        let json = r#"{"sub":"test"}"#;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes());
+        assert!(parse_jwt_exp(&format!("h.{payload}.s")).is_none());
+    }
+
+    #[test]
+    fn cookie_expiry_short_circuits_for_non_linkedin_provider() {
         // Naukri cookies are opaque session strings, not JWTs.
         // cookie_expiry must short-circuit before hitting the keyring.
         assert!(cookie_expiry("naukri").is_none());
         assert!(cookie_expiry("indeed").is_none());
+        assert_eq!(cookie_health("naukri"), CookieHealth::NotStored);
+        assert_eq!(cookie_health("indeed"), CookieHealth::NotStored);
     }
 
     #[test]
-    fn cookie_expiry_returns_none_when_keyring_empty() {
-        // No li_at present in test environment — must return None
-        // gracefully rather than panicking.
-        assert!(cookie_expiry("linkedin").is_none());
-        assert!(cookie_remaining("linkedin").is_none());
+    fn cookie_expiry_handles_linkedin_lookup_without_panicking() {
+        // Note: the developer's real OS keyring may or may not contain
+        // a `career-ai`/`linkedin/li_at` entry. Asserting None would
+        // fail on a machine where the operator has stored a real
+        // cookie. Instead, only assert the call paths return — the
+        // public API must not panic regardless of keyring state.
+        let _ = cookie_expiry("linkedin");
+        let _ = cookie_remaining("linkedin");
+        let _ = cookie_health("linkedin");
     }
 
     #[test]

@@ -12,6 +12,7 @@ use chrono::Duration;
 
 use careerai_core::config::CoreConfig;
 use careerai_pipeline as pipeline;
+use careerai_submit::credentials::CookieHealth;
 
 /// Parse a since-window string. Accepts `<n>h`, `<n>d`, `<n>w`, or a
 /// bare integer interpreted as hours. Returns `chrono::Duration`.
@@ -52,22 +53,41 @@ fn humanize(d: Duration) -> String {
     }
 }
 
-/// Build the cookie_warnings list for the digest. Read-only side effect
-/// surface: queries the OS keyring, decodes JWT exp claim. Wired here in
-/// the CLI layer (rather than inside `pipeline::digest_summary`) so the
-/// pipeline crate doesn't have to depend on `careerai-submit` for a
-/// purely reporting feature.
-fn collect_cookie_warnings() -> Vec<String> {
-    let mut out = Vec::new();
-    if let Some(remaining) = careerai_submit::credentials::cookie_remaining("linkedin") {
-        if remaining < Duration::hours(48) {
-            out.push(format!(
-                "li_at expires in {} — run `careerai cookies refresh linkedin`",
-                humanize(remaining)
-            ));
+/// Build the cookie_warnings list for the digest. Read-only side
+/// effect surface: queries the OS keyring, decodes the JWT `exp`
+/// claim. Wired at the CLI layer (rather than inside
+/// `pipeline::digest_summary`) so the pipeline crate avoids *calling*
+/// keyring code for a purely reporting feature — the `careerai-submit`
+/// dependency itself is unconditional but that's only because pipeline
+/// owns the apply path; the digest read path stays clean.
+fn collect_cookie_warnings_from(health: CookieHealth) -> Vec<String> {
+    match health {
+        // Cookie is fine — no warning.
+        CookieHealth::Healthy(_) => Vec::new(),
+        // Cookie absent from keyring entirely.
+        CookieHealth::NotStored => {
+            vec!["li_at not in keyring — run `careerai cookies refresh linkedin`".to_string()]
         }
+        // Present but JWT couldn't be decoded.
+        CookieHealth::Unparseable => vec![
+            "li_at present in keyring but unparseable — run `careerai cookies refresh linkedin`"
+                .to_string(),
+        ],
+        // Already past exp.
+        CookieHealth::Expired(ago) => vec![format!(
+            "li_at EXPIRED {} ago — run `careerai cookies refresh linkedin`",
+            humanize(ago)
+        )],
+        // Still valid but inside the 48h warning window.
+        CookieHealth::ExpiringSoon(remaining) => vec![format!(
+            "li_at expires in {} — run `careerai cookies refresh linkedin`",
+            humanize(remaining)
+        )],
     }
-    out
+}
+
+fn collect_cookie_warnings() -> Vec<String> {
+    collect_cookie_warnings_from(careerai_submit::credentials::cookie_health("linkedin"))
 }
 
 /// Run `careerai digest` end to end.
@@ -170,5 +190,66 @@ mod tests {
         assert_eq!(humanize(Duration::hours(30)), "1d 6h");
         assert_eq!(humanize(Duration::minutes(45)), "45m");
         assert_eq!(humanize(Duration::seconds(125)), "2m");
+    }
+
+    #[test]
+    fn humanize_clamps_negative_to_zero() {
+        // A future refactor that drops `.max(0)` would leak negative
+        // values into the warning string. Pin the contract.
+        assert_eq!(humanize(Duration::hours(-5)), "0m");
+    }
+
+    #[test]
+    fn warnings_silent_for_healthy_cookie() {
+        let healthy = CookieHealth::Healthy(Duration::hours(96));
+        assert!(collect_cookie_warnings_from(healthy).is_empty());
+    }
+
+    #[test]
+    fn warnings_fire_inside_48h_quiet_outside() {
+        // The whole point of the digest warning is the 48h boundary —
+        // a regression flipping this comparator would ship green
+        // without a test that pins both sides.
+        let inside = CookieHealth::ExpiringSoon(Duration::hours(3));
+        let warnings = collect_cookie_warnings_from(inside);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("expires in"));
+        // humanize(3h) = "3h 0m" — the duration appears in the message.
+        assert!(warnings[0].contains("3h"), "got: {}", warnings[0]);
+
+        // Anything >= 48h is `Healthy` per `cookie_health` and stays
+        // silent. (The boundary lives in `cookie_health`, not here.)
+        let healthy = CookieHealth::Healthy(Duration::hours(48));
+        assert!(collect_cookie_warnings_from(healthy).is_empty());
+    }
+
+    #[test]
+    fn warnings_split_expired_from_expiring_soon() {
+        // Expired cookie must say "EXPIRED ... ago", not "expires in 0m".
+        let expired = CookieHealth::Expired(Duration::hours(3));
+        let warnings = collect_cookie_warnings_from(expired);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("EXPIRED") && warnings[0].contains("ago"),
+            "got: {}",
+            warnings[0]
+        );
+        assert!(!warnings[0].contains("expires in"));
+    }
+
+    #[test]
+    fn warnings_for_missing_cookie() {
+        let warnings = collect_cookie_warnings_from(CookieHealth::NotStored);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("not in keyring"));
+        assert!(warnings[0].contains("careerai cookies refresh linkedin"));
+    }
+
+    #[test]
+    fn warnings_for_unparseable_cookie() {
+        let warnings = collect_cookie_warnings_from(CookieHealth::Unparseable);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unparseable"));
+        assert!(warnings[0].contains("careerai cookies refresh linkedin"));
     }
 }

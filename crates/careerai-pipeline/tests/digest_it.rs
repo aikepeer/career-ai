@@ -113,20 +113,30 @@ async fn digest_summary_counts_transitions_in_window() {
     seed_listing_in_state(&pool, "linkedin", "li-1", ListingState::Drafted).await;
     seed_listing_in_state(&pool, "linkedin", "li-2", ListingState::Responded).await;
 
+    // Two filtered_out — proves the matched += branch fires for
+    // filtered_out, not just shortlisted.
+    seed_listing_in_state(&pool, "lever", "lever-3", ListingState::FilteredOut).await;
+    seed_listing_in_state(&pool, "greenhouse", "gh-4", ListingState::FilteredOut).await;
+
     drop(pool);
 
     let report = pipeline::digest_summary(tmp.path(), Duration::hours(24))
         .await
         .expect("digest_summary should succeed");
 
-    // 7 listings inserted → 7 'discovered' events.
-    assert_eq!(report.discovered, 7, "discovered count");
-    // Two transitioned through Shortlisted only; three through (Shortlisted +
-    // Tailored + Rendered + ...) means Shortlisted events = 2 + 3 + 1 + 1 = ...
-    // gh-2 → S; gh-3 → S T R Submitted; lever-1 → S; lever-2 → S T R Failed;
-    // li-1 → S T R Drafted; li-2 → S T R Submitted Responded
-    // = 6 distinct listings reaching Shortlisted (every state except Discovered).
+    // 9 listings inserted → 9 'discovered' events.
+    assert_eq!(report.discovered, 9, "discovered count");
+    // Six listings reached Shortlisted (every non-FilteredOut, non-
+    // pure-Discovered listing): gh-2, gh-3, lever-1, lever-2, li-1,
+    // li-2 — that's 6. (gh-1 stays Discovered; gh-4 + lever-3 go to
+    // FilteredOut without passing through Shortlisted.)
     assert_eq!(report.shortlisted, 6, "shortlisted count");
+    // matched = shortlisted + filtered_out distinct listings
+    //         = 6 + 2 = 8
+    assert_eq!(
+        report.matched, 8,
+        "matched should include both shortlisted and filtered_out"
+    );
     assert_eq!(report.drafted, 1, "drafted count (li-1)");
     // gh-3 + li-2 reached Submitted.
     assert_eq!(report.submitted, 2, "submitted count");
@@ -134,11 +144,13 @@ async fn digest_summary_counts_transitions_in_window() {
     assert_eq!(report.responded, 1, "responded count (li-2)");
 
     // Per-source: count of distinct listings with any activity.
+    // greenhouse: gh-1, gh-2, gh-3, gh-4 = 4
     assert_eq!(
         report.per_source.get("greenhouse").map(|c| c.total),
-        Some(3)
+        Some(4)
     );
-    assert_eq!(report.per_source.get("lever").map(|c| c.total), Some(2));
+    // lever: lever-1, lever-2, lever-3 = 3
+    assert_eq!(report.per_source.get("lever").map(|c| c.total), Some(3));
     assert_eq!(report.per_source.get("linkedin").map(|c| c.total), Some(2));
 
     // last_tick must be Some — every transition wrote an event.
@@ -183,12 +195,22 @@ async fn digest_summary_window_excludes_old_events() {
         .await
         .unwrap();
     let id = seed_listing_in_state(&pool, "greenhouse", "gh-old", ListingState::Submitted).await;
-    // Backdate every event for this listing to 48h ago — outside a 24h window.
-    sqlx::query("UPDATE events SET created_at = datetime('now', '-48 hours') WHERE listing_id = ?")
-        .bind(&id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    // Backdate every event for this listing to 48h ago — outside a 24h
+    // window. Use the exact production timestamp format
+    // (`strftime('%Y-%m-%dT%H:%M:%fZ')`) — events.created_at default
+    // uses this shape, and the digest WHERE clause compares as TEXT.
+    // A mismatched format (e.g. `datetime('now', '-48h')` which lacks
+    // the `T` and `Z`) would lex-compare differently and could
+    // accidentally include or exclude rows at the boundary.
+    sqlx::query(
+        "UPDATE events
+         SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-48 hours')
+         WHERE listing_id = ?",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
     drop(pool);
 
     let report = pipeline::digest_summary(tmp.path(), Duration::hours(24))
@@ -200,4 +222,42 @@ async fn digest_summary_window_excludes_old_events() {
         "old events outside the window must be excluded"
     );
     assert_eq!(report.submitted, 0);
+}
+
+/// `listings.source` isn't lowercase-enforced by the schema. Discovery
+/// adapters write lowercase, but a hand-edited row with `"LinkedIn"`
+/// or `"LINKEDIN"` would otherwise produce three separate buckets in
+/// `per_source`. The query must merge them via `LOWER()` (matching the
+/// PR #14 convention in `list_drafted_linkedin`).
+#[tokio::test]
+async fn digest_summary_per_source_is_case_insensitive() {
+    let tmp = tempfile::tempdir().unwrap();
+    scaffold_project(tmp.path());
+
+    let pool = pool_from_path(&tmp.path().join("data/careerai.sqlite"))
+        .await
+        .unwrap();
+    seed_listing_in_state(&pool, "linkedin", "li-lower", ListingState::Shortlisted).await;
+    seed_listing_in_state(&pool, "LinkedIn", "li-mixed", ListingState::Shortlisted).await;
+    seed_listing_in_state(&pool, "LINKEDIN", "li-upper", ListingState::Shortlisted).await;
+    drop(pool);
+
+    let report = pipeline::digest_summary(tmp.path(), Duration::hours(24))
+        .await
+        .unwrap();
+
+    // All three rows must aggregate under a single lowercase bucket.
+    assert_eq!(
+        report.per_source.get("linkedin").map(|c| c.total),
+        Some(3),
+        "case variants must merge into a single 'linkedin' bucket"
+    );
+    assert!(
+        !report.per_source.contains_key("LinkedIn"),
+        "no separate mixed-case bucket"
+    );
+    assert!(
+        !report.per_source.contains_key("LINKEDIN"),
+        "no separate upper-case bucket"
+    );
 }
