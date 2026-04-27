@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Job-board discovery adapters behind a unified Source trait"
 
 [dependencies]
+careerai-core = { path = "../careerai-core" }
 thiserror.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -15,10 +16,31 @@ serde_json.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
 regex = "1"
+chrono.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio = { workspace = true }
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
+governor.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true }
 wiremock.workspace = true
+tempfile.workspace = true
+serde_yaml.workspace = true
+rmcp = { workspace = true, features = ["client", "server", "macros", "transport-io", "transport-child-process", "transport-async-rw", "schemars"] }
+schemars.workspace = true
+
+# Integration test for the MCP-jobs adapter. `harness = false` so we
+# can hijack `main()` to switch between client-test mode and
+# stdio-server mode (the parent re-execs itself with
+# `CAREERAI_FAKE_MCP=1` to act as a fake MCP server). The default
+# libtest harness can't be used here because it writes its own banner
+# to stdout before any test function runs, which would corrupt the
+# JSON-RPC frames the child must speak on stdio.
+[[test]]
+name = "mcp_jobs_it"
+path = "tests/mcp_jobs_it.rs"
+harness = false
 
 [lints]
 workspace = true

@@ -7,6 +7,7 @@
 pub mod base;
 pub mod greenhouse;
 pub mod lever;
+pub mod mcp_jobs;
 pub mod naukri;
 pub mod remoteok;
 pub mod remotive;
@@ -15,6 +16,7 @@ pub mod util;
 pub use base::{RawListing, Source, SourceError};
 pub use greenhouse::GreenhouseSource;
 pub use lever::LeverSource;
+pub use mcp_jobs::{probe as probe_mcp_source, McpJobsSource, ProbeReport};
 pub use naukri::NaukriSource;
 pub use remoteok::RemoteOkSource;
 pub use remotive::RemotiveSource;
