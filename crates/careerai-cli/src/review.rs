@@ -37,10 +37,24 @@ pub async fn run_review(root: &Path, cfg: &CoreConfig) -> Result<()> {
         println!("[{}/{}] application {}", idx + 1, drafted.len(), app.id);
         // The operator can run `careerai inspect <id>` for full details.
         print!("  Submit? [y/N/s(kip remaining)]: ");
-        io::stdout().flush().ok();
+        // Propagate flush errors — a swallowed broken-pipe makes the
+        // prompt invisible while read_line still returns Ok(0), turning
+        // every remaining draft into a silent "no" with no indication
+        // anything went wrong.
+        io::stdout().flush().context("flush stdout")?;
 
         let mut line = String::new();
-        stdin.read_line(&mut line)?;
+        let bytes = stdin.read_line(&mut line).context("read stdin")?;
+        if bytes == 0 {
+            // EOF — stdin closed (piped from /dev/null, broken pipe,
+            // unattended cron). Surface the count of unprocessed drafts
+            // explicitly rather than silently treating each as skipped.
+            println!(
+                "(stdin closed — {} draft(s) left in drafted state)",
+                drafted.len() - idx
+            );
+            break;
+        }
         match line.trim().to_ascii_lowercase().as_str() {
             "y" | "yes" => match pipeline::confirm_linkedin_submit(root, cfg, &app.id).await {
                 Ok(outcome) => println!("    submitted: {:?}", outcome.outcome),
