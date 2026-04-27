@@ -88,11 +88,11 @@ impl CareerAiServer {
         &self,
         Parameters(_args): Parameters<ProfileStatusArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let result = self.do_profile_status()?;
+        let result = self.do_profile_status().await?;
         json_content(&result)
     }
 
-    fn do_profile_status(&self) -> Result<ProfileStatusResult, McpServerError> {
+    async fn do_profile_status(&self) -> Result<ProfileStatusResult, McpServerError> {
         let path = self.root().join("profile").join("profile.yaml");
         let path_str = path.display().to_string();
 
@@ -102,7 +102,11 @@ impl CareerAiServer {
         // as a structured `exists: false` result; the latter is surfaced
         // as an MCP error so the operator sees the real cause instead
         // of a misleading "does not exist" message.
-        let metadata = match std::fs::metadata(&path) {
+        //
+        // Uses `tokio::fs` so the async reactor is never blocked even on
+        // a slow disk; profile.yaml is small in practice but the rule is
+        // "no sync I/O on the reactor".
+        let metadata = match tokio::fs::metadata(&path).await {
             Ok(m) => Some(m),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => {
@@ -128,10 +132,13 @@ impl CareerAiServer {
             });
         }
 
-        let text = std::fs::read_to_string(&path).map_err(|e| McpServerError::ProfileMissing {
-            path: path_str.clone(),
-            source: e,
-        })?;
+        let text =
+            tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| McpServerError::ProfileMissing {
+                    path: path_str.clone(),
+                    source: e,
+                })?;
 
         match careerai_profile::Profile::from_yaml(&text) {
             Ok(profile) => {
@@ -465,11 +472,19 @@ impl CareerAiServer {
         ]
     }
 
-    fn read_profile_resource(&self, uri: &str) -> Result<ReadResourceResult, McpServerError> {
+    async fn read_profile_resource(&self, uri: &str) -> Result<ReadResourceResult, McpServerError> {
         let path = self.root().join("profile").join("profile.yaml");
-        let text = std::fs::read_to_string(&path).map_err(|e| McpServerError::ProfileMissing {
-            path: path.display().to_string(),
-            source: e,
+        // `tokio::fs` is preferred over `std::fs` here: `read_resource`
+        // runs on the async reactor and a missing/large profile would
+        // otherwise block the executor thread. Errors map to
+        // `ResourceMissing` so MCP clients see `resource_not_found`
+        // (per spec) rather than `invalid_request`, which is reserved
+        // for the `careerai_profile_status` tool path.
+        let text = tokio::fs::read_to_string(&path).await.map_err(|e| {
+            McpServerError::ResourceMissing {
+                uri: uri.to_string(),
+                source: e,
+            }
         })?;
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
             text,
@@ -600,7 +615,7 @@ impl ServerHandler for CareerAiServer {
 
         // careerai://profile
         if uri == "careerai://profile" {
-            return self.read_profile_resource(uri).map_err(Into::into);
+            return self.read_profile_resource(uri).await.map_err(Into::into);
         }
 
         // careerai://shortlist/{date}
