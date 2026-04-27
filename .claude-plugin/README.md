@@ -22,16 +22,23 @@ other tools.)
 - **`pandoc`** on PATH (resume rendering). Debian/Ubuntu:
   `sudo apt install pandoc`. macOS: `brew install pandoc`. Arch:
   `sudo pacman -S pandoc`.
-- **Anthropic API key** — either `ANTHROPIC_API_KEY` env var or a keyring
-  entry (`secret-tool` on Linux, `security` on macOS). Used for LLM
-  resume tailoring + the LLM profile extractor.
-- **`careerai` CLI + `careerai-mcp` MCP server** built and on PATH.
-  After cloning:
+- **Anthropic API key** — set the `ANTHROPIC_API_KEY` environment
+  variable. Used for LLM resume tailoring + the LLM profile extractor.
+  (Keyring-backed storage for the Anthropic key is a future capability;
+  the env var is the only supported path today.)
+- **`careerai` CLI** built and on PATH. After cloning:
   ```
   cd career-ai
   cargo install --path crates/careerai-cli      # `careerai` binary
-  cargo install --path crates/careerai-mcp      # `careerai-mcp` MCP server (Phase 2)
   ```
+  The `careerai-mcp` MCP server is **not yet on `main`** — it lands with
+  PR #18 (`feat/mcp-server`). Until that PR merges, build it from the
+  `feat/mcp-server` branch:
+  ```
+  git checkout feat/mcp-server
+  cargo install --path crates/careerai-mcp
+  ```
+  Once PR #18 merges, the server will be installable from `main`.
 - **Optional: RapidAPI key** (`LINKEDIN_RAPIDAPI_KEY`) for ToS-clean
   LinkedIn discovery via the `linkedin-jobs` MCP server.
 
