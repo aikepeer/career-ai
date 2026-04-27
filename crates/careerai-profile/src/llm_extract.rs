@@ -15,9 +15,10 @@
 //! `canonical_profile_hash`), so this crate can't depend on
 //! `careerai-llm` directly. To still let callers share their `Llm`
 //! implementation, this module defines the small [`LlmCaller`] async
-//! trait — a one-method shim around the gateway's complete()
-//! call. `careerai-llm` provides a blanket impl, so any `Llm` works as
-//! an `LlmCaller` at the CLI/orchestration boundary.
+//! trait — a one-method shim around the gateway's `complete()` call.
+//! The adapter from `careerai-llm`'s concrete `Llm` type into
+//! [`LlmCaller`] lives in `careerai-cli`, where both crates are already
+//! in scope and the `profile ↔ llm` dependency cycle is impossible.
 
 use async_trait::async_trait;
 use serde::Deserialize;

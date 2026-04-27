@@ -143,9 +143,12 @@ enum ProfileCommand {
         #[arg(long)]
         force: bool,
         /// Route PDF/DOCX text through the LLM extractor instead of the
-        /// regex heuristic. Auto-detects when omitted: enabled if an
-        /// Anthropic key is reachable (keyring or env), disabled
-        /// otherwise. Pass `--use-llm=false` to force the heuristic.
+        /// regex heuristic. Auto-detects when omitted only in builds
+        /// with the `live-llm` cargo feature: enabled if an Anthropic
+        /// key is reachable (keyring or env), disabled otherwise. In
+        /// non-`live-llm` builds the heuristic is always used unless
+        /// `--use-llm=true` is passed (which then errors clearly).
+        /// Pass `--use-llm=false` to force the heuristic.
         #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
         use_llm: Option<bool>,
     },
@@ -734,8 +737,9 @@ fn anthropic_key_reachable() -> bool {
 
 /// Parse PDF/DOCX inputs through the LLM extractor; LinkedIn ZIPs go
 /// through their structured CSV path unchanged. Currently only Anthropic
-/// is wired (Haiku is the cheap default; user may override via
-/// `config.llm.parse_resume_model` once we plumb it through).
+/// is wired. Model + cache directory are sourced from
+/// `config.llm.parse_resume_model` / `config.llm.cache_dir` when set,
+/// falling back to [`careerai_profile::ExtractOptions`] defaults.
 fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Profile> {
     #[cfg(feature = "live-llm")]
     {
@@ -758,15 +762,46 @@ fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Prof
                 )
             })?;
 
-        let cache_dir = std::env::current_dir()?.join(".cache/llm");
+        let cwd = std::env::current_dir()?;
+        // Best-effort config load — when no `config/` is present (e.g.
+        // running `profile import` before `init`), fall back to a
+        // `LlmConfig::default()` so a fresh box still works. We only
+        // need the `llm` block; `CoreConfig` itself doesn't impl
+        // Default but `LlmConfig` does.
+        let llm_cfg = CoreConfig::load(&cwd).map(|c| c.llm).unwrap_or_default();
+
+        // Honor `config.llm.cache_dir` so live profile-extract caches
+        // sit next to tailor caches under `data/cache/llm`. `.gitignore`
+        // already excludes `/data/`.
+        let cache_root: PathBuf = if llm_cfg.cache_dir.is_empty() {
+            PathBuf::from("data").join("cache").join("llm")
+        } else {
+            PathBuf::from(&llm_cfg.cache_dir)
+        };
+        let cache_dir = if cache_root.is_absolute() {
+            cache_root
+        } else {
+            cwd.join(cache_root)
+        };
         let cache = Arc::new(careerai_llm::Cache::new(cache_dir));
-        let opts = careerai_profile::ExtractOptions::default();
+
+        let mut opts = careerai_profile::ExtractOptions::default();
+        // Plumb config.llm.parse_resume_model into the extractor; strip
+        // any leading `provider/` prefix that the layered config uses
+        // (rig's anthropic transport expects the bare model id).
+        if !llm_cfg.parse_resume_model.is_empty() {
+            opts.model = strip_provider_prefix(&llm_cfg.parse_resume_model).to_string();
+        }
+        if !llm_cfg.prompt_version.is_empty() {
+            opts.prompt_version.clone_from(&llm_cfg.prompt_version);
+        }
+
         let llm = careerai_llm::RigLlm::with_api_key(
             careerai_llm::Provider::Anthropic,
             api_key,
             opts.model.clone(),
             cache,
-            60,
+            llm_cfg.timeout_seconds.max(1),
         )
         .map_err(|e| anyhow::anyhow!("construct llm client: {e}"))?;
 
@@ -783,6 +818,18 @@ fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Prof
              Re-run with: cargo run -p careerai-cli --features live-llm -- profile import …"
         )
     }
+}
+
+/// Strip a leading `provider/` prefix (e.g. `anthropic/claude-haiku-4-5`
+/// → `claude-haiku-4-5`). Layered config templates use the prefixed
+/// form for human readability, but rig's transports want the bare model
+/// id. No-op when no slash is present.
+///
+/// Only the live-LLM import path consumes this; tests exercise it on
+/// every build.
+#[cfg_attr(not(any(feature = "live-llm", test)), allow(dead_code))]
+fn strip_provider_prefix(model: &str) -> &str {
+    model.split_once('/').map_or(model, |(_, rest)| rest)
 }
 
 /// Adapter that lets a `careerai_llm::Llm` be used as a
@@ -836,6 +883,24 @@ mod tests {
     fn detect_stale_skills_flags_legacy_flat_list() {
         let yaml = "personal:\n  name: Alice\nskills:\n  - Rust\n  - Python\n";
         assert!(detect_stale_skills_schema(yaml));
+    }
+
+    #[test]
+    fn strip_provider_prefix_handles_layered_config_form() {
+        assert_eq!(
+            strip_provider_prefix("anthropic/claude-haiku-4-5"),
+            "claude-haiku-4-5"
+        );
+        assert_eq!(strip_provider_prefix("openai/gpt-4o-mini"), "gpt-4o-mini");
+    }
+
+    #[test]
+    fn strip_provider_prefix_passes_bare_model_id_through() {
+        assert_eq!(
+            strip_provider_prefix("claude-haiku-4-5"),
+            "claude-haiku-4-5"
+        );
+        assert_eq!(strip_provider_prefix(""), "");
     }
 
     #[test]
