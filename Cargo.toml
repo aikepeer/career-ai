@@ -55,6 +55,7 @@ keyring = "3"
 tokio-cron-scheduler = "0.13"
 futures = "0.3"
 scraper = "0.26"
+base64 = "0.22"
 
 [profile.release]
 opt-level = 3

@@ -18,7 +18,9 @@ careerai-tailor = { path = "../careerai-tailor" }
 careerai-render = { path = "../careerai-render" }
 careerai-submit = { path = "../careerai-submit" }
 anyhow.workspace = true
+chrono.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 tracing.workspace = true
 
 [features]
@@ -27,6 +29,7 @@ live-llm = ["careerai-llm/live-llm"]
 browser = ["careerai-submit/browser"]
 
 [dev-dependencies]
+sqlx.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true }
 

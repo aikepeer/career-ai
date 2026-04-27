@@ -151,6 +151,41 @@ pub struct DiscoveryReport {
     pub errors: usize,
 }
 
+/// Per-source activity counts within the digest window.
+#[derive(Debug, Default, Clone)]
+pub struct SourceCounts {
+    /// Distinct listings from this source that had any state transition
+    /// within the window.
+    pub total: usize,
+}
+
+/// Daily-digest snapshot returned by `digest_summary`. All count fields
+/// are "distinct listings that reached this state within `since`" — so a
+/// listing that moved Discovered → Shortlisted → Submitted in the window
+/// contributes once each to `discovered`, `shortlisted`, and `submitted`.
+#[derive(Debug, Default)]
+pub struct DigestReport {
+    /// ISO-8601 UTC timestamp marking the start of the window.
+    pub since_iso: String,
+    pub discovered: usize,
+    /// Listings that reached either `shortlisted` or `filtered_out` —
+    /// i.e. matcher activity (kept + rejected combined).
+    pub matched: usize,
+    pub shortlisted: usize,
+    pub drafted: usize,
+    pub submitted: usize,
+    pub failed: usize,
+    pub responded: usize,
+    pub per_source: std::collections::HashMap<String, SourceCounts>,
+    /// Most recent `events.created_at` in the database, formatted as ISO-
+    /// 8601 UTC. `None` when there are no events at all.
+    pub last_tick: Option<String>,
+    /// Human-readable warnings about credential expiry, e.g.
+    /// `"li_at expires in 1d 6h"`. Populated by `digest_summary` when
+    /// the LinkedIn cookie's JWT exp claim is within 48h.
+    pub cookie_warnings: Vec<String>,
+}
+
 pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<MatchReport> {
     let pool = open_pool(root).await?;
     let profile = load_profile(root)?;
@@ -772,4 +807,98 @@ pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectRe
         events,
         artifacts,
     })
+}
+
+/// Compute a daily-digest snapshot of pipeline activity within `since`
+/// (counted backwards from now, UTC). Single read-only call: opens the
+/// pool, runs three small SELECTs against the `events` table, returns
+/// `DigestReport`. Designed to complete in well under one second on a
+/// realistic database.
+///
+/// Counting model: every count is "distinct listings that had a
+/// transition `to_state = X` within the window". A listing that moved
+/// Discovered → Shortlisted → Submitted in the same window contributes
+/// once each to `discovered`, `shortlisted`, and `submitted`.
+///
+/// `cookie_warnings` is populated by the caller (CLI layer) — keeping
+/// keyring access out of the pipeline crate avoids pulling
+/// `careerai-submit` as a hard dependency for read-only reporting.
+pub async fn digest_summary(root: &Path, since: chrono::Duration) -> Result<DigestReport> {
+    use sqlx::Row;
+
+    let pool = open_pool(root).await?;
+    let cutoff = chrono::Utc::now() - since;
+    let cutoff_iso = cutoff.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    let mut report = DigestReport {
+        since_iso: cutoff_iso.clone(),
+        ..DigestReport::default()
+    };
+
+    // Per-state counts: distinct listing_id grouped by to_state in window.
+    let state_rows = sqlx::query(
+        "SELECT to_state, COUNT(DISTINCT listing_id) AS n
+         FROM events
+         WHERE created_at >= ?
+         GROUP BY to_state",
+    )
+    .bind(&cutoff_iso)
+    .fetch_all(&pool)
+    .await
+    .context("digest: per-state counts")?;
+
+    for row in state_rows {
+        let to_state: String = row.try_get("to_state")?;
+        let n: i64 = row.try_get("n")?;
+        let n = usize::try_from(n).unwrap_or(0);
+        match to_state.as_str() {
+            "discovered" => report.discovered = n,
+            "filtered_out" => report.matched += n,
+            "shortlisted" => {
+                report.shortlisted = n;
+                report.matched += n;
+            }
+            "drafted" => report.drafted = n,
+            "submitted" => report.submitted = n,
+            "failed" => report.failed = n,
+            "responded" => report.responded = n,
+            // Tailored / Rendered / Prepared / Skipped not surfaced in
+            // the digest summary — they're transient pipeline stages
+            // rather than operator-meaningful outcomes.
+            _ => {}
+        }
+    }
+
+    // Per-source: distinct listings with any transition in window.
+    let source_rows = sqlx::query(
+        "SELECT l.source, COUNT(DISTINCT e.listing_id) AS n
+         FROM events e
+         JOIN listings l ON l.id = e.listing_id
+         WHERE e.created_at >= ?
+         GROUP BY l.source",
+    )
+    .bind(&cutoff_iso)
+    .fetch_all(&pool)
+    .await
+    .context("digest: per-source counts")?;
+
+    for row in source_rows {
+        let source: String = row.try_get("source")?;
+        let n: i64 = row.try_get("n")?;
+        report.per_source.insert(
+            source,
+            SourceCounts {
+                total: usize::try_from(n).unwrap_or(0),
+            },
+        );
+    }
+
+    // last_tick: most recent event in the database (not bounded by window).
+    let last: Option<(String,)> = sqlx::query_as("SELECT MAX(created_at) FROM events")
+        .fetch_optional(&pool)
+        .await
+        .context("digest: last_tick")?;
+    report.last_tick = last.and_then(|(s,)| if s.is_empty() { None } else { Some(s) });
+
+    Ok(report)
 }
