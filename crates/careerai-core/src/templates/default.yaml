@@ -87,6 +87,19 @@ submit:
     jitter_seconds: 60
     quiet_hours_utc: [19, 1]
     action_timeout_seconds: 20
+    interactive_only: true   # daemon never auto-clicks; only `careerai review` does
+  # Naukri.com browser submitter (Tasks 2.5+2.6). Only consulted when the CLI
+  # is built with `--features browser`. No `interactive_only` gate — Naukri
+  # risk profile is low enough for daemon-driven auto-submit when operator
+  # opts in via `submit.per_source.naukri.enabled=true` and `auto_submit=true`.
+  naukri:
+    headless: true
+    max_per_day: 10
+    min_seconds_between: 60
+    jitter_seconds: 15
+    quiet_hours_utc: [19, 1]
+    action_timeout_seconds: 30
+    # screenshots_dir defaults to artifacts/naukri-audit
 
 llm:
   tailor_model: "anthropic/claude-sonnet-4-6"

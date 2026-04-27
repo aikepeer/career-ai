@@ -18,12 +18,18 @@ pub enum SubmitError {
     Serde(#[from] serde_json::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("application is in state '{state}'; expected 'rendered' or 'prepared'")]
+    #[error("application is in state '{state}'; expected 'rendered', 'prepared', or 'drafted'")]
     BadState { state: String },
     #[error("unknown source: {0}")]
     UnknownSource(String),
     #[error("source '{0}' is disabled in submit.per_source config")]
     SourceDisabled(String),
+    /// The submitter exists but its click/network flow has not been
+    /// built yet. Distinct from `SourceDisabled` (config) so audit logs
+    /// can tell "operator turned this off" from "engineer hasn't
+    /// shipped this".
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
 }
 
 pub type Result<T> = std::result::Result<T, SubmitError>;

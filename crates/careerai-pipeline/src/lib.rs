@@ -572,6 +572,31 @@ pub async fn apply_one(
     let application = queries::find_application_by_id(&pool, application_id).await?;
     let listing = queries::find_by_id(&pool, &application.listing_id).await?;
 
+    // LinkedIn assist mode: when interactive_only is set (default true), the
+    // daemon never opens a browser session and never clicks Submit
+    // autonomously. Mark the application as Drafted and return a DryRun-shaped
+    // outcome. `careerai review` is the only path that turns Drafted →
+    // Submitted, by calling submit_application with interactive_only=false.
+    if listing.source == "linkedin" && cfg.submit.linkedin.interactive_only {
+        queries::transition_application_and_listing(
+            &pool,
+            &application.id,
+            &listing.id,
+            ListingState::Drafted.as_str(),
+            ListingState::Drafted,
+            Some("drafted: awaiting careerai review"),
+        )
+        .await
+        .context("transition application to drafted")?;
+        return Ok(AppliedOutcome {
+            application_id: application.id,
+            source: listing.source,
+            outcome: careerai_submit::SubmitOutcome::DryRun {
+                payload_summary: "drafted: awaiting careerai review".into(),
+            },
+        });
+    }
+
     let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
     let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
         .await
@@ -651,6 +676,67 @@ pub async fn applied_show(
     queries::list_applications_by_state_and_source(&pool, "submitted", source_filter, limit)
         .await
         .context("list submitted applications")
+}
+
+/// List all applications currently in the `drafted` state whose listing source
+/// is `linkedin`, oldest-first.
+///
+/// Consumed by `careerai review` to enumerate the queue of applications that
+/// the daemon parked in `Drafted` due to `interactive_only = true`. The
+/// operator is then prompted to confirm or skip each one.
+pub async fn list_drafted_linkedin(
+    root: &Path,
+    limit: i64,
+) -> Result<Vec<careerai_db::Application>> {
+    let pool = open_pool(root).await?;
+    queries::list_drafted_linkedin(&pool, limit)
+        .await
+        .context("list drafted linkedin applications")
+}
+
+/// Confirm-submit a drafted LinkedIn application via the browser, called
+/// from `careerai review` after the operator approves. Overrides
+/// `interactive_only` to `false` for this single invocation so the daemon-
+/// path short-circuit in `apply_one` doesn't fire.
+///
+/// The operator config on disk is **not** modified; only an ephemeral clone
+/// is used.  Errors if the application is not currently in `Drafted` state
+/// to guard against a race between `careerai review` and the daemon.
+pub async fn confirm_linkedin_submit(
+    root: &Path,
+    cfg: &CoreConfig,
+    application_id: &str,
+) -> Result<AppliedOutcome> {
+    // Clone config and lift the assist-mode gate just for this call.
+    let mut effective_cfg = cfg.clone();
+    effective_cfg.submit.linkedin.interactive_only = false;
+
+    // Verify the application is actually in Drafted state — guards against a
+    // race where `careerai review` and the daemon both try to act on the same
+    // row concurrently.
+    let pool = open_pool(root).await?;
+    let app = queries::find_application_by_id(&pool, application_id).await?;
+    drop(pool);
+
+    let expected_state = ListingState::Drafted.as_str();
+    if app.state != expected_state {
+        return Err(anyhow::anyhow!(
+            "application {} is in state '{}', expected '{}'",
+            application_id,
+            app.state,
+            expected_state,
+        ));
+    }
+
+    // Delegate to apply_one. Because effective_cfg has interactive_only=false,
+    // the daemon-path short-circuit is bypassed and the normal LinkedIn
+    // submitter runs. Force live submission (Some(true)) rather than
+    // inheriting cfg.submit.auto_submit — `careerai review` is the
+    // explicit operator-confirmation path; if it took the dry-run path
+    // when auto_submit=false, the operator typing 'y' would see a
+    // success message but no actual submission, contradicting the docs
+    // and silently leaving the application in `drafted`.
+    apply_one(root, &effective_cfg, application_id, Some(true)).await
 }
 
 /// Gather everything needed to render `careerai inspect <id>`.

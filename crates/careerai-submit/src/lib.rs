@@ -16,6 +16,9 @@ pub mod error;
 #[cfg(feature = "browser")]
 pub mod linkedin;
 pub mod linkedin_selectors;
+#[cfg(feature = "browser")]
+pub mod naukri;
+pub mod naukri_selectors;
 pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
@@ -27,6 +30,8 @@ pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
 #[cfg(feature = "browser")]
 pub use linkedin::{LinkedinConfig, LinkedinSubmitter};
+#[cfg(feature = "browser")]
+pub use naukri::{NaukriConfig, NaukriSubmitter};
 pub use rate_limiter::{RateLimitError, RateLimiter, RatePermit, RatePolicy};
 
 use std::path::Path;
@@ -83,9 +88,23 @@ pub async fn submit_application(
     application_id: &str,
 ) -> Result<SubmitOutcome> {
     // 1. Load the application and assert it's ready to submit.
+    //    `Drafted` is accepted because `pipeline::confirm_linkedin_submit`
+    //    routes through this function after the operator approves a
+    //    drafted LinkedIn application in `careerai review`. The pipeline
+    //    layer does its own `state == Drafted` precheck before calling.
+    //
+    //    INVARIANT: `Drafted` is currently only produced by the LinkedIn
+    //    interactive_only short-circuit in `pipeline::apply_one`. No
+    //    other source writes Drafted today. Any future submitter that
+    //    introduces a draft-then-confirm flow MUST add an equivalent
+    //    pre-check in the pipeline layer before calling this function;
+    //    the source-agnostic allowlist here is a defensive accept, not
+    //    an authorisation to draft from arbitrary sources.
     let application = queries::find_application_by_id(pool, application_id).await?;
     let state_str = application.state.as_str();
-    if state_str != ListingState::Rendered.as_str() && state_str != ListingState::Prepared.as_str()
+    if state_str != ListingState::Rendered.as_str()
+        && state_str != ListingState::Prepared.as_str()
+        && state_str != ListingState::Drafted.as_str()
     {
         return Err(SubmitError::BadState {
             state: application.state.clone(),
@@ -140,11 +159,30 @@ pub async fn submit_application(
             )
             .await;
         }
+        // Naukri.com browser-driven submitter (Tasks 2.5+2.6). No
+        // `interactive_only` gate — the daemon may auto-submit when
+        // `auto_submit=true` AND `per_source.naukri.enabled=true`.
+        #[cfg(feature = "browser")]
+        "naukri" => Box::new(crate::naukri::NaukriSubmitter::new(
+            crate::naukri::NaukriConfig::from_core(cfg),
+            shared_rate_limiter(),
+        )),
+        #[cfg(not(feature = "browser"))]
+        "naukri" => {
+            return mark_skipped(
+                pool,
+                &application,
+                &listing,
+                "naukri requires --features browser; rebuild with \
+                 `cargo build -p careerai-cli --features browser`",
+            )
+            .await;
+        }
         // Feed-only sources don't have an HTTP submission API. Browser
         // submitters land in M5 for LinkedIn / Indeed; until then the
         // safe answer is to mark the application Skipped with a clear
         // reason rather than fail the whole batch with UnknownSource.
-        "remotive" | "remoteok" | "naukri" => {
+        "remotive" | "remoteok" => {
             return mark_skipped(
                 pool,
                 &application,

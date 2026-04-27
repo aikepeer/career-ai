@@ -17,6 +17,7 @@ pub enum ListingState {
     Tailored,
     Rendered,
     Prepared,
+    Drafted,
     Submitted,
     Skipped,
     Failed,
@@ -41,6 +42,7 @@ impl ListingState {
             Self::Tailored => "tailored",
             Self::Rendered => "rendered",
             Self::Prepared => "prepared",
+            Self::Drafted => "drafted",
             Self::Submitted => "submitted",
             Self::Skipped => "skipped",
             Self::Failed => "failed",
@@ -70,6 +72,7 @@ impl FromStr for ListingState {
             "tailored" => Ok(Self::Tailored),
             "rendered" => Ok(Self::Rendered),
             "prepared" => Ok(Self::Prepared),
+            "drafted" => Ok(Self::Drafted),
             "submitted" => Ok(Self::Submitted),
             "skipped" => Ok(Self::Skipped),
             "failed" => Ok(Self::Failed),
@@ -90,6 +93,10 @@ mod tests {
         assert!(ListingState::Failed.is_terminal());
         assert!(!ListingState::Discovered.is_terminal());
         assert!(!ListingState::Shortlisted.is_terminal());
+        // Drafted MUST be non-terminal — `careerai review` transitions
+        // it to Submitted/Failed. A regression that flips this would
+        // silently break the LinkedIn assist flow.
+        assert!(!ListingState::Drafted.is_terminal());
     }
 
     #[test]
@@ -101,6 +108,7 @@ mod tests {
             ListingState::Tailored,
             ListingState::Rendered,
             ListingState::Prepared,
+            ListingState::Drafted,
             ListingState::Submitted,
             ListingState::Skipped,
             ListingState::Failed,
@@ -109,5 +117,27 @@ mod tests {
             let back: ListingState = s.as_str().parse().unwrap();
             assert_eq!(back, s);
         }
+    }
+
+    #[test]
+    fn drafted_serde_roundtrip() {
+        let s = ListingState::Drafted;
+        let yaml = serde_yaml::to_string(&s).unwrap();
+        assert_eq!(yaml.trim(), "drafted");
+        let back: ListingState = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(s, back);
+    }
+
+    #[test]
+    fn drafted_as_str_is_drafted() {
+        assert_eq!(ListingState::Drafted.as_str(), "drafted");
+    }
+
+    #[test]
+    fn drafted_parses_from_str() {
+        assert_eq!(
+            "drafted".parse::<ListingState>().unwrap(),
+            ListingState::Drafted
+        );
     }
 }
