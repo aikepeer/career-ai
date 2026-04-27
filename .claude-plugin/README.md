@@ -71,7 +71,7 @@ does not relax any of them.
 3. **Constrained-diff resume tailoring.** The LLM tailoring step emits a
    JSON diff that can only reorder or rewrite existing bullets — it
    cannot fabricate new experience, titles, dates, or employers. The
-   validator in `careerai-tailor/src/diff.rs` is strict and rejects
+   validator in `crates/careerai-tailor/src/diff.rs` is strict and rejects
    anything outside the grammar. See
    [`skills/tailor-resume/SKILL.md`](./skills/tailor-resume/SKILL.md).
 

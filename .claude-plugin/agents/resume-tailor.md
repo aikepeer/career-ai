@@ -31,7 +31,7 @@ The tailoring tool emits a JSON diff that can only:
 
 It **cannot** introduce new experience, titles, dates, employers, or
 skills not in the master profile. The schema validator in
-`careerai-tailor/src/diff.rs` rejects anything else.
+`crates/careerai-tailor/src/diff.rs` rejects anything else.
 
 When summarizing the tailored output, **do not describe a bullet that
 isn't in the master profile**. If you do, you've broken the invariant in
