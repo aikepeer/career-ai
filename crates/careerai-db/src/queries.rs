@@ -473,6 +473,28 @@ pub async fn list_artifacts(pool: &SqlitePool, application_id: &str) -> Result<V
     Ok(rows)
 }
 
+/// List applications in state `drafted` whose listing source is `linkedin`,
+/// oldest first (so operators review in submission order).
+///
+/// Used by `careerai review` to enumerate the queue of applications that the
+/// daemon has parked in `Drafted` due to `interactive_only = true`. The limit
+/// prevents an unbounded SELECT on large databases.
+pub async fn list_drafted_linkedin(pool: &SqlitePool, limit: i64) -> Result<Vec<Application>> {
+    let rows = sqlx::query_as::<_, Application>(
+        "SELECT a.id, a.listing_id, a.state, a.profile_hash, a.prompt_version, a.llm_model,
+                a.created_at, a.updated_at
+         FROM applications a
+         JOIN listings l ON l.id = a.listing_id
+         WHERE a.state = 'drafted' AND l.source = 'linkedin'
+         ORDER BY a.created_at ASC
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -834,5 +856,66 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, DbError::Sqlx(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn list_drafted_linkedin_returns_only_drafted_linkedin() {
+        let pool = pool_in_memory().await.unwrap();
+
+        // Listing A + B: linkedin source
+        let (li_id_a, _) = insert_or_ignore(&pool, &fixture("linkedin", "li-dl-a"))
+            .await
+            .unwrap();
+        let (li_id_b, _) = insert_or_ignore(&pool, &fixture("linkedin", "li-dl-b"))
+            .await
+            .unwrap();
+        // Listing C: linkedin but application ends up in `rendered` (wrong state)
+        let (li_id_c, _) = insert_or_ignore(&pool, &fixture("linkedin", "li-dl-c"))
+            .await
+            .unwrap();
+        // Listing D: greenhouse source (wrong source)
+        let (gh_id, _) = insert_or_ignore(&pool, &fixture("greenhouse", "gh-dl-d"))
+            .await
+            .unwrap();
+
+        // A: drafted + linkedin
+        let app_a = create_application(&pool, &new_app(&li_id_a)).await.unwrap();
+        set_application_state(&pool, &app_a.id, "drafted")
+            .await
+            .unwrap();
+
+        // B: drafted + linkedin
+        let app_b = create_application(&pool, &new_app(&li_id_b)).await.unwrap();
+        set_application_state(&pool, &app_b.id, "drafted")
+            .await
+            .unwrap();
+
+        // C: rendered + linkedin (wrong state — must not appear)
+        let app_c = create_application(&pool, &new_app(&li_id_c)).await.unwrap();
+        set_application_state(&pool, &app_c.id, "rendered")
+            .await
+            .unwrap();
+
+        // D: drafted + greenhouse (wrong source — must not appear)
+        let app_d = create_application(&pool, &new_app(&gh_id)).await.unwrap();
+        set_application_state(&pool, &app_d.id, "drafted")
+            .await
+            .unwrap();
+
+        let rows = list_drafted_linkedin(&pool, 100).await.unwrap();
+        assert_eq!(rows.len(), 2, "must return only drafted+linkedin rows");
+        for r in &rows {
+            assert_eq!(r.state, "drafted", "unexpected state: {}", r.state);
+        }
+        // IDs must be A and B (order is oldest-first, which is insertion order here)
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(
+            ids.contains(&app_a.id.as_str()),
+            "app_a missing from results"
+        );
+        assert!(
+            ids.contains(&app_b.id.as_str()),
+            "app_b missing from results"
+        );
     }
 }

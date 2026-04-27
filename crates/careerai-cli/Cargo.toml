@@ -23,6 +23,7 @@ careerai-scheduler = { path = "../careerai-scheduler" }
 careerai-pipeline = { path = "../careerai-pipeline" }
 anyhow.workspace = true
 clap.workspace = true
+keyring.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
