@@ -21,7 +21,9 @@ Calls the `careerai_digest` MCP tool with `since: <window>`.
 - Counts by state transition during the window.
 - Per-source breakdown (discovered, shortlisted, submitted, responded).
 - Last successful cron tick per source.
-- Cookie expiry warnings (any session cookie expiring within 7 days).
+- LinkedIn `li_at` cookie expiry warnings (when expiry is within 48
+  hours, decoded from the cookie's JWT `exp` claim). Naukri cookies are
+  opaque and are not checked.
 
 ## Notes
 

@@ -97,6 +97,7 @@ Surface the response: status code, follow-up state (`submitted`,
   permit will be available; the daemon will retry on its next tick if
   enabled.
 - **`SourceLoginExpired`** — refresh cookies via
-  `careerai cookies set <source>` and re-run.
+  `careerai cookies refresh <provider>` (`linkedin` or `naukri`) and
+  re-run.
 - **`ApplicationNotReady`** — application is not in `rendered` /
   `prepared`. Run the `tailor-resume` skill first.

@@ -55,5 +55,6 @@ Live prints: source, submission timestamp, response code, follow-up state.
 - `ApplicationNotReady` — application is not in `rendered` or `prepared`.
   Run `/career:tailor` first.
 - `RateLimited` — back off; the daemon will retry on its next tick.
-- `SourceLoginExpired` — refresh cookies via `careerai cookies set
-  <source>` and re-run.
+- `SourceLoginExpired` — refresh cookies via `careerai cookies refresh
+  <provider>` (`linkedin` and `naukri` are the supported providers) and
+  re-run.

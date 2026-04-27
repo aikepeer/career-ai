@@ -21,8 +21,10 @@ Sections:
    `submitted`, `responded`, `skipped`, `failed`).
 3. **Per-source** — listings + applications grouped by source.
 4. **Last cron tick** — timestamp of the most recent daemon run.
-5. **Cookie expiry warnings** — any session cookies (LinkedIn, Naukri)
-   expiring within 7 days, decoded from their JWT `exp` claims.
+5. **Cookie expiry warnings** — LinkedIn `li_at` session-cookie warnings
+   only, decoded from the cookie's JWT `exp` claim and surfaced when
+   expiry is within 48 hours. Naukri cookies are opaque and are not
+   checked.
 
 ## Notes
 
