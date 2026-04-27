@@ -483,10 +483,13 @@ pub async fn list_artifacts(pool: &SqlitePool, application_id: &str) -> Result<V
 /// negative value would disable the LIMIT in SQLite and a zero-or-negative
 /// would silently return nothing — both surprising for a "bounded" query.
 ///
-/// `LOWER(l.source) = 'linkedin'` mirrors the case-insensitive lookup in
-/// `careerai-submit::submit_application`. The schema doesn't enforce
-/// lowercase on `listings.source`, so a row inserted as `"LinkedIn"`
-/// would otherwise be invisible to `careerai review`.
+/// `l.source = 'linkedin' COLLATE NOCASE` mirrors the case-insensitive
+/// lookup in `careerai-submit::submit_application`. The schema doesn't
+/// enforce lowercase on `listings.source`, so a row inserted as
+/// `"LinkedIn"` would otherwise be invisible to `careerai review`.
+/// COLLATE NOCASE is sargable — unlike `LOWER(l.source)` which would
+/// force a function evaluation per row and prevent SQLite from using
+/// the `idx_listings_source_state` index on `listings(source, state)`.
 pub async fn list_drafted_linkedin(pool: &SqlitePool, limit: i64) -> Result<Vec<Application>> {
     const MIN_LIMIT: i64 = 1;
     const MAX_LIMIT: i64 = 1_000;
@@ -497,7 +500,7 @@ pub async fn list_drafted_linkedin(pool: &SqlitePool, limit: i64) -> Result<Vec<
                 a.created_at, a.updated_at
          FROM applications a
          JOIN listings l ON l.id = a.listing_id
-         WHERE a.state = 'drafted' AND LOWER(l.source) = 'linkedin'
+         WHERE a.state = 'drafted' AND l.source = 'linkedin' COLLATE NOCASE
          ORDER BY a.created_at ASC
          LIMIT ?",
     )
@@ -519,9 +522,17 @@ pub async fn list_drafted_linkedin(pool: &SqlitePool, limit: i64) -> Result<Vec<
 /// `Rendered` is reused (rather than introducing a new `Submitting` state)
 /// because `submit_application`'s state guard already accepts it and the
 /// downstream success/failure transitions remain coherent. After a
-/// successful submit the row goes to `Submitted`; on failure to `Failed`.
-/// A crashed-mid-submission application ends up `Failed` and won't be
-/// re-listed by `list_drafted_linkedin` — operator must intervene.
+/// successful submit the row goes to `Submitted`; on a `submit_application`
+/// failure path the row goes to `Failed`.
+///
+/// **Crash recovery.** If the process crashes after the claim succeeds but
+/// before `submit_application` runs (or while it's running, before its
+/// failure transition), the row stays in `Rendered`. It is no longer
+/// returned by `list_drafted_linkedin`, so the operator won't see it in
+/// `careerai review`. Recovery: inspect with `careerai inspect <id>` and
+/// either resubmit by setting state back to `drafted` and re-running
+/// review, or call `careerai apply <id>` directly (Rendered is a valid
+/// input state for the submit layer).
 pub async fn claim_drafted_application(pool: &SqlitePool, application_id: &str) -> Result<bool> {
     let res = sqlx::query(
         "UPDATE applications

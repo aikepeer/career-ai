@@ -574,9 +574,11 @@ pub async fn apply_one(
 
     // LinkedIn assist mode: when interactive_only is set (default true), the
     // daemon never opens a browser session and never clicks Submit
-    // autonomously. Mark the application as Drafted and return a DryRun-shaped
-    // outcome. `careerai review` is the only path that turns Drafted →
-    // Submitted, by calling submit_application with interactive_only=false.
+    // autonomously. Transition the application to Drafted in the DB and
+    // return `SubmitOutcome::Drafted` (a real state change, not a dry-run).
+    // `careerai review` is the only path that turns Drafted → Submitted, by
+    // calling `confirm_linkedin_submit` which atomically claims the row and
+    // delegates to submit_application with interactive_only=false.
     // listings.source is conventionally lowercase but the schema doesn't
     // enforce it; submit_application uses to_ascii_lowercase too. Match
     // case-insensitively here so a "LinkedIn" or "LINKEDIN" row doesn't
