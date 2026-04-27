@@ -329,7 +329,7 @@ async fn run_mcp_probe(cfg: &CoreConfig) -> Result<()> {
             }
             Err(e) => {
                 any_unreachable = true;
-                println!("{name}: unreachable -- {err}", name = src_cfg.name, err = e,);
+                println!("{name}: unreachable -- {err}", name = src_cfg.name, err = e);
                 println!(
                     "  hint: install/run `{cmd} {args}` and retry",
                     cmd = src_cfg.mcp.command,

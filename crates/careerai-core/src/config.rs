@@ -137,8 +137,14 @@ pub struct McpSourceConfig {
     /// avoid downstream confusion.
     #[serde(default)]
     pub submit_enabled: bool,
-    /// Optional cron expression. Falls back to the global cadence in
-    /// `scheduler.cadence` when unset.
+    /// Optional cron expression for this MCP source. Currently parsed
+    /// but **not yet wired** to the scheduler — the daemon picks cron
+    /// expressions exclusively from the global `scheduler.cadence` map,
+    /// keyed by source `name`. To run an MCP source on a custom cron,
+    /// add `scheduler.cadence.<name>: "<cron>"` in `config/local.yaml`.
+    /// This field is preserved for forward-compatibility; it will
+    /// override `scheduler.cadence` once the scheduler crate learns to
+    /// read it. Tracked as a follow-up in the PR-19 review.
     #[serde(default)]
     pub cron: Option<String>,
     /// Soft cap on `tools/call` invocations per minute against this
