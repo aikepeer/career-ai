@@ -6,15 +6,17 @@ versions don't promise semver yet.
 
 ## [Unreleased]
 
-- `feat/mcp-sources-adapter` (PR #19) — `careerai-sources::mcp_jobs`
-  adapter consumes any community MCP server as a discovery source. New
-  CLI: `careerai mcp probe` reachability check. `kind: mcp` source type
-  in config (default `enabled: false`).
-- `docs/plugin-release` (this PR) — README + CONTRIBUTING + CHANGELOG
-  refreshed; `.mcp.json` switched to `uvx --from git+...` form
-  (community LinkedIn MCPs aren't on PyPI under the canonical names);
-  `cargo-dist` configured for prebuilt binaries; plugin manifest gains
-  `categories` + extended `keywords`.
+- `feat/mcp-sources-adapter` (PR #19, in review) —
+  `careerai-sources::mcp_jobs` adapter consumes any community MCP
+  server as a discovery source. New CLI: `careerai mcp probe`
+  reachability check. `kind: mcp` source type in config (default
+  `enabled: false`).
+- `docs/plugin-release` (PR #20) — README + CONTRIBUTING + CHANGELOG
+  refreshed; `.mcp.json` migrated to `uvx --from git+...` form
+  (community LinkedIn MCPs aren't on PyPI under the canonical names),
+  with both community entries `disabled: true` until upstream
+  packaging is sorted; `cargo-dist` configured for prebuilt binaries;
+  plugin manifest gains `categories` + extended `keywords`.
 
 ## [0.1.0-mcp] — 2026-04-27
 

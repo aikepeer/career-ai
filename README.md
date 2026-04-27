@@ -3,17 +3,18 @@
 Automated job discovery, resume tailoring, and auto-apply for a single user —
 runs as a local daemon and as a Claude Code plugin.
 
-**Status (2026-04-27):** M0–M6 shipped. The pipeline state machine, four
-ATS adapters (Greenhouse, Lever, Remotive, RemoteOK), LinkedIn submitter,
-LLM-backed resume importer, MCP server, and Claude Code plugin shell are
-all merged on `main`. See [`CHANGELOG.md`](./CHANGELOG.md) for milestone
-detail.
+**Status (2026-04-27):** M0–M6 shipped. The pipeline state machine, five
+discovery adapters (Greenhouse, Lever, Remotive, RemoteOK, Naukri),
+LinkedIn submitter, LLM-backed resume importer, MCP server, and Claude
+Code plugin shell are all merged on `main`. See
+[`CHANGELOG.md`](./CHANGELOG.md) for milestone detail.
 
 ## What it does
 
-Finds jobs across ATS APIs (Greenhouse, Lever, Remotive, RemoteOK, plus any
-MCP-exposed source — see Phase 4), matches them against your profile,
-tailors a resume + cover letter per job description via Claude, and submits
+Finds jobs across ATSes and job boards (Greenhouse, Lever, Remotive,
+RemoteOK, Naukri; plus any MCP-exposed source via the upcoming `mcp_jobs`
+adapter — see PR #19), matches them against your profile, tailors a
+resume + cover letter per job description via Claude, and submits
 applications with a hard dry-run gate enabled by default. Niche focus:
 AI/ML + LLM apps and embedded platforms / robotics. Remote-first with
 Delhi-NCR fallback.
@@ -35,9 +36,14 @@ cargo install --git https://github.com/justdoGIT/career-ai careerai-mcp careerai
 /career:apply <id>   # DRY-RUN by default; --live needs an explicit confirm
 ```
 
-The plugin also registers two community LinkedIn MCPs in `.mcp.json`:
-`linkedin-jobs` (RapidAPI, ToS-clean — default) and `linkedin-browser`
-(scraper, opt-in, violates LinkedIn ToS §8.2).
+The plugin also registers two community LinkedIn MCPs in `.mcp.json`,
+both disabled by default. `linkedin-jobs` (RapidAPI-backed, ToS-clean)
+points at `Rom7699/linkedin-jobs-mcp-server`, which currently ships as
+`python main.py` with no script entry — see the comment in `.mcp.json`
+for manual-enable steps. `linkedin-browser` (`adhikasp/mcp-linkedin`,
+properly packaged) is a scraper that violates LinkedIn ToS §8.2 and
+stays opt-in. The first-class path for community MCP discovery sources
+is the upcoming `mcp_jobs` adapter (PR #19).
 
 ## Install — CLI / daemon
 
@@ -78,8 +84,8 @@ export ANTHROPIC_API_KEY=...      # or store in OS keyring
                                    │
    ┌──── Source trait ────┐ pipeline state machine ┌── Submitter trait ──┐
    │ greenhouse · lever · │ discovered → shortlist │ ats-http · linkedin │
-   │ remotive · remoteok ·│ → tailored → rendered →│ · naukri · email    │
-   │ mcp-jobs (any MCP)   │ → submitted → responded│   (dry-run default) │
+   │ remotive · remoteok ·│ → tailored → rendered →│ · naukri            │
+   │ naukri               │ → submitted → responded│   (dry-run default) │
    └──────────────────────┘                        └─────────────────────┘
                                    │
                   SQLite · keyring · governor rate-limits
