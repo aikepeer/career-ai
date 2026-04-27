@@ -1,0 +1,24 @@
+{
+  "name": "career-ai",
+  "version": "0.1.0",
+  "description": "Local single-user pipeline that discovers jobs, tailors resumes per JD via LLM, and auto-applies with a dry-run safety gate. Targets AI/ML and embedded/robotics roles.",
+  "author": {
+    "name": "Kamal Pandey",
+    "url": "https://github.com/justdoGIT/career-ai"
+  },
+  "homepage": "https://github.com/justdoGIT/career-ai",
+  "repository": "https://github.com/justdoGIT/career-ai",
+  "license": "MIT",
+  "keywords": [
+    "career",
+    "jobs",
+    "resume",
+    "linkedin",
+    "ats",
+    "automation"
+  ],
+  "commands": "./commands",
+  "skills": "./skills",
+  "agents": "./agents",
+  "mcpServers": "./.mcp.json"
+}

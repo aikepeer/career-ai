@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "careerai": {
+      "command": "careerai-mcp",
+      "args": [],
+      "env": {
+        "RUST_LOG": "info"
+      },
+      "comment": "Local CareerAI MCP server \u2014 coming soon (PR #18, branch `feat/mcp-server`). The `crates/careerai-mcp` crate is not on `main` yet; until PR #18 merges, build the `careerai-mcp` binary from the `feat/mcp-server` branch (`cargo install --path crates/careerai-mcp`) so it lands on PATH. Without that binary the plugin's MCP tool calls will fail."
+    },
+    "linkedin-jobs": {
+      "command": "uvx",
+      "args": [
+        "linkedin-jobs-mcp-server"
+      ],
+      "env": {
+        "RAPIDAPI_KEY": "${LINKEDIN_RAPIDAPI_KEY}"
+      },
+      "comment": "Default LinkedIn discovery via RapidAPI's LinkedIn Data API. ToS-clean (no scraping). Free tier exists. Set LINKEDIN_RAPIDAPI_KEY in your env to enable; the server is harmless without a key but discovery calls will fail."
+    },
+    "linkedin-browser": {
+      "command": "uvx",
+      "args": [
+        "mcp-linkedin"
+      ],
+      "env": {},
+      "disabled": true,
+      "comment": "Opt-in: browser-based LinkedIn scraper. Violates LinkedIn ToS section 8.2 (User Agreement: no automated access). Disabled by default. Flip `disabled` to false at your own risk; rate caps and cookie-jar rotation in careerai-submit still apply."
+    }
+  }
+}
