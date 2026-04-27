@@ -18,7 +18,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
+  # Intentionally NOT setting `RUSTFLAGS: -D warnings` here — release
+  # builds shouldn't fail on benign upstream-dep warnings. The
+  # warnings-as-errors gate lives in `ci.yml` (clippy on PRs/main).
 
 jobs:
   plan:
@@ -73,6 +75,8 @@ jobs:
             -p careerai-cli -p careerai-mcp
 
       - name: Stage artifacts
+        # `7z` is preinstalled on `windows-latest` runners (GitHub-hosted);
+        # `tar` is preinstalled everywhere else. No extra setup needed.
         shell: bash
         run: |
           stage="careerai-${{ needs.plan.outputs.tag }}-${{ matrix.target }}"
