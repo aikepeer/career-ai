@@ -13,9 +13,10 @@ use std::sync::Arc;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    AnnotateAble, CallToolResult, Content, Implementation, ListResourcesResult,
-    PaginatedRequestParams, ProtocolVersion, RawResource, ReadResourceRequestParams,
-    ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo,
+    AnnotateAble, CallToolResult, Content, Implementation, ListResourceTemplatesResult,
+    ListResourcesResult, PaginatedRequestParams, ProtocolVersion, RawResource, RawResourceTemplate,
+    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ResourceTemplate,
+    ServerCapabilities, ServerInfo,
 };
 use rmcp::service::RequestContext;
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler};
@@ -95,18 +96,29 @@ impl CareerAiServer {
         let path = self.root().join("profile").join("profile.yaml");
         let path_str = path.display().to_string();
 
-        let metadata = std::fs::metadata(&path);
-        let exists = metadata.is_ok();
-        let last_modified = metadata
-            .as_ref()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .map(|t| {
-                let dt: chrono::DateTime<chrono::Utc> = t.into();
-                dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            });
+        // Distinguish "file truly absent" (a normal, expected state on a
+        // fresh checkout) from real I/O failures (permission denied,
+        // broken symlink, transient FS error). The former is reported
+        // as a structured `exists: false` result; the latter is surfaced
+        // as an MCP error so the operator sees the real cause instead
+        // of a misleading "does not exist" message.
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => Some(m),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                return Err(McpServerError::ProfileIo {
+                    path: path_str,
+                    source: e,
+                });
+            }
+        };
 
-        if !exists {
+        let last_modified = metadata.as_ref().and_then(|m| m.modified().ok()).map(|t| {
+            let dt: chrono::DateTime<chrono::Utc> = t.into();
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        });
+
+        if metadata.is_none() {
             return Ok(ProfileStatusResult {
                 path: path_str,
                 exists: false,
@@ -423,12 +435,33 @@ impl CareerAiServer {
 
     // ---------- resource handlers ----------
 
+    /// Concrete (non-templated) resources discoverable via
+    /// `resources/list`. Parameterized URIs (`careerai://shortlist/{date}`,
+    /// `careerai://artifacts/{application_id}`) are advertised separately
+    /// via `resources/templates/list` — see `list_resource_templates_static`.
     #[allow(clippy::unused_self)]
     fn list_resources_static(&self) -> Vec<Resource> {
         vec![
             RawResource::new("careerai://profile", "profile.yaml").no_annotation(),
             RawResource::new("careerai://shortlist/today", "today's shortlist (JSON)")
                 .no_annotation(),
+        ]
+    }
+
+    /// Resource templates (URI patterns) advertised via
+    /// `resources/templates/list`. MCP clients use these to discover
+    /// parameterized resources that can't be listed exhaustively
+    /// (every date / every application id).
+    #[allow(clippy::unused_self)]
+    fn list_resource_templates_static(&self) -> Vec<ResourceTemplate> {
+        vec![
+            RawResourceTemplate::new("careerai://shortlist/{date}", "shortlist by date")
+                .no_annotation(),
+            RawResourceTemplate::new(
+                "careerai://artifacts/{application_id}",
+                "artifacts for an application",
+            )
+            .no_annotation(),
         ]
     }
 
@@ -447,11 +480,30 @@ impl CareerAiServer {
     async fn read_shortlist_resource(
         &self,
         uri: &str,
-        _date: &str,
+        date_seg: &str,
     ) -> Result<ReadResourceResult, McpServerError> {
-        // We don't index shortlist by date yet; the pipeline only stores
-        // the current shortlist. Return whatever's currently in state
-        // `shortlisted`.
+        // Validate the {date} segment so a malformed URI surfaces as an
+        // `invalid_params` error instead of being silently swallowed.
+        // The pipeline doesn't yet support per-day filtering, so a valid
+        // date is accepted but logged as ignored — the caller still gets
+        // today's shortlist. The literal `today` is a friendly alias.
+        if date_seg != "today" {
+            match chrono::NaiveDate::parse_from_str(date_seg, "%Y-%m-%d") {
+                Ok(_) => {
+                    tracing::warn!(
+                        date = %date_seg,
+                        "shortlist date segment parsed but ignored: pipeline does not yet \
+                         support per-day filtering — returning current shortlist"
+                    );
+                }
+                Err(e) => {
+                    return Err(McpServerError::InvalidArgument(format!(
+                        "shortlist date segment must be `today` or YYYY-MM-DD (got `{date_seg}`): {e}"
+                    )));
+                }
+            }
+        }
+
         let rows = pipeline::shortlist_show(self.root(), 500)
             .await
             .map_err(McpServerError::from)?;
@@ -522,6 +574,18 @@ impl ServerHandler for CareerAiServer {
     ) -> Result<ListResourcesResult, McpError> {
         Ok(ListResourcesResult {
             resources: self.list_resources_static(),
+            next_cursor: None,
+            meta: None,
+        })
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(ListResourceTemplatesResult {
+            resource_templates: self.list_resource_templates_static(),
             next_cursor: None,
             meta: None,
         })
