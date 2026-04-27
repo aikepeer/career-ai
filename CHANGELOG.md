@@ -1,0 +1,111 @@
+# Changelog
+
+All notable changes to career-ai. The format roughly follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); pre-1.0
+versions don't promise semver yet.
+
+## [Unreleased]
+
+- `feat/mcp-sources-adapter` (PR #19, in review) —
+  `careerai-sources::mcp_jobs` adapter consumes any community MCP
+  server as a discovery source. New CLI: `careerai mcp probe`
+  reachability check. `kind: mcp` source type in config (default
+  `enabled: false`).
+- `docs/plugin-release` (PR #20) — README + CONTRIBUTING + CHANGELOG
+  refreshed; `.mcp.json` migrated to `uvx --from git+...` form
+  (community LinkedIn MCPs aren't on PyPI under the canonical names),
+  with both community entries `disabled: true` until upstream
+  packaging is sorted; `cargo-dist` configured for prebuilt binaries;
+  plugin manifest gains `categories` + extended `keywords`.
+
+## [0.1.0-mcp] — 2026-04-27
+
+First version that's installable as a Claude Code plugin.
+
+### Added
+- **Plugin shell** (#17, `feat/claude-plugin`) — `.claude-plugin/`
+  with 7 slash commands (`/career:setup|discover|tailor|apply|status|digest|inspect`),
+  3 skills (`ingest-profile`, `tailor-resume`, `dry-run-apply`),
+  3 subagents (`job-hunter`, `resume-tailor`, `application-reviewer`),
+  and `.mcp.json` registering `careerai` (local) plus community LinkedIn
+  servers.
+- **MCP server** (#18, `feat/mcp-server`) — new `careerai-mcp` crate
+  using `rmcp` 1.5; 8 tools (`careerai_profile_status`, `_discover`,
+  `_shortlist`, `_tailor`, `_render`, `_apply`, `_inspect`, `_digest`),
+  resource templates for `careerai://shortlist/{date}` and
+  `careerai://artifacts/{application_id}`, hard `dry_run=true` default
+  with `confirm: "I_UNDERSTAND_TOS_RISK"` gate for live submission.
+  Async I/O throughout (`tokio::fs` for resource reads).
+- **LLM-backed profile importer** (#16, `feat/profile-llm-extract`) —
+  replaces the heuristic regex parser for free-form PDF resumes;
+  constrained JSON-schema prompt → `Profile` with retry-on-validation;
+  LinkedIn-first merge order so structured data wins on conflict.
+  Gated behind `--features live-llm`.
+
+### Fixed
+- Heuristic parser misclassifying experience entries on real PDF text
+  (titles like `"Jan 2025"`, education entries that were just years).
+- Stale `skills:` schema (legacy `Vec<String>` form) detected at
+  `profile validate` with actionable migration message.
+
+## [0.1.0-w3] — 2026-04-27 (sprint week 3)
+
+- `feat(cli): careerai digest daily pipeline summary` (#15) — `careerai
+  digest --since 24h` reports counts by state, per-source breakdown,
+  last cron tick, and LinkedIn `li_at` cookie-expiry warnings (48h
+  window via JWT decode).
+- `feat(credentials): cookie_expiry decodes li_at JWT exp claim`.
+
+## [0.1.0-w2] — 2026-04-27 (sprint week 2)
+
+- `feat(submit): drafted state + careerai review walk-through` (#13).
+- `fix(submit): copilot follow-up review` (#14).
+
+## [0.1.0-w1] — 2026-04-25 (sprint week 1)
+
+- `feat(filters): must-include keyword filter` (#10) — adds the
+  `must_include` filter to `careerai-match` so domain-specific roles
+  pass the score threshold even when the JD wording underweights core
+  keywords.
+- `chore(claude-md): token-discipline rules` (#8) — Serena symbol-level
+  + context-mode mandate; subagent propagation snippet.
+- `chore(spec): job-search-sprint-spec` (#9).
+
+## [0.1.0-m6] — 2026-04-25
+
+- **M6: scheduler daemon** (#7, `feat/m6-daemon`) — `tokio-cron-
+  scheduler` with per-source cadences; graceful shutdown; observability.
+
+## [0.1.0-m5] — 2026-04-25
+
+- **M5a: LinkedIn submitter** (#6, `feat/m5-browser-submit`) —
+  `chromiumoxide`-driven Easy Apply, governor token-bucket rate
+  limiter (RAII permit), keyring credential store, stealth script
+  pinned by SHA, day-aware permits.
+
+## [0.1.0-m4] — 2026-04-25
+
+- **M4: Naukri + Submit trait** (#5, `feat/m4-submit-naukri`) — adds
+  Naukri discovery, the `Submitter` trait, ATS HTTP submitters, and
+  `careerai apply / applied / inspect` CLI surface.
+
+## [0.1.0-m3] — 2026-04-25
+
+- **M3: tailor + render** (#4, `feat/m3-tailor-render`) — constrained-
+  diff resume edits, cover-letter drafting, Tera → Markdown → pandoc
+  DOCX/PDF rendering pipeline.
+
+## [0.1.0-m2] — 2026-04-24
+
+- **M2: discovery + matching** (#2, `feat/m2-discovery-match`) — DB
+  schema + four ATS adapters (Greenhouse, Lever, Remotive, RemoteOK),
+  Jaccard scorer, `careerai discover|match|shortlist` CLI.
+- Docs sync (#3, `docs/post-m1-sync`).
+
+## [0.1.0-m1] — 2026-04-23
+
+- **M1: profile pipeline** (#1, `feat/m1-profile-pipeline`) — PDF /
+  DOCX / LinkedIn-zip ingestion → canonical `profile/profile.yaml`;
+  date normalization; bullet + skill dedup.
+- **M0: workspace scaffold** — 13 Rust crates, edition 2021,
+  MSRV 1.78. Python stub deleted.

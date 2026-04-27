@@ -12,9 +12,16 @@
   "keywords": [
     "career",
     "jobs",
+    "job-search",
     "resume",
-    "linkedin",
+    "resume-tailor",
     "ats",
+    "linkedin",
+    "automation",
+    "rust"
+  ],
+  "categories": [
+    "productivity",
     "automation"
   ],
   "commands": "./commands",

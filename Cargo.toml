@@ -21,7 +21,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.78"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/capitalbluecity/career-ai"
+repository = "https://github.com/justdoGIT/career-ai"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -65,6 +65,23 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# cargo-dist — prebuilt binaries on GitHub Releases. Run `cargo dist init`
+# once on this manifest to refresh the workflow when bumping cargo-dist.
+[workspace.metadata.dist]
+cargo-dist-version = "0.25.1"
+ci = "github"
+installers = ["shell", "powershell"]
+targets = [
+  "x86_64-unknown-linux-musl",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-gnu",
+]
+# Only ship the user-facing binaries; pipeline crates are libraries.
+include = []
+publish-jobs = []
+pr-run-mode = "plan"
 
 [profile.dev]
 opt-level = 0
