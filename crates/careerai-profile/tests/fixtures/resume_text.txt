@@ -1,0 +1,38 @@
+Alice Kumar
+Delhi NCR | alice@example.com | +91 98765 43210
+github.com/alicek | linkedin.com/in/alicek
+
+Summary
+Senior embedded developer with 8 years building real-time control loops
+on STM32 and Linux ARM. Recently shipped an LLM-powered debug assistant
+that cut on-call MTTR by 40%.
+
+Experience
+
+Acme Robotics — Senior Embedded Developer
+Jan 2022 - Present | Remote
+- Led migration of motor-control firmware from FreeRTOS to Zephyr,
+  cutting binary size 30% and boot time 2x.
+- Designed CAN bus arbitration scheme adopted across three product
+  lines.
+
+BetaCorp — Embedded Engineer
+Jun 2019 - Dec 2021 | Bangalore
+- Built ingest pipeline processing 12k events/sec from on-vehicle
+  telemetry.
+- Mentored two junior engineers through firmware bring-up.
+
+Education
+
+IIT Delhi — B.Tech, Computer Science Engineering
+2015 - 2019
+
+Skills
+Languages: Rust, C, C++, Python
+Frameworks: Tokio, Zephyr, FreeRTOS
+Tools: Git, Docker, JTAG, CAN bus analyzers
+
+Projects
+
+embedded-llm-helper - github.com/alicek/embedded-llm-helper
+- On-device tinyllama for firmware debugging on Cortex-M7.

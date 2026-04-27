@@ -142,6 +142,15 @@ enum ProfileCommand {
         /// Overwrite an existing `profile/profile.yaml`.
         #[arg(long)]
         force: bool,
+        /// Route PDF/DOCX text through the LLM extractor instead of the
+        /// regex heuristic. Auto-detects when omitted only in builds
+        /// with the `live-llm` cargo feature: enabled if an Anthropic
+        /// key is reachable (keyring or env), disabled otherwise. In
+        /// non-`live-llm` builds the heuristic is always used unless
+        /// `--use-llm=true` is passed (which then errors clearly).
+        /// Pass `--use-llm=false` to force the heuristic.
+        #[arg(long, value_name = "BOOL", num_args = 0..=1, default_missing_value = "true")]
+        use_llm: Option<bool>,
     },
     /// Print the parsed profile.
     Show,
@@ -590,13 +599,17 @@ fn profile_yaml_path() -> Result<PathBuf> {
 
 fn run_profile(command: ProfileCommand) -> Result<()> {
     match command {
-        ProfileCommand::Import { paths, force } => profile_import(&paths, force),
+        ProfileCommand::Import {
+            paths,
+            force,
+            use_llm,
+        } => profile_import(&paths, force, use_llm),
         ProfileCommand::Show => profile_show(),
         ProfileCommand::Validate => profile_validate(),
     }
 }
 
-fn profile_import(paths: &[PathBuf], force: bool) -> Result<()> {
+fn profile_import(paths: &[PathBuf], force: bool, use_llm: Option<bool>) -> Result<()> {
     if paths.is_empty() {
         anyhow::bail!("profile import: at least one source file is required");
     }
@@ -608,7 +621,33 @@ fn profile_import(paths: &[PathBuf], force: bool) -> Result<()> {
         );
     }
     let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-    let profile = careerai_profile::import_paths(&refs).context("parsing profile sources")?;
+
+    // Decide whether to run the LLM extractor. Resolution order:
+    //   1. Explicit `--use-llm=<bool>` always wins.
+    //   2. Otherwise: enabled iff this binary was built with `live-llm`
+    //      AND an Anthropic key is reachable. Without the feature flag
+    //      we cannot actually call the LLM; auto-enabling on key
+    //      detection alone would route into a hard error.
+    let want_llm = match use_llm {
+        Some(v) => v,
+        None => cfg!(feature = "live-llm") && anthropic_key_reachable(),
+    };
+
+    let profile = if want_llm {
+        run_profile_import_with_llm(&refs)?
+    } else {
+        if use_llm.is_none() && !cfg!(feature = "live-llm") {
+            // Built without `live-llm`; nothing the user can do at
+            // runtime to improve this. Stay quiet on the heuristic
+            // fallback unless they explicitly asked for LLM.
+        } else if use_llm.is_none() {
+            eprintln!(
+                "warning: no Anthropic key configured; falling back to heuristic parser. \
+                 Set ANTHROPIC_API_KEY for better results."
+            );
+        }
+        careerai_profile::import_paths(&refs).context("parsing profile sources")?
+    };
 
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
@@ -630,8 +669,260 @@ fn profile_show() -> Result<()> {
 fn profile_validate() -> Result<()> {
     let out = profile_yaml_path()?;
     let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
+
+    // Detect the stale-schema signature (`skills:` followed by a flat
+    // sequence) before serde gets a chance to bury the error in a generic
+    // "invalid type" message. The 0.x line wrote skills as `Vec<String>`;
+    // the current schema is the structured `Skills { languages, ... }`.
+    if detect_stale_skills_schema(&text) {
+        anyhow::bail!(
+            "Detected stale schema (skills as a flat list). Old binary wrote this file.\n\
+             Re-run: careerai profile import --force <your sources>"
+        );
+    }
+
     let profile = careerai_profile::Profile::from_yaml(&text).context("parse profile yaml")?;
     profile.check().context("profile validation failed")?;
     println!("profile ok: {}", out.display());
     Ok(())
+}
+
+/// Stale-schema sniffer for `profile validate`. The 0.x binary wrote
+/// `skills:` as a flat YAML sequence (`- Rust\n- Python`). The current
+/// schema serializes it as a nested mapping with `languages`,
+/// `frameworks`, `tools`. We detect the legacy shape via a quick string
+/// scan rather than pulling in a YAML parser — false-positive cost is
+/// just a misleading hint, which is fine.
+fn detect_stale_skills_schema(text: &str) -> bool {
+    let mut in_skills = false;
+    for line in text.lines() {
+        if !in_skills {
+            if line.trim_start() == "skills:" && !line.starts_with(' ') {
+                in_skills = true;
+            }
+            continue;
+        }
+        // Ignore blanks and pure comments inside the block.
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let leading = line.len() - trimmed.len();
+        if leading == 0 {
+            // Left the skills block without seeing nested keys.
+            return false;
+        }
+        // First non-empty child of `skills:`. Stale shape:  `- Rust`.
+        return trimmed.starts_with("- ");
+    }
+    false
+}
+
+/// Best-effort probe: is an Anthropic API key reachable without any
+/// network round-trip? Checks `ANTHROPIC_API_KEY` first, then the
+/// keyring (service "career-ai", username "anthropic/api_key"). Used
+/// to default `--use-llm`.
+fn anthropic_key_reachable() -> bool {
+    if std::env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty()) {
+        return true;
+    }
+    if let Ok(entry) = keyring::Entry::new("career-ai", "anthropic/api_key") {
+        if let Ok(v) = entry.get_password() {
+            if !v.is_empty() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Parse PDF/DOCX inputs through the LLM extractor; LinkedIn ZIPs go
+/// through their structured CSV path unchanged. Currently only Anthropic
+/// is wired. Model + cache directory are sourced from
+/// `config.llm.parse_resume_model` / `config.llm.cache_dir` when set,
+/// falling back to [`careerai_profile::ExtractOptions`] defaults.
+fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Profile> {
+    #[cfg(feature = "live-llm")]
+    {
+        use std::sync::Arc;
+
+        // Resolve API key. Same precedence as `anthropic_key_reachable`.
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .or_else(|| {
+                keyring::Entry::new("career-ai", "anthropic/api_key")
+                    .ok()
+                    .and_then(|e| e.get_password().ok())
+                    .filter(|v| !v.is_empty())
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no Anthropic key found in keyring or ANTHROPIC_API_KEY; \
+                     re-run with --use-llm=false or configure a key"
+                )
+            })?;
+
+        let cwd = std::env::current_dir()?;
+        // Fall back to `LlmConfig::default()` ONLY when no `config/`
+        // directory is present (e.g. running `profile import` before
+        // `init`). When config exists, surface load/parse failures so
+        // malformed YAML and similar real errors don't silently hide
+        // behind defaults.
+        let llm_cfg = if cwd.join("config").exists() {
+            CoreConfig::load(&cwd).context("load config/")?.llm
+        } else {
+            careerai_core::config::LlmConfig::default()
+        };
+
+        // Honor `config.llm.cache_dir` so live profile-extract caches
+        // sit next to tailor caches under `data/cache/llm`. `.gitignore`
+        // already excludes `/data/`.
+        let cache_root: PathBuf = if llm_cfg.cache_dir.is_empty() {
+            PathBuf::from("data").join("cache").join("llm")
+        } else {
+            PathBuf::from(&llm_cfg.cache_dir)
+        };
+        let cache_dir = if cache_root.is_absolute() {
+            cache_root
+        } else {
+            cwd.join(cache_root)
+        };
+        let cache = Arc::new(careerai_llm::Cache::new(cache_dir));
+
+        let mut opts = careerai_profile::ExtractOptions::default();
+        // Plumb config.llm.parse_resume_model into the extractor; strip
+        // any leading `provider/` prefix that the layered config uses
+        // (rig's anthropic transport expects the bare model id).
+        if !llm_cfg.parse_resume_model.is_empty() {
+            opts.model = strip_provider_prefix(&llm_cfg.parse_resume_model).to_string();
+        }
+        if !llm_cfg.prompt_version.is_empty() {
+            opts.prompt_version.clone_from(&llm_cfg.prompt_version);
+        }
+
+        let llm = careerai_llm::RigLlm::with_api_key(
+            careerai_llm::Provider::Anthropic,
+            api_key,
+            opts.model.clone(),
+            cache,
+            llm_cfg.timeout_seconds.max(1),
+        )
+        .map_err(|e| anyhow::anyhow!("construct llm client: {e}"))?;
+
+        let adapter = profile_llm_adapter::Adapter::new(&llm);
+        let ctx = careerai_profile::LlmExtractContext::new(&adapter, opts);
+        careerai_profile::import_paths_with_llm(paths, Some(&ctx))
+            .context("parsing profile sources via LLM")
+    }
+    #[cfg(not(feature = "live-llm"))]
+    {
+        let _ = paths;
+        anyhow::bail!(
+            "LLM extraction requires the `live-llm` cargo feature. \
+             Re-run with: cargo run -p careerai-cli --features live-llm -- profile import …"
+        )
+    }
+}
+
+/// Strip a leading `provider/` prefix (e.g. `anthropic/claude-haiku-4-5`
+/// → `claude-haiku-4-5`). Layered config templates use the prefixed
+/// form for human readability, but rig's transports want the bare model
+/// id. No-op when no slash is present.
+///
+/// Only the live-LLM import path consumes this; tests exercise it on
+/// every build.
+#[cfg_attr(not(any(feature = "live-llm", test)), allow(dead_code))]
+fn strip_provider_prefix(model: &str) -> &str {
+    model.split_once('/').map_or(model, |(_, rest)| rest)
+}
+
+/// Adapter that lets a `careerai_llm::Llm` be used as a
+/// `careerai_profile::LlmCaller`. Lives here (in the CLI) because the
+/// CLI is the only crate that depends on both, breaking the otherwise-
+/// circular `profile ↔ llm` edge.
+#[cfg(feature = "live-llm")]
+mod profile_llm_adapter {
+    use async_trait::async_trait;
+    use careerai_llm::{Llm, LlmRequest};
+    use careerai_profile::llm_extract::{ExtractRequest, LlmCaller};
+
+    pub struct Adapter<'a> {
+        inner: &'a dyn Llm,
+    }
+
+    impl<'a> Adapter<'a> {
+        pub fn new(inner: &'a dyn Llm) -> Self {
+            Self { inner }
+        }
+    }
+
+    #[async_trait]
+    impl LlmCaller for Adapter<'_> {
+        async fn call(&self, req: &ExtractRequest) -> Result<String, String> {
+            let llm_req = LlmRequest {
+                system: req.system.clone(),
+                profile_block: req.profile_block.clone(),
+                user: req.user.clone(),
+                prompt_version: req.prompt_version.clone(),
+                model: req.model.clone(),
+                temperature: req.temperature,
+                max_tokens: req.max_tokens,
+                cache_profile: req.cache_schema,
+            };
+            self.inner
+                .complete(&llm_req)
+                .await
+                .map(|r| r.text)
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_stale_skills_flags_legacy_flat_list() {
+        let yaml = "personal:\n  name: Alice\nskills:\n  - Rust\n  - Python\n";
+        assert!(detect_stale_skills_schema(yaml));
+    }
+
+    #[test]
+    fn strip_provider_prefix_handles_layered_config_form() {
+        assert_eq!(
+            strip_provider_prefix("anthropic/claude-haiku-4-5"),
+            "claude-haiku-4-5"
+        );
+        assert_eq!(strip_provider_prefix("openai/gpt-4o-mini"), "gpt-4o-mini");
+    }
+
+    #[test]
+    fn strip_provider_prefix_passes_bare_model_id_through() {
+        assert_eq!(
+            strip_provider_prefix("claude-haiku-4-5"),
+            "claude-haiku-4-5"
+        );
+        assert_eq!(strip_provider_prefix(""), "");
+    }
+
+    #[test]
+    fn detect_stale_skills_passes_current_mapping_shape() {
+        let yaml = "personal:\n  name: Alice\nskills:\n  languages:\n    - Rust\n";
+        assert!(!detect_stale_skills_schema(yaml));
+    }
+
+    #[test]
+    fn detect_stale_skills_handles_missing_skills_block() {
+        let yaml = "personal:\n  name: Alice\nsummary: hi\n";
+        assert!(!detect_stale_skills_schema(yaml));
+    }
+
+    #[test]
+    fn detect_stale_skills_ignores_blank_lines_and_comments() {
+        let yaml = "personal:\n  name: Alice\nskills:\n\n  # a comment\n  languages:\n    - Rust\n";
+        assert!(!detect_stale_skills_schema(yaml));
+    }
 }

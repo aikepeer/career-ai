@@ -9,6 +9,7 @@ pub mod docx;
 pub mod error;
 pub mod heuristic;
 pub mod linkedin;
+pub mod llm_extract;
 pub mod merge;
 pub mod pdf;
 pub mod schema;
@@ -18,23 +19,83 @@ use std::path::Path;
 use tracing::{info, warn};
 
 pub use crate::error::{ProfileError, Result};
+pub use crate::llm_extract::{
+    extract_profile_from_text, ExtractError, ExtractOptions, ExtractRequest, LlmCaller,
+};
 pub use crate::schema::Profile;
 
 /// Import one or more source files into a single merged [`Profile`].
 ///
 /// Supported extensions: `.pdf`, `.docx`, `.zip` (LinkedIn export). Files
-/// are parsed in the order given; later files overlay earlier ones via
-/// [`merge::merge_pair`]. Unsupported extensions fail fast.
+/// are parsed via the heuristic regex parser (PDF/DOCX) and the LinkedIn
+/// CSV adapter (ZIP). LinkedIn-derived profiles are processed FIRST so
+/// their structured data wins on scalar conflicts during the merge —
+/// see [`merge::merge_pair`] for the precedence rule.
+///
+/// Unsupported extensions fail fast.
 pub fn import_paths(paths: &[&Path]) -> Result<Profile> {
-    let mut parsed = Vec::with_capacity(paths.len());
-    for path in paths {
-        let p = parse_one(path)?;
+    import_paths_with_llm(paths, None)
+}
+
+/// Like [`import_paths`] but optionally routes PDF/DOCX text through an
+/// LLM-backed extractor. When `llm` is `None`, falls back to the
+/// heuristic regex parser (the M1 default) — same behavior as
+/// [`import_paths`].
+///
+/// LinkedIn ZIPs always use the structured CSV path regardless of the
+/// `llm` argument; LinkedIn already gives us reliably-shaped data.
+pub fn import_paths_with_llm(
+    paths: &[&Path],
+    llm: Option<&LlmExtractContext<'_>>,
+) -> Result<Profile> {
+    // LinkedIn-first ordering: zips contribute base scalars (which win
+    // in `merge_pair`); PDF/DOCX merge later and only fill gaps.
+    let mut sorted: Vec<&&Path> = paths.iter().collect();
+    sorted.sort_by_key(|p| {
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_lowercase);
+        match ext.as_deref() {
+            Some("zip") => 0,
+            _ => 1,
+        }
+    });
+
+    let mut parsed = Vec::with_capacity(sorted.len());
+    for path in sorted {
+        let p = parse_one(path, llm)?;
         parsed.push(p);
     }
     Ok(merge::merge_all(parsed))
 }
 
-fn parse_one(path: &Path) -> Result<Profile> {
+/// Bundle of the bits [`import_paths_with_llm`] needs to drive an LLM
+/// extraction. Held by reference so we don't clone the caller / opts on
+/// every file.
+pub struct LlmExtractContext<'a> {
+    pub caller: &'a dyn LlmCaller,
+    pub options: ExtractOptions,
+}
+
+impl std::fmt::Debug for LlmExtractContext<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `caller` is a trait object whose concrete impl may hold an API
+        // key in its private state; never derive Debug for it.
+        f.debug_struct("LlmExtractContext")
+            .field("caller", &"<dyn LlmCaller>")
+            .field("options", &self.options)
+            .finish()
+    }
+}
+
+impl<'a> LlmExtractContext<'a> {
+    pub fn new(caller: &'a dyn LlmCaller, options: ExtractOptions) -> Self {
+        Self { caller, options }
+    }
+}
+
+fn parse_one(path: &Path, llm: Option<&LlmExtractContext<'_>>) -> Result<Profile> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -43,12 +104,12 @@ fn parse_one(path: &Path) -> Result<Profile> {
         Some("pdf") => {
             info!(path = %path.display(), "parsing PDF");
             let text = pdf::extract_text_from_path(path)?;
-            Ok(heuristic::parse(&text))
+            parse_text_with_optional_llm(&text, llm)
         }
         Some("docx") => {
             info!(path = %path.display(), "parsing DOCX");
             let text = docx::extract_text_from_path(path)?;
-            Ok(heuristic::parse(&text))
+            parse_text_with_optional_llm(&text, llm)
         }
         Some("zip") => {
             info!(path = %path.display(), "parsing LinkedIn export");
@@ -60,4 +121,67 @@ fn parse_one(path: &Path) -> Result<Profile> {
         }
         None => Err(ProfileError::UnsupportedFormat(path.display().to_string())),
     }
+}
+
+fn parse_text_with_optional_llm(
+    text: &str,
+    llm: Option<&LlmExtractContext<'_>>,
+) -> Result<Profile> {
+    let Some(ctx) = llm else {
+        return Ok(heuristic::parse(text));
+    };
+
+    // Synchronously drive the async extractor. We're called from a sync
+    // function (`import_paths*`) which itself is invoked by the CLI's
+    // `#[tokio::main]` runtime, so a tokio Handle is usually already in
+    // scope. `block_in_place` is only valid on the multi-thread runtime
+    // — calling it under a current-thread runtime panics. Spawn a fresh
+    // single-thread runtime on a side thread in that case so we don't
+    // deadlock the caller's reactor either.
+    let result = match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
+            tokio::task::block_in_place(|| handle.block_on(fut))
+        }
+        Ok(_) => {
+            // Current-thread runtime in scope — `block_in_place` would
+            // panic. Drive the future on a dedicated thread with its
+            // own single-threaded runtime so we don't reenter the
+            // caller's reactor.
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| ExtractError::LlmCall(format!("build runtime: {e}")))?;
+                    let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
+                    rt.block_on(fut)
+                })
+                .join()
+                .unwrap_or_else(|_| Err(ExtractError::LlmCall("extractor thread panicked".into())))
+            })
+        }
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(ProfileError::Io)?;
+            let fut = extract_profile_from_text(text, ctx.caller, &ctx.options);
+            rt.block_on(fut)
+        }
+    };
+
+    match result {
+        Ok(profile) => Ok(profile),
+        Err(e) => Ok(llm_fallback(text, &e)),
+    }
+}
+
+fn llm_fallback(text: &str, err: &ExtractError) -> Profile {
+    warn!(
+        target: "profile.llm_extract",
+        error = %err,
+        "LLM extraction failed; falling back to heuristic parser",
+    );
+    heuristic::parse(text)
 }
