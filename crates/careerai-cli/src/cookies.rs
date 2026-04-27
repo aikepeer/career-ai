@@ -17,11 +17,7 @@
 //! on the next apply tick without restarting.
 
 use anyhow::{anyhow, Result};
-
-/// Keyring service name — MUST match `careerai_submit::credentials::SERVICE`.
-/// It's a private constant in the `credentials` module, so we duplicate
-/// the string here. If the service name ever changes, update both.
-const KEYRING_SERVICE: &str = "career-ai";
+use careerai_submit::credentials::SERVICE as KEYRING_SERVICE;
 
 struct ProviderInfo {
     /// Keyring username in `{source}/{key}` format.

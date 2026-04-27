@@ -17,7 +17,11 @@ use crate::error::{Result, SubmitError};
 /// Service name used for keychain entries. Picked once and never
 /// changed across versions — renaming this string would orphan every
 /// existing credential.
-const SERVICE: &str = "career-ai";
+///
+/// `pub` so the `careerai cookies refresh` CLI writes to the same
+/// keychain entry the daemon reads. A drifted duplicate string would
+/// produce a stale-cookie bug that's tedious to diagnose.
+pub const SERVICE: &str = "career-ai";
 
 /// A typed credential reference. Compose via `Credential::for_source(src, name)`.
 #[derive(Debug, Clone)]

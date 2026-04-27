@@ -93,6 +93,10 @@ mod tests {
         assert!(ListingState::Failed.is_terminal());
         assert!(!ListingState::Discovered.is_terminal());
         assert!(!ListingState::Shortlisted.is_terminal());
+        // Drafted MUST be non-terminal — `careerai review` transitions
+        // it to Submitted/Failed. A regression that flips this would
+        // silently break the LinkedIn assist flow.
+        assert!(!ListingState::Drafted.is_terminal());
     }
 
     #[test]

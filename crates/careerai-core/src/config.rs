@@ -508,35 +508,39 @@ mod tests {
 
     #[test]
     fn naukri_validated_clamps_full_coverage_quiet_hours() {
-        let mut cfg = NaukriSubmitConfig::default();
-        cfg.quiet_hours_utc = Some((0, 24));
-        let v = cfg.validated();
-        assert_eq!(v.quiet_hours_utc, Some((19, 1)));
+        let cfg = NaukriSubmitConfig {
+            quiet_hours_utc: Some((0, 24)),
+            ..Default::default()
+        };
+        assert_eq!(cfg.validated().quiet_hours_utc, Some((19, 1)));
     }
 
     #[test]
     fn naukri_validated_clamps_out_of_range_quiet_hours() {
-        let mut cfg = NaukriSubmitConfig::default();
-        cfg.quiet_hours_utc = Some((25, 30));
-        let v = cfg.validated();
-        assert_eq!(v.quiet_hours_utc, Some((19, 1)));
+        let cfg = NaukriSubmitConfig {
+            quiet_hours_utc: Some((25, 30)),
+            ..Default::default()
+        };
+        assert_eq!(cfg.validated().quiet_hours_utc, Some((19, 1)));
     }
 
     #[test]
     fn naukri_validated_keeps_valid_wrap_window() {
         // 19:00 UTC → 01:00 UTC is a valid wrap (matches the default).
-        let mut cfg = NaukriSubmitConfig::default();
-        cfg.quiet_hours_utc = Some((19, 1));
-        let v = cfg.validated();
-        assert_eq!(v.quiet_hours_utc, Some((19, 1)));
+        let cfg = NaukriSubmitConfig {
+            quiet_hours_utc: Some((19, 1)),
+            ..Default::default()
+        };
+        assert_eq!(cfg.validated().quiet_hours_utc, Some((19, 1)));
     }
 
     #[test]
     fn naukri_validated_passes_through_none() {
-        let mut cfg = NaukriSubmitConfig::default();
-        cfg.quiet_hours_utc = None;
-        let v = cfg.validated();
-        assert_eq!(v.quiet_hours_utc, None);
+        let cfg = NaukriSubmitConfig {
+            quiet_hours_utc: None,
+            ..Default::default()
+        };
+        assert_eq!(cfg.validated().quiet_hours_utc, None);
     }
 
     #[test]
