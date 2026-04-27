@@ -154,6 +154,12 @@ impl CareerAiServer {
                     issues,
                 })
             }
+            // `last_modified` is intentionally retained on parse errors:
+            // the on-disk timestamp is diagnostic-useful (tells the user
+            // when they last touched the bad file). The `ProfileStatusResult`
+            // doc on `last_modified` is the source of truth: `None` only
+            // when the file is absent; populated whenever metadata is
+            // readable, including the parse-failure branch.
             Err(e) => Ok(ProfileStatusResult {
                 path: path_str,
                 exists: true,

@@ -192,10 +192,12 @@ pub struct ProfileStatusResult {
     pub path: String,
     pub exists: bool,
     pub valid: bool,
-    /// RFC 3339 UTC timestamp from the file's `mtime`. `None` only when
-    /// the file does not exist; parse / validation failures still
-    /// populate it (the on-disk timestamp is useful diagnostic info
-    /// even if the contents won't deserialize).
+    /// RFC 3339 UTC timestamp from the file's `mtime`. Populated whenever
+    /// the file's metadata is readable — including when the YAML body
+    /// fails to parse or validate (the on-disk timestamp is useful
+    /// diagnostic info regardless of content health). `None` only when
+    /// the file is absent or its metadata is unreadable
+    /// (e.g. permission denied on the parent directory).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_modified: Option<String>,
     /// One human-readable line per validation issue. Empty when valid.
