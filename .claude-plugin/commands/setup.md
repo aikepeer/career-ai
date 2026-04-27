@@ -37,11 +37,27 @@ filesystem paths to their resume and LinkedIn data export.
    prominently — those indicate LinkedIn changed its export format and
    need a code-side fix rather than a user fix. (See Notes for the
    future LLM-extractor flag.)
-5. **Print next steps.** Suggest:
+5. **Probe MCP-source servers (optional).** If the user has configured
+   any `kind: mcp` entries under `sources.mcp` in `config/default.yaml`
+   or `config/local.yaml`, run `careerai mcp probe` and surface the
+   per-source reachability lines verbatim. Format examples:
+   ```
+   linkedin-jobs-mcp: reachable (4 tools, search_jobs available)
+   mcp-linkedin: unreachable -- spawn mcp server `uvx`: No such file or directory
+     hint: install/run `uvx mcp-linkedin` and retry
+   ```
+   The probe is read-only — `careerai mcp probe` calls `initialize` +
+   `tools/list` only, never `tools/call`. **Do NOT auto-enable any
+   source**; ToS exposure varies per server and the user must flip
+   `enabled: true` themselves. If the user has no `kind: mcp` entries
+   configured yet, skip this step silently.
+6. **Print next steps.** Suggest:
    - `/career:discover` to pull listings from configured sources
    - `/career:status` to see pipeline counts
    - Edit `config/local.yaml` to tune sources, cadences, and the score
-     threshold
+     threshold (including the commented-out `sources.mcp` block — see
+     `crates/careerai-core/src/templates/default.yaml` for the worked
+     example)
 
 ## Notes
 
