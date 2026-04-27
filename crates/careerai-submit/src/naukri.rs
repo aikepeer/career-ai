@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::base::{SubmitContext, Submitter, WouldSubmit};
-use crate::browser_session::{BrowserSession, BrowserSessionConfig};
+use crate::browser_session::BrowserSession;
 use crate::credentials::{self, Credential};
 use crate::error::Result;
 use crate::error::SubmitError;
@@ -88,7 +88,13 @@ impl Default for NaukriConfig {
 
 #[derive(Debug)]
 pub struct NaukriSubmitter {
+    // Both fields are wired through `new()` and consumed by `run_session`,
+    // which is currently dead code (the click flow ships in M5c). The
+    // allow keeps the struct shape stable for the follow-up implementer
+    // without spawning per-field allows.
+    #[allow(dead_code)]
     cfg: NaukriConfig,
+    #[allow(dead_code)]
     rate_limiter: Arc<RateLimiter>,
 }
 
@@ -117,7 +123,11 @@ impl NaukriSubmitter {
     /// Load the Naukri session cookie from the OS keyring.
     /// Returns `SubmitError::SourceDisabled` with an actionable message when
     /// missing — same shape as LinkedIn's `load_li_at`.
-    #[allow(clippy::unused_self)]
+    ///
+    /// Currently unused — `submit()` short-circuits with `NotImplemented`
+    /// before reaching this. Kept as the documented load path for the
+    /// follow-up implementer.
+    #[allow(clippy::unused_self, dead_code)]
     fn load_naukri_session(&self) -> Result<String> {
         credentials::load(&Credential::for_source("naukri", NAUKRI_SESSION_KEY))
     }
@@ -125,11 +135,11 @@ impl NaukriSubmitter {
     /// Inner submit flow. Owns no resources; `submit()` ensures the
     /// `BrowserSession` is closed regardless of whether this returns Ok or Err.
     ///
-    /// Stub body — the full chromiumoxide click flow ships in a follow-up
-    /// commit once the browser helper methods (click, wait_for,
-    /// element_present) land in `BrowserSession`. Returns `SourceDisabled`
-    /// so dispatching to Naukri without the full implementation surfaces a
-    /// clear, actionable error rather than panicking.
+    /// Currently unused — `submit()` returns `NotImplemented` before any
+    /// browser launch. The function is kept (with `#[allow(dead_code)]`)
+    /// as the documented click-flow reference for the follow-up
+    /// implementer who lands the BrowserSession helper methods (click,
+    /// wait_for, element_present).
     ///
     /// Expected click flow (documented here for the follow-up implementer):
     ///   1. `session.set_cookie(NAUKRI_COOKIE_NAME, cookie, NAUKRI_DOMAIN)`
@@ -143,9 +153,7 @@ impl NaukriSubmitter {
     ///   8. Screenshot pre-submit state → `<screenshots_dir>/<id>-pre-submit.png`
     ///   9. Wait for APPLIED_SUCCESS_SELECTOR.
     ///  10. Return `ctx.listing.external_id` as the remote submission ID.
-    // Async signature is required for the follow-up implementer who will
-    // replace the stub body with real `await` calls on chromiumoxide.
-    #[allow(clippy::unused_async)]
+    #[allow(clippy::unused_async, dead_code)]
     async fn run_session(
         &self,
         session: &BrowserSession,
@@ -153,8 +161,6 @@ impl NaukriSubmitter {
         cookie: &str,
         permit_slot: &mut Option<RatePermit<'_>>,
     ) -> Result<String> {
-        // Suppress unused-variable warnings — bindings document the
-        // intended call signatures for the follow-up implementer.
         let _ = (session, ctx, cookie, permit_slot);
         let _ = (
             APPLY_BUTTON_SELECTOR,
@@ -164,7 +170,7 @@ impl NaukriSubmitter {
             NAUKRI_COOKIE_NAME,
             NAUKRI_DOMAIN,
         );
-        Err(SubmitError::SourceDisabled(
+        Err(SubmitError::NotImplemented(
             "naukri click flow not yet implemented — see naukri.rs::run_session for the \
              documented sequence; browser helper methods land in the follow-up commit"
                 .into(),
@@ -185,53 +191,20 @@ impl Submitter for NaukriSubmitter {
     /// Live path. NOT called when the dispatcher routes through
     /// `DryRunSubmitter` — that wrapper invokes `prepare()` only.
     ///
-    /// 1. Acquire a rate-limit permit (denied → SourceDisabled).
-    /// 2. Load the session cookie from the OS keyring.
-    /// 3. Launch stealth Chromium.
-    /// 4. Inject the session cookie for `.naukri.com`.
-    /// 5. Navigate to the listing URL.
-    /// 6. Detect login-required indicator; if present return SourceDisabled.
-    /// 7. Click the Apply button.
-    /// 8. Take an audit screenshot and commit the rate permit.
-    /// 9. Handle confirmation modal if present.
-    /// 10. Wait for success indicator and return the listing's external_id.
-    async fn submit(&self, ctx: &SubmitContext<'_>) -> Result<String> {
-        // Rate-limit gate first — denied permits don't cost a browser spawn.
-        let permit = self
-            .rate_limiter
-            .acquire(self.name(), &self.cfg.rate_policy)
-            .await
-            .map_err(|e| SubmitError::SourceDisabled(format!("rate-limited: {e}")))?;
-
-        let cookie = self.load_naukri_session()?;
-
-        let mut session_cfg = BrowserSessionConfig {
-            headless: self.cfg.headless,
-            request_timeout_seconds: self.cfg.action_timeout_seconds,
-            ..BrowserSessionConfig::default()
-        };
-        if let Some(ua) = &self.cfg.user_agent {
-            session_cfg.user_agent.clone_from(ua);
-        }
-
-        let session = BrowserSession::launch(&session_cfg)
-            .await
-            .map_err(|e| match e {
-                SubmitError::Io(io) => SubmitError::SourceDisabled(format!(
-                    "naukri browser launch failed (is Chromium installed?): {io}"
-                )),
-                other => other,
-            })?;
-
-        // Every exit path must close the session so we don't leak Chromium
-        // processes across batch submits.
-        let mut permit_slot = Some(permit);
-        let outcome = self
-            .run_session(&session, ctx, &cookie, &mut permit_slot)
-            .await;
-        if let Err(e) = session.close().await {
-            tracing::warn!(target: "submit", error = %e, "naukri browser close failed");
-        }
-        outcome
+    /// **Stub.** Until the chromiumoxide click flow lands (see
+    /// `run_session` for the documented sequence and follow-up plan),
+    /// this returns `NotImplemented` *before* any browser launch or
+    /// rate-permit acquisition. Both of those have observable side
+    /// effects — leaked Chromium processes and consumed daily quota —
+    /// that must not happen for a path the engineer hasn't shipped.
+    /// `NotImplemented` (vs `SourceDisabled`) keeps the audit log
+    /// honest: the operator can tell "I haven't enabled this" from
+    /// "career-ai hasn't built this yet".
+    async fn submit(&self, _ctx: &SubmitContext<'_>) -> Result<String> {
+        Err(SubmitError::NotImplemented(
+            "naukri submitter is a scaffold — the chromiumoxide click flow ships in M5c. \
+             To unblock testing, set submit.per_source.naukri.enabled=false in your config."
+                .into(),
+        ))
     }
 }

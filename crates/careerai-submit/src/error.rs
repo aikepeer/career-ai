@@ -24,6 +24,12 @@ pub enum SubmitError {
     UnknownSource(String),
     #[error("source '{0}' is disabled in submit.per_source config")]
     SourceDisabled(String),
+    /// The submitter exists but its click/network flow has not been
+    /// built yet. Distinct from `SourceDisabled` (config) so audit logs
+    /// can tell "operator turned this off" from "engineer hasn't
+    /// shipped this".
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
 }
 
 pub type Result<T> = std::result::Result<T, SubmitError>;
