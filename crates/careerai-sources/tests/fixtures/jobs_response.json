@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "title": "Senior AI Engineer",
+      "company": "Acme Robotics",
+      "location": "Remote (India)",
+      "url": "https://example.com/jobs/ai-1",
+      "description": "Build LLM-powered planning systems on edge devices.",
+      "id": "fixture-1",
+      "posted_at": "2026-04-26T08:00:00Z"
+    },
+    {
+      "job_title": "Embedded ML Engineer",
+      "company_name": "Beta Edge",
+      "place": "Bangalore-remote",
+      "apply_url": "https://example.com/jobs/em-2",
+      "summary": "Quantize and deploy CV models on Jetson.",
+      "job_id": "fixture-2"
+    }
+  ]
+}
