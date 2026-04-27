@@ -16,9 +16,6 @@ pub mod error;
 #[cfg(feature = "browser")]
 pub mod linkedin;
 pub mod linkedin_selectors;
-#[cfg(feature = "browser")]
-pub mod naukri;
-pub mod naukri_selectors;
 pub mod rate_limiter;
 
 pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
@@ -30,8 +27,6 @@ pub use dry_run::DryRunSubmitter;
 pub use error::{Result, SubmitError};
 #[cfg(feature = "browser")]
 pub use linkedin::{LinkedinConfig, LinkedinSubmitter};
-#[cfg(feature = "browser")]
-pub use naukri::{NaukriConfig, NaukriSubmitter};
 pub use rate_limiter::{RateLimitError, RateLimiter, RatePermit, RatePolicy};
 
 use std::path::Path;
@@ -145,30 +140,11 @@ pub async fn submit_application(
             )
             .await;
         }
-        // Naukri.com browser-driven submitter (Tasks 2.5+2.6). No
-        // `interactive_only` gate — the daemon may auto-submit when
-        // `auto_submit=true` AND `per_source.naukri.enabled=true`.
-        #[cfg(feature = "browser")]
-        "naukri" => Box::new(crate::naukri::NaukriSubmitter::new(
-            crate::naukri::NaukriConfig::from_core(cfg),
-            shared_rate_limiter(),
-        )),
-        #[cfg(not(feature = "browser"))]
-        "naukri" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "naukri requires --features browser; rebuild with \
-                 `cargo build -p careerai-cli --features browser`",
-            )
-            .await;
-        }
         // Feed-only sources don't have an HTTP submission API. Browser
         // submitters land in M5 for LinkedIn / Indeed; until then the
         // safe answer is to mark the application Skipped with a clear
         // reason rather than fail the whole batch with UnknownSource.
-        "remotive" | "remoteok" => {
+        "remotive" | "remoteok" | "naukri" => {
             return mark_skipped(
                 pool,
                 &application,

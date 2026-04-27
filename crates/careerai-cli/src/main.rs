@@ -4,9 +4,6 @@
 //! `profile show`, `profile validate`, and `--help` are wired end-to-end at
 //! M1; the rest are stubs until M2+.
 
-mod cookies;
-mod review;
-
 use careerai_pipeline as pipeline;
 
 use std::path::{Path, PathBuf};
@@ -102,25 +99,6 @@ enum Command {
         /// Maximum rows to return (newest first).
         #[arg(long, default_value_t = 20)]
         limit: i64,
-    },
-    /// Walk drafted LinkedIn applications, prompt y/N per draft, click Submit on yes.
-    Review,
-    /// Manage session cookies for browser-driven submitters (linkedin, naukri).
-    Cookies {
-        #[command(subcommand)]
-        command: CookiesCommand,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum CookiesCommand {
-    /// Refresh the session cookie for a provider (linkedin or naukri).
-    ///
-    /// Prompts for the cookie value from your browser DevTools and stores
-    /// it in the OS keyring. The daemon picks it up on the next apply tick.
-    Refresh {
-        /// Provider name: linkedin | naukri
-        provider: String,
     },
 }
 
@@ -227,15 +205,6 @@ async fn main() -> Result<()> {
         Command::Applied { source, limit } => {
             run_applied(&cwd, source.as_deref(), limit).await?;
         }
-        Command::Review => {
-            let cfg = load_cfg(&cwd)?;
-            review::run_review(&cwd, &cfg).await?;
-        }
-        Command::Cookies { command } => match command {
-            CookiesCommand::Refresh { provider } => {
-                cookies::refresh(&provider)?;
-            }
-        },
         Command::Inspect { application_id } => {
             run_inspect(&cwd, &application_id).await?;
         }
