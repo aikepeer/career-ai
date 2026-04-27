@@ -27,7 +27,7 @@ Activate when the user:
      the cache must hit for cost efficiency).
    - Sends the JD + bullet-rewrite prompt.
    - Receives a constrained JSON diff and validates it against the strict
-     grammar in `careerai-tailor/src/diff.rs`.
+     grammar in `crates/careerai-tailor/src/diff.rs`.
    - Applies the diff to produce a tailored profile snapshot for this
      application.
 
@@ -54,9 +54,11 @@ It rejects:
 - new skills not in the master profile
 
 If the LLM ever emits anything outside this grammar, the validator
-rejects the whole diff and the call fails with `LLMRefused`. Re-running
-usually fixes transient model glitches; persistent failures mean the JD
-is too sparse to tailor against.
+rejects the whole diff and the call fails with `TailorError::Schema` (or
+`TailorError::InventedContent` when the model proposes a bullet that
+isn't grounded in the master profile). Re-running usually fixes
+transient model glitches; persistent failures mean the JD is too sparse
+to tailor against.
 
 When discussing tailored output with the user, never describe a bullet
 that isn't grounded in the master profile — that would defeat the whole
@@ -71,10 +73,12 @@ safety story.
 
 ## Failure modes + recovery
 
-- **`LLMRefused`** — diff failed validation. Re-run once. If it fails
-  twice, capture the JD and skip with a note.
-- **`PandocMissing`** — install pandoc and re-run only the render step
+- **`TailorError::Schema` / `TailorError::InventedContent`** — diff
+  failed validation. Re-run once. If it fails twice, capture the JD and
+  skip with a note.
+- **Pandoc missing** — install pandoc and re-run only the render step
   via `careerai_render`.
-- **`MissingProfile`** — run the `ingest-profile` skill first.
-- **`MissingListing`** — listing is not in `shortlisted` state. Inspect
-  with `/career:inspect` to see why.
+- **Profile missing (`TailorError::Profile`)** — run the
+  `ingest-profile` skill first.
+- **Listing not found (`DbError::NotFound`) or wrong state** — listing is
+  not in `shortlisted` state. Inspect with `/career:inspect` to see why.

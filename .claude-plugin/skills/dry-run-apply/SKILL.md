@@ -90,14 +90,16 @@ Surface the response: status code, follow-up state (`submitted`,
 
 ## Failure modes + recovery
 
-- **`SubmitDisabled`** — config has `submit_enabled: false` for this
-  source. Tell the user to flip it in `config/local.yaml`. Don't edit
+- **`SubmitError::SourceDisabled(...)` / source-disabled condition** —
+  config has `submit_enabled: false` for this source (rate-limit and
+  quiet-hours gating also surface through this error path with a
+  message). Tell the user to flip it in `config/local.yaml`. Don't edit
   config files unprompted.
-- **`RateLimited`** — token bucket empty. Tell the user when the next
-  permit will be available; the daemon will retry on its next tick if
-  enabled.
-- **`SourceLoginExpired`** — refresh cookies via
+- **Rate-limit condition** — token bucket empty. Tell the user when the
+  next permit will be available; the daemon will retry on its next tick
+  if enabled.
+- **Login/session expired at the source** — refresh cookies via
   `careerai cookies refresh <provider>` (`linkedin` or `naukri`) and
   re-run.
-- **`ApplicationNotReady`** — application is not in `rendered` /
-  `prepared`. Run the `tailor-resume` skill first.
+- **`SubmitError::BadState` / application not ready** — application is
+  not in `rendered` / `prepared`. Run the `tailor-resume` skill first.

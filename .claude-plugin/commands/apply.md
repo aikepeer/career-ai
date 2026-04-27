@@ -33,11 +33,13 @@ it produces a screenshot and logs a `would_submit` event, then exits.
      answers), and require a plain `yes` confirmation.
 3. **Per-source `submit_enabled` gates are honored even with `--live`.** If
    the source has `submit_enabled: false` in config, the call fails fast
-   with `SubmitDisabled` — `--live` does not override config.
+   with `SubmitError::SourceDisabled(...)` — `--live` does not override
+   config.
 4. **Rate limits + quiet hours apply.** Even with `--live`, the call goes
    through `governor` token-buckets. If the bucket is empty or you're in a
-   quiet-hours window, the call returns `RateLimited` and is not retried
-   silently.
+   quiet-hours window, the call is blocked at the rate-limit boundary and
+   is not retried silently. (Rate-limit/quiet-hours conditions are also
+   surfaced through the same disabled-source error path with a message.)
 
 ## Tool call
 
@@ -52,9 +54,12 @@ Live prints: source, submission timestamp, response code, follow-up state.
 
 ## Failure modes
 
-- `ApplicationNotReady` — application is not in `rendered` or `prepared`.
-  Run `/career:tailor` first.
-- `RateLimited` — back off; the daemon will retry on its next tick.
-- `SourceLoginExpired` — refresh cookies via `careerai cookies refresh
-  <provider>` (`linkedin` and `naukri` are the supported providers) and
-  re-run.
+- `SubmitError::BadState` — the application is not in `rendered` or
+  `prepared`. Run `/career:tailor` first.
+- Rate limiting or quiet-hours gating — back off; submission is blocked
+  until tokens are available or the quiet-hours window has passed. The
+  daemon retries on its next tick.
+- Login/session issues for cookie-based sources may surface as credential,
+  cookie, or keyring-related errors. Refresh cookies via
+  `careerai cookies refresh <provider>` (`linkedin` and `naukri` are the
+  supported providers) and re-run.
