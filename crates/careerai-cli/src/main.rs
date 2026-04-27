@@ -719,8 +719,9 @@ fn detect_stale_skills_schema(text: &str) -> bool {
 }
 
 /// Best-effort probe: is an Anthropic API key reachable without any
-/// network round-trip? Checks the keyring (service "career-ai", username
-/// "anthropic/api_key") then the env var. Used to default `--use-llm`.
+/// network round-trip? Checks `ANTHROPIC_API_KEY` first, then the
+/// keyring (service "career-ai", username "anthropic/api_key"). Used
+/// to default `--use-llm`.
 fn anthropic_key_reachable() -> bool {
     if std::env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty()) {
         return true;
@@ -763,12 +764,16 @@ fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Prof
             })?;
 
         let cwd = std::env::current_dir()?;
-        // Best-effort config load — when no `config/` is present (e.g.
-        // running `profile import` before `init`), fall back to a
-        // `LlmConfig::default()` so a fresh box still works. We only
-        // need the `llm` block; `CoreConfig` itself doesn't impl
-        // Default but `LlmConfig` does.
-        let llm_cfg = CoreConfig::load(&cwd).map(|c| c.llm).unwrap_or_default();
+        // Fall back to `LlmConfig::default()` ONLY when no `config/`
+        // directory is present (e.g. running `profile import` before
+        // `init`). When config exists, surface load/parse failures so
+        // malformed YAML and similar real errors don't silently hide
+        // behind defaults.
+        let llm_cfg = if cwd.join("config").exists() {
+            CoreConfig::load(&cwd).context("load config/")?.llm
+        } else {
+            careerai_core::config::LlmConfig::default()
+        };
 
         // Honor `config.llm.cache_dir` so live profile-extract caches
         // sit next to tailor caches under `data/cache/llm`. `.gitignore`

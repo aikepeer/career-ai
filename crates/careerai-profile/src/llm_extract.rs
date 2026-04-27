@@ -83,8 +83,10 @@ pub struct ExtractRequest {
 /// Provider-agnostic shim consumed by [`extract_profile_from_text`].
 ///
 /// The async-trait erases the future so we can take this as
-/// `&dyn LlmCaller`. `careerai-llm` provides a blanket impl over its
-/// `Llm` trait, so callers don't normally implement this directly.
+/// `&dyn LlmCaller`. Callers may implement this directly; in this
+/// workspace, the adapter from `careerai-llm`'s `Llm` abstraction into
+/// [`LlmCaller`] lives in `careerai-cli`, where both crates are in
+/// scope and the `profile ↔ llm` dependency cycle is impossible.
 #[async_trait]
 pub trait LlmCaller: Send + Sync {
     /// Issue a single completion. Implementations own their own retry
@@ -100,6 +102,13 @@ pub enum ExtractError {
 
     #[error("response is not valid JSON: {0}")]
     ParseJson(String),
+
+    /// Response parsed as JSON but its shape doesn't match the
+    /// [`Profile`] schema (missing/extra/mistyped fields). Distinct
+    /// from [`ExtractError::ParseJson`] so callers and operators can
+    /// tell a malformed JSON document from a wrong-shape one.
+    #[error("response shape does not match Profile schema: {0}")]
+    SchemaDeserialize(String),
 
     #[error("response failed schema validation: {0}")]
     SchemaValidate(String),
@@ -232,9 +241,11 @@ pub fn strip_code_fences(text: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`ExtractError::ParseJson`] if the text isn't a JSON object
-/// matching the [`Profile`] schema, or [`ExtractError::SchemaValidate`]
-/// if the validator rejects it (e.g. empty `personal.name`).
+/// Returns [`ExtractError::ParseJson`] if the text isn't valid JSON,
+/// [`ExtractError::SchemaDeserialize`] if it parses but the shape
+/// doesn't match the [`Profile`] schema, or
+/// [`ExtractError::SchemaValidate`] if the validator rejects an
+/// otherwise-shaped profile (e.g. empty `personal.name`).
 pub fn parse_and_validate(response_text: &str) -> Result<Profile, ExtractError> {
     let cleaned = strip_code_fences(response_text);
 
@@ -243,8 +254,8 @@ pub fn parse_and_validate(response_text: &str) -> Result<Profile, ExtractError> 
     let value: Value =
         serde_json::from_str(&cleaned).map_err(|e| ExtractError::ParseJson(e.to_string()))?;
 
-    let profile = Profile::deserialize(value)
-        .map_err(|e| ExtractError::ParseJson(format!("schema mismatch: {e}")))?;
+    let profile =
+        Profile::deserialize(value).map_err(|e| ExtractError::SchemaDeserialize(e.to_string()))?;
 
     Validate::validate(&profile).map_err(|e| ExtractError::SchemaValidate(e.to_string()))?;
 
@@ -391,6 +402,18 @@ mod tests {
     fn parse_and_validate_rejects_non_json() {
         let err = parse_and_validate("not json at all").unwrap_err();
         assert!(matches!(err, ExtractError::ParseJson(_)));
+    }
+
+    #[test]
+    fn parse_and_validate_distinguishes_shape_mismatch_from_invalid_json() {
+        // Valid JSON but the shape is wrong — `personal` is a string
+        // instead of the expected object.
+        let bad = r#"{"personal":"Alice","summary":"","skills":{"languages":[],"frameworks":[],"tools":[]},"experience":[],"education":[],"projects":[]}"#;
+        let err = parse_and_validate(bad).unwrap_err();
+        assert!(
+            matches!(err, ExtractError::SchemaDeserialize(_)),
+            "expected SchemaDeserialize for shape mismatch, got {err:?}"
+        );
     }
 
     #[tokio::test]
