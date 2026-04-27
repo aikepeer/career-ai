@@ -29,8 +29,12 @@ fn apply_button_selector_matches_fixture_button() {
         "APPLY_BUTTON_SELECTOR should match at least one element in the fixture"
     );
     // The first match should be a button with the aria-label "Apply".
+    // Asserting both the tag and the aria-label keeps the comment honest
+    // and locks the contract: a future selector revision that drops the
+    // aria-label anchor will fail this test, not silently succeed.
     let first = &matches[0];
     assert_eq!(first.value().name(), "button");
+    assert_eq!(first.value().attr("aria-label"), Some("Apply"));
 }
 
 #[test]

@@ -121,9 +121,13 @@ async fn linkedin_apply_with_interactive_only_transitions_to_drafted() {
         .unwrap();
     assert_eq!(app.state, "drafted", "expected Drafted, got {}", app.state);
 
-    // Outcome must not claim a real network submission happened.
-    if let careerai_submit::SubmitOutcome::Submitted { .. } = outcome.outcome {
-        panic!("interactive_only=true must never report Submitted from the daemon path");
+    // Outcome must be Drafted (state changed, no network submission).
+    // Submitted/DryRun would both be wrong: Submitted = network call
+    // happened (daemon never auto-submits LinkedIn); DryRun = no state
+    // change (we DID write Drafted to the DB).
+    match &outcome.outcome {
+        careerai_submit::SubmitOutcome::Drafted { .. } => {}
+        other => panic!("interactive_only=true must yield Drafted, got {other:?}"),
     }
 }
 
@@ -241,4 +245,40 @@ async fn submit_application_accepts_drafted_state() {
     if let Err(careerai_submit::SubmitError::BadState { state }) = &result {
         panic!("submit_application rejected Drafted state with BadState({state}); P0 regression");
     }
+}
+
+/// Regression test for the double-submit race: two `careerai review`
+/// processes both observe `state = drafted` simultaneously. With the
+/// atomic claim in `confirm_linkedin_submit`, exactly one wins and the
+/// other gets a clear error before any browser launch.
+#[tokio::test]
+async fn confirm_linkedin_submit_atomic_claim_prevents_double_submit() {
+    let tmp = tempfile::tempdir().unwrap();
+    scaffold_project(tmp.path());
+
+    let (_listing_id, application_id) = seed_rendered_linkedin_application(tmp.path()).await;
+
+    // Move the application into Drafted (post-daemon-draft state).
+    let db_path = tmp.path().join("data/careerai.sqlite");
+    let pool = pool_from_path(&db_path).await.unwrap();
+    queries::set_application_state(&pool, &application_id, "drafted")
+        .await
+        .unwrap();
+
+    // First claim wins — state transitions Drafted → Rendered.
+    let won = queries::claim_drafted_application(&pool, &application_id)
+        .await
+        .unwrap();
+    assert!(won, "first claim must succeed");
+
+    let app_after = queries::find_application_by_id(&pool, &application_id)
+        .await
+        .unwrap();
+    assert_eq!(app_after.state, "rendered", "claim transitions to rendered");
+
+    // Second claim loses — state is no longer Drafted.
+    let won_again = queries::claim_drafted_application(&pool, &application_id)
+        .await
+        .unwrap();
+    assert!(!won_again, "second claim on already-rendered row must fail");
 }

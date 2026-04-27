@@ -329,6 +329,12 @@ fn print_apply_line(outcome: &pipeline::AppliedOutcome, auto_submit: bool) {
                 outcome.application_id, outcome.source, reason,
             );
         }
+        careerai_submit::SubmitOutcome::Drafted { note } => {
+            println!(
+                "[draft]   application={} source={} -> Drafted ({}; run `careerai review` to confirm)",
+                outcome.application_id, outcome.source, note,
+            );
+        }
     }
 }
 
