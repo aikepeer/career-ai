@@ -18,7 +18,8 @@
       "env": {
         "RAPIDAPI_KEY": "${LINKEDIN_RAPIDAPI_KEY}"
       },
-      "comment": "Default LinkedIn discovery via RapidAPI's LinkedIn Data API. ToS-clean (no scraping). Free tier exists. Not on PyPI under this name as of 2026-04-27, so we install directly from the upstream Git repo via uvx. Set LINKEDIN_RAPIDAPI_KEY to enable; the server is harmless without a key but discovery calls will fail."
+      "comment": "Optional LinkedIn discovery via RapidAPI's LinkedIn Data API (ToS-clean, no scraping; free tier exists). Disabled by default because the upstream repo (Rom7699/linkedin-jobs-mcp-server, verified 2026-04-27) ships as `python main.py` with no [project.scripts] entry, so the uvx invocation above will fail until upstream is packaged or the user pins a packaged fork. To enable: clone the repo locally, run `python main.py` with RAPIDAPI_KEY set, and replace this entry with a command/args pair pointing at the local script. Tracking: PR #19 (mcp_jobs adapter) is the proper long-term path.",
+      "disabled": true
     },
     "linkedin-browser": {
       "command": "uvx",
@@ -29,7 +30,7 @@
       ],
       "env": {},
       "disabled": true,
-      "comment": "Opt-in: browser-based LinkedIn scraper. Violates LinkedIn User Agreement section 8.2 (no automated access). Disabled by default. Installed from the upstream Git repo via uvx (not on PyPI). Flip `disabled` to false at your own risk; rate caps and cookie-jar rotation in careerai-submit still apply."
+      "comment": "Opt-in: browser-based LinkedIn scraper. Violates LinkedIn User Agreement section 8.2 (no automated access). Disabled by default. Installed from the upstream Git repo via uvx (not on PyPI; pyproject pins `name = mcp-linkedin` with a matching [project.scripts] entry, so the uvx form works). Flip `disabled` to false at your own risk; rate caps and cookie-jar rotation in careerai-submit still apply."
     }
   }
 }
