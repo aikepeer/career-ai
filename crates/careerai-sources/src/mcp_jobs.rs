@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use careerai_core::config::{McpSourceConfig, McpTransportConfig};
-use chrono::{DateTime, Utc};
 use governor::clock::DefaultClock;
 use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
@@ -30,7 +29,7 @@ use rmcp::ClientHandler;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::base::{RawListing, Source, SourceError};
 
@@ -72,26 +71,63 @@ type ReadRateLimiter = RateLimiter<
     NoOpMiddleware<governor::clock::QuantaInstant>,
 >;
 
+/// Per-name interner for `(name_static, rate_limiter)` pairs.
+///
+/// `build_sources()` is invoked on every cron tick, which means
+/// `McpJobsSource::new` is called repeatedly with the same `cfg.name`
+/// over the daemon's lifetime. Without this cache:
+///   1. Every call would `Box::leak` a fresh copy of the source name —
+///      one slow leak per tick, per source. Bounded but unbounded over
+///      uptime; pre-fix doc comment claimed otherwise and was wrong.
+///   2. Every call would build a new `RateLimiter` with a full bucket,
+///      so the per-minute cap never fired in practice.
+///
+/// With the cache: one allocation per distinct source name, and the
+/// token-bucket state is shared across reconstructions so the cap is
+/// honored.
+type InternedState = (&'static str, Option<Arc<ReadRateLimiter>>);
+type InternMap = std::sync::Mutex<std::collections::HashMap<String, InternedState>>;
+static SOURCE_STATE: std::sync::OnceLock<InternMap> = std::sync::OnceLock::new();
+
+fn intern_source_state(name: &str, rate_per_minute: u32) -> InternedState {
+    let map = SOURCE_STATE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    // `lock()` only fails if a previous holder panicked. The state we
+    // keep is just `(static str, Arc<RateLimiter>)`; recovery is safe.
+    let mut guard = map
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(entry) = guard.get(name) {
+        return entry.clone();
+    }
+    let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
+    let rl = NonZeroU32::new(rate_per_minute)
+        .map(|n| Arc::new(RateLimiter::direct(Quota::per_minute(n))));
+    guard.insert(name.to_owned(), (leaked, rl.clone()));
+    (leaked, rl)
+}
+
 #[derive(Debug)]
 pub struct McpJobsSource {
     cfg: McpSourceConfig,
-    /// `&'static str` produced via `Box::leak`. Each `McpJobsSource`
-    /// instance leaks at most one short string for the lifetime of the
-    /// process; sources are constructed once per `build_sources()` and
-    /// the daemon is single-process, so the leak is bounded.
+    /// `&'static str` produced via a name-keyed interner backed by
+    /// `Box::leak`. Constructing two `McpJobsSource` instances with the
+    /// same `cfg.name` returns the same `&'static str` (one allocation
+    /// per distinct source name, for the lifetime of the process). The
+    /// scheduler invokes `build_sources()` on every cron tick — without
+    /// the cache that would leak a fresh string every tick.
     name_static: &'static str,
+    /// Shared with all other `McpJobsSource` instances that have the
+    /// same `cfg.name`. The token-bucket state lives in the `Arc`, so a
+    /// new construction (e.g. on the next cron tick via
+    /// `build_sources()`) does not reset the bucket — the per-minute
+    /// cap is honored across ticks.
     rate_limiter: Option<Arc<ReadRateLimiter>>,
 }
 
 impl McpJobsSource {
-    /// Construct a new adapter. `cfg.name` is leaked into a
-    /// `&'static str` so the existing `Source::name(&self) -> &'static
-    /// str` contract holds without allocating on every call.
     #[must_use]
     pub fn new(cfg: McpSourceConfig) -> Self {
-        let name_static: &'static str = Box::leak(cfg.name.clone().into_boxed_str());
-        let rate_limiter = NonZeroU32::new(cfg.rate_per_minute)
-            .map(|n| Arc::new(RateLimiter::direct(Quota::per_minute(n))));
+        let (name_static, rate_limiter) = intern_source_state(&cfg.name, cfg.rate_per_minute);
         Self {
             cfg,
             name_static,
@@ -172,7 +208,27 @@ impl Source for McpJobsSource {
 
 async fn run_call(src: &McpJobsSource) -> Result<Vec<RawListing>, SourceError> {
     let svc = src.connect().await?;
-    let tool_name = src.pick_tool(&svc).await?;
+
+    // Run the call inside a closure so we can guarantee `svc.cancel()`
+    // fires whether the inner work succeeds or fails. Returning early
+    // with `?` would otherwise drop `svc` on the floor and rely solely
+    // on `kill_on_drop` to reap the child — cleaner to send the MCP
+    // shutdown frame first.
+    let inner = call_and_parse(src, &svc).await;
+
+    // Best-effort shutdown; ignore errors so a misbehaving server
+    // can't poison the cron tick. `kill_on_drop` (set in
+    // `build_command`) is the SIGKILL backstop when this fails.
+    let _ = svc.cancel().await;
+
+    inner
+}
+
+async fn call_and_parse(
+    src: &McpJobsSource,
+    svc: &RunningService<RoleClient, ProbeClient>,
+) -> Result<Vec<RawListing>, SourceError> {
+    let tool_name = src.pick_tool(svc).await?;
     let args = build_tool_args(&src.cfg.mcp.query);
 
     let result = svc
@@ -188,24 +244,22 @@ async fn run_call(src: &McpJobsSource) -> Result<Vec<RawListing>, SourceError> {
         )));
     }
 
-    let raw_json = first_text_content(&result.content).unwrap_or_default();
-    let listings = parse_listings(&raw_json, src.name_static).unwrap_or_else(|err| {
-        warn!(
-            source = %src.name_static,
-            error = %err,
-            "mcp response could not be parsed as JSON listings; returning empty",
-        );
-        Vec::new()
-    });
+    let raw_json = first_text_content(&result.content).ok_or_else(|| {
+        SourceError::Parse(format!(
+            "mcp tool `{tool_name}` returned no text content blocks"
+        ))
+    })?;
+
+    // Surface parse errors instead of swallowing them. A community MCP
+    // server that suddenly switches schema would otherwise show up as
+    // "0 listings" in the cron log with no indication that the daemon
+    // is silently broken — the operator only notices days later.
+    let listings = parse_listings(&raw_json, src.name_static).map_err(SourceError::Parse)?;
     info!(
         source = %src.name_static,
         count = listings.len(),
         "mcp adapter discovered listings",
     );
-
-    // Best-effort cancel; ignore the result so a misbehaving server
-    // can't poison the cron tick.
-    let _ = svc.cancel().await;
     Ok(listings)
 }
 
@@ -218,17 +272,19 @@ fn first_text_content(content: &[rmcp::model::Content]) -> Option<String> {
     })
 }
 
-/// Build the `tokio::process::Command` for the configured stdio MCP
-/// server. `${VAR}` placeholders in `env` values are expanded against
-/// the parent process's environment; missing vars expand to empty
-/// strings (the server is responsible for surfacing the missing-key
-/// error in its own logs).
 fn build_command(cfg: &McpTransportConfig) -> Command {
     let mut cmd = Command::new(&cfg.command);
     cmd.args(&cfg.args);
     for (k, v) in &cfg.env {
         cmd.env(k, expand_env(v));
     }
+    // If the cron tick times out (or we hit any early-error path before
+    // `svc.cancel().await` fires), the `RunningService` is dropped but
+    // the spawned MCP server child does not necessarily die with it.
+    // `kill_on_drop(true)` makes tokio SIGKILL the child when the
+    // `TokioChildProcess` handle is dropped, so a hung `uvx` / `npx` /
+    // `docker` cannot accumulate one-orphan-per-tick.
+    cmd.kill_on_drop(true);
     cmd
 }
 
@@ -320,14 +376,17 @@ fn map_listing(item: &Value, source_name: &str) -> Option<RawListing> {
         return None;
     }
     let location = pick_string(item, &["location", "place", "city"]);
-    let description = pick_string(item, &["description", "summary", "snippet"]).unwrap_or_default();
+    // Strip HTML to plain text — community MCPs (e.g. mcp-linkedin)
+    // return marketing HTML in `description`, and the matcher
+    // embeddings work much better on clean text. Mirrors the same
+    // pre-processing done by every other adapter (greenhouse, lever,
+    // remoteok, remotive, naukri).
+    let description = pick_string(item, &["description", "summary", "snippet"])
+        .map(|s| crate::util::html_to_text(&s))
+        .unwrap_or_default();
     let external_id = pick_string(item, &["id", "job_id", "external_id"])
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| derive_external_id(source_name, &url, &title, &company));
-    let _posted_at_unused: Option<DateTime<Utc>> =
-        pick_string(item, &["posted_at", "date", "posted_date"])
-            .as_deref()
-            .and_then(parse_posted_at);
     Some(RawListing {
         source: source_name.to_string(),
         external_id,
@@ -373,14 +432,10 @@ fn derive_external_id(source_name: &str, url: &str, title: &str, company: &str) 
     hex::encode(&digest[..8])
 }
 
-/// Best-effort RFC3339 parse, with a tolerant fallback that strips a
-/// trailing `Z` if `parse_from_rfc3339` rejects it.
-fn parse_posted_at(s: &str) -> Option<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return Some(dt.with_timezone(&Utc));
-    }
-    None
-}
+// `parse_posted_at` was previously used to populate a discarded
+// `_posted_at_unused` local. `RawListing` has no `posted_at` field; the
+// value was thrown away. Removed in the PR-19 review pass — if the
+// schema later grows a `posted_at`, reintroduce the parser then.
 
 /// Wire helper used by the `careerai mcp probe` CLI subcommand. Spawns
 /// the configured server, runs `initialize` + `tools/list`, and
@@ -539,6 +594,76 @@ mod tests {
         assert_eq!(a, b);
         let c = derive_external_id("src", "u", "t", "different");
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn external_id_differs_across_sources_for_same_url() {
+        // Two MCP sources can legitimately surface the same job (same
+        // URL, title, company, no upstream id). The downstream upsert
+        // key is `(source, external_id)`; if the SHA didn't include the
+        // source name, both rows would collapse into one and we'd
+        // silently drop the second source's listing.
+        let a = derive_external_id("source-one", "u", "t", "c");
+        let b = derive_external_id("source-two", "u", "t", "c");
+        assert_ne!(a, b, "external_id must vary by source_name");
+    }
+
+    #[test]
+    fn description_html_is_stripped_to_plain_text() {
+        // mcp-linkedin-style payload: HTML inside `description`. The
+        // matcher embeddings expect plain text; assert we strip tags
+        // the same way greenhouse / lever / remoteok do.
+        let body = r#"[{
+            "title": "X",
+            "company": "Y",
+            "url": "https://example.com/x",
+            "description": "<p>Build <strong>LLM</strong> apps.</p>"
+        }]"#;
+        let listings = parse_listings(body, "src").expect("parse");
+        assert_eq!(listings.len(), 1);
+        assert_eq!(listings[0].description, "Build LLM apps.");
+    }
+
+    #[test]
+    fn intern_source_state_reuses_static_name_and_limiter() {
+        // Two `McpJobsSource` constructed with the same `name` must
+        // share the same `&'static str` (so the cache is hit, no
+        // per-tick leak) and the same rate-limiter `Arc` (so the
+        // token-bucket state survives `build_sources()` rebuild).
+        let cfg = |rpm: u32| McpSourceConfig {
+            name: "intern-test-shared".into(),
+            enabled: true,
+            submit_enabled: false,
+            cron: None,
+            rate_per_minute: rpm,
+            mcp: McpTransportConfig::default(),
+        };
+        let a = McpJobsSource::new(cfg(60));
+        let b = McpJobsSource::new(cfg(60));
+        // Same `&'static str` (pointer identity, not just string equality).
+        assert!(
+            std::ptr::eq(a.name(), b.name()),
+            "name_static must be interned across constructions"
+        );
+        // Same limiter `Arc`.
+        let arc_a = a.rate_limiter.as_ref().expect("limiter set");
+        let arc_b = b.rate_limiter.as_ref().expect("limiter set");
+        assert!(
+            Arc::ptr_eq(arc_a, arc_b),
+            "rate_limiter Arc must be shared across constructions"
+        );
+    }
+
+    #[test]
+    fn parse_listings_propagates_error_instead_of_empty() {
+        // Regression: previously `run_call` swallowed parse errors and
+        // returned an empty Vec, hiding upstream schema breakage from
+        // the operator. The mapper itself returns Result; assert that
+        // a malformed body surfaces the error rather than `Ok(vec![])`.
+        let err = parse_listings("not json", "x").unwrap_err();
+        assert!(err.contains("invalid JSON"), "got: {err}");
+        let err = parse_listings(r#"{"unexpected": true}"#, "x").unwrap_err();
+        assert!(err.contains("expected JSON array"), "got: {err}");
     }
 
     #[test]
