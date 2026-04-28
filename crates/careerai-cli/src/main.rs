@@ -542,7 +542,6 @@ async fn run_notify_test(cfg: &CoreConfig) -> Result<()> {
     Ok(())
 }
 
-
 /// Dispatch for `careerai apply`. Errors short-circuit the process with a
 /// typed exit code; success paths print one line per application.
 async fn run_apply(
