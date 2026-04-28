@@ -71,21 +71,28 @@ mod tests {
 
     /// Build a stub `claude` binary in `dir` that:
     /// - writes its argv (one arg per line) to `argv_sentinel`,
-    /// - emits the `payload` string on stdout (wrapped in the
-    ///   `claude --print --output-format json` shape),
+    /// - emits a canned `claude --print --output-format json` envelope
+    ///   on stdout,
     /// - exits 0.
     ///
-    /// The stub flips between two payloads based on the marker text in
+    /// The stub flips between two payloads based on a unique marker in
     /// the user prompt that arrives on stdin: any prompt containing
-    /// `cover_letter` returns the cover letter; otherwise the diff.
-    /// (`careerai-tailor::cover_letter::draft` builds a separate prompt
-    /// with that prompt-version suffix.) That keeps the stub tiny while
-    /// covering both LLM hops in one binary.
+    /// the literal phrase `Draft a cover letter` (emitted by the
+    /// cover-letter Tera template) returns the cover letter; otherwise
+    /// the diff. Matching `cover_letter` would also match the tailor
+    /// prompt's JSON schema (which lists a `cover_letter` field), so
+    /// the discriminator must be a phrase that appears only in the
+    /// cover-letter prompt body.
+    ///
+    /// Hermeticity: the JSON-escaped `result` string is generated in
+    /// Rust via `serde_json::to_string` and embedded as a shell
+    /// literal. The script is POSIX `/bin/sh` only — no `base64`, no
+    /// `python3`, no other external executables.
     fn write_stub_binary(stub_path: &std::path::Path, argv_sentinel: &std::path::Path) {
-        let diff_b64 = base64_payload(TAILOR_DIFF);
-        let cover_b64 = base64_payload(COVER_LETTER);
+        let diff_json = serde_json::to_string(TAILOR_DIFF).unwrap();
+        let cover_json = serde_json::to_string(COVER_LETTER).unwrap();
         // The script reads stdin into $stdin, picks one of the two
-        // payloads, and prints the wrapped JSON.
+        // pre-escaped JSON strings, and emits the wrapped envelope.
         let script = format!(
             r#"#!/bin/sh
 # Capture argv (one per line) for the assertion.
@@ -94,27 +101,24 @@ for a in "$@"; do printf '%s\n' "$a" >> '{sentinel}'; done
 
 stdin=$(cat || true)
 
-# Decide which canned response to return. The cover-letter prompt
-# contains a recognizable marker emitted by the tailor's prompt
-# template. The constrained-diff prompt does not.
+# Decide which canned response to return. Match only a phrase that is
+# unique to the cover-letter prompt text, not the `cover_letter`
+# schema field name that also appears in the tailor prompt.
 case "$stdin" in
-  *cover_letter*|*"cover letter"*) payload_b64='{cover_b64}' ;;
-  *) payload_b64='{diff_b64}' ;;
+  *"Draft a cover letter"*) result_json='{cover_json}' ;;
+  *) result_json='{diff_json}' ;;
 esac
 
-result=$(printf '%s' "$payload_b64" | base64 -d)
-
-# Emit the claude --print --output-format json envelope. `result` is
-# JSON-escaped via python3 -c so embedded quotes round-trip safely.
-escaped=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-
+# Emit the claude --print --output-format json envelope. `result_json`
+# is already a JSON-escaped string literal (produced by serde_json
+# in Rust), so the stub stays POSIX-only.
 cat <<__P__
-{{"type":"result","is_error":false,"result":${{escaped}},"usage":{{"input_tokens":7,"output_tokens":11,"cache_read_input_tokens":0}}}}
+{{"type":"result","is_error":false,"result":${{result_json}},"usage":{{"input_tokens":7,"output_tokens":11,"cache_read_input_tokens":0}}}}
 __P__
 "#,
             sentinel = argv_sentinel.display(),
-            diff_b64 = diff_b64,
-            cover_b64 = cover_b64,
+            diff_json = diff_json,
+            cover_json = cover_json,
         );
         std::fs::write(stub_path, script).unwrap();
         #[cfg(unix)]
@@ -124,34 +128,6 @@ __P__
             perms.set_mode(0o755);
             std::fs::set_permissions(stub_path, perms).unwrap();
         }
-    }
-
-    fn base64_payload(s: &str) -> String {
-        // Tiny base64 (no_std-friendly) to avoid pulling a new dep.
-        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let bytes = s.as_bytes();
-        let mut out = String::new();
-        let mut i = 0;
-        while i < bytes.len() {
-            let b0 = bytes[i];
-            let b1 = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
-            let b2 = if i + 2 < bytes.len() { bytes[i + 2] } else { 0 };
-            let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
-            out.push(CHARSET[((triple >> 18) & 0x3f) as usize] as char);
-            out.push(CHARSET[((triple >> 12) & 0x3f) as usize] as char);
-            if i + 1 < bytes.len() {
-                out.push(CHARSET[((triple >> 6) & 0x3f) as usize] as char);
-            } else {
-                out.push('=');
-            }
-            if i + 2 < bytes.len() {
-                out.push(CHARSET[(triple & 0x3f) as usize] as char);
-            } else {
-                out.push('=');
-            }
-            i += 3;
-        }
-        out
     }
 
     fn fixture_cfg(cache_dir: String) -> LlmConfig {
