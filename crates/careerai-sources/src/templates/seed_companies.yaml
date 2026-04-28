@@ -246,9 +246,8 @@
   domain_hint: [ai_ml]
 
 # --- Ashby: AI/ML + dev tools (Ashby has steady AI uptake) ------------
-- slug: anthropic
-  ats: ashby
-  domain_hint: [ai_ml]
+# NOTE: anthropic publishes on Greenhouse only — listed there above.
+# Adding it here would 404 on every probe and pollute probe_failures.
 - slug: openai
   ats: ashby
   domain_hint: [ai_ml]

@@ -20,6 +20,11 @@ use careerai_sources::company_sync::{
 /// `apply == true` writes `config/local.yaml` (creates it if missing)
 /// with the new lists merged in. Existing keys outside
 /// `sources.<ats>.companies` are preserved verbatim.
+///
+/// The write is atomic: we serialize the merged YAML into a sibling
+/// tempfile (`local.yaml.tmp.<pid>`) and rename it into place. A
+/// SIGKILL or power loss mid-write therefore cannot truncate the
+/// user's existing config.
 pub async fn run(cwd: &Path, apply: bool) -> Result<()> {
     let cfg = CoreConfig::load(cwd).context("load config")?;
     let seed = load_embedded_seed().context("parse embedded seed_companies.yaml")?;
@@ -34,10 +39,41 @@ pub async fn run(cwd: &Path, apply: bool) -> Result<()> {
     }
     let local_path = cwd.join("config").join("local.yaml");
     let merged = merge_into_local_yaml(&local_path, &report)?;
-    std::fs::write(&local_path, merged)
-        .with_context(|| format!("write {}", local_path.display()))?;
+    write_atomic(&local_path, &merged)?;
     println!();
     println!("wrote {}", local_path.display());
+    Ok(())
+}
+
+/// Atomically write `contents` to `dest`. Strategy:
+/// 1. Ensure the parent directory exists.
+/// 2. Write to a sibling `<dest>.tmp.<pid>` tempfile.
+/// 3. `rename` the tempfile over `dest` — atomic on the same filesystem.
+///
+/// A SIGKILL or power loss between steps 2 and 3 leaves the original
+/// `dest` intact (and an orphaned tempfile that the next run
+/// overwrites). The default `std::fs::write` truncates `dest` first
+/// and is NOT safe under those conditions.
+fn write_atomic(dest: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create parent {}", parent.display()))?;
+    }
+    let tmp_name = format!(
+        "{}.tmp.{}",
+        dest.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("local.yaml"),
+        std::process::id(),
+    );
+    let tmp_path = dest
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(tmp_name);
+    std::fs::write(&tmp_path, contents)
+        .with_context(|| format!("write tempfile {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, dest)
+        .with_context(|| format!("rename {} -> {}", tmp_path.display(), dest.display()))?;
     Ok(())
 }
 
@@ -366,5 +402,44 @@ sources:
             .and_then(|s| s.get("ashby"))
             .and_then(|a| a.get("companies"))
             .is_some());
+    }
+
+    /// `write_atomic` swaps the file via tempfile + rename, leaves no
+    /// `.tmp.<pid>` lingering on success, and produces the requested
+    /// content. Existing-content destination is overwritten cleanly.
+    #[test]
+    fn write_atomic_replaces_existing_file_and_cleans_up_tempfile() {
+        let tmp = TempDir::new().unwrap();
+        let dest = tmp.path().join("local.yaml");
+        std::fs::write(&dest, "old content").unwrap();
+
+        write_atomic(&dest, "new content").unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
+
+        let leftover: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| {
+                let n = e.ok()?.file_name();
+                let s = n.to_str()?.to_string();
+                if s.contains(".tmp.") {
+                    Some(s)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(leftover.is_empty(), "stray tempfile(s): {leftover:?}");
+    }
+
+    /// `write_atomic` creates the parent directory when missing —
+    /// `~/career-ai-data/config/` may not exist on a fresh box.
+    #[test]
+    fn write_atomic_creates_missing_parent_dir() {
+        let tmp = TempDir::new().unwrap();
+        let dest = tmp.path().join("nested").join("local.yaml");
+        assert!(!dest.parent().unwrap().exists());
+
+        write_atomic(&dest, "fresh").unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "fresh");
     }
 }
