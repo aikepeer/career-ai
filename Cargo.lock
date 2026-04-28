@@ -331,6 +331,7 @@ name = "careerai-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "careerai-notify",
  "config",
  "serde",
  "serde_yaml",

@@ -44,6 +44,10 @@ match:
   # (case-insensitive substring) somewhere in its title/description/skills,
   # or it's filtered out before scoring. Leave empty for no filter.
   must_include_skills: []
+  # Score above which a shortlisted match fires a HighScoreMatch
+  # notification through `careerai-notify`. Strictly higher than
+  # `score_threshold` so only the strongest matches ping the operator.
+  notify_threshold: 0.85
 
 # NOTE: `rates.*` predates M5a and drives the legacy submit-layer
 # guardrails. The M5a browser submitter reads `submit.linkedin.*`
@@ -190,3 +194,37 @@ render:
   pdf_engine: "weasyprint"
   timeout_seconds: 60
   keep_intermediate_markdown: true
+
+# Notification pipeline. Best-effort fan-out to whichever channels
+# the operator enables. Secrets MUST come from env vars or the OS
+# keyring; never inline them in this file. Test any configured
+# channel via `careerai notify test`. See docs/NOTIFICATIONS.md
+# for setup walkthroughs.
+#
+# All channels default to disabled. Uncomment a block in
+# `config/local.yaml` (not here) to enable it; the override layer
+# merges into this default.
+notify:
+  min_severity: warning   # info | warning | critical
+  channels: {}
+# Worked example for `config/local.yaml`:
+#
+# notify:
+#   min_severity: warning
+#   channels:
+#     slack:
+#       webhook_url_env: CAREERAI_SLACK_WEBHOOK
+#       # channel: "#alerts"
+#     telegram:
+#       bot_token_keyring: telegram/bot_token
+#       chat_id: "123456789"
+#     email:
+#       smtp_host: smtp.gmail.com
+#       smtp_port: 587
+#       smtp_username: career-ai@example.com
+#       from: career-ai@example.com
+#       to:
+#         - operator@example.com
+#     ntfy:
+#       topic: careerai-RANDOM-PRIVATE-TOPIC
+#       # server: https://ntfy.sh
