@@ -393,9 +393,11 @@ fn fixtures_dir(root: &Path) -> PathBuf {
 
 /// Tailor a shortlisted listing into an application row + persisted payload.
 ///
-/// Uses a `MockLlm` sourced from `CAREERAI_LLM_FIXTURES_DIR` (default
-/// `<root>/data/cache/llm/fixtures`). A live provider is only available with
-/// `cargo build --features live-llm` and `CAREERAI_LLM_LIVE=1`.
+/// Backend selection: when either `live-llm-cli` or `live-llm-api` is on
+/// (default), `careerai_llm::Backend::resolve` picks between the
+/// `claude` CLI subprocess and the rig-core Anthropic API per
+/// `cfg.llm.backend`. Without any live feature, falls back to the
+/// `MockLlm` fixtures dir at `CAREERAI_LLM_FIXTURES_DIR`.
 pub async fn tailor_one(
     root: &Path,
     cfg: &CoreConfig,
@@ -420,34 +422,6 @@ pub async fn tailor_one(
 
     let profile = load_profile(root)?;
 
-    // Build the LLM. Default: MockLlm from a fixtures dir. A live provider
-    // can be wired in future via the `live-llm` feature; the CLI re-exports
-    // that feature so `cargo build -p careerai-cli --features live-llm`
-    // compiles the rig-core dependency.
-    #[cfg(feature = "live-llm")]
-    {
-        // Intentionally a no-op today: constructing a RigLlm requires env
-        // credentials (ANTHROPIC_API_KEY / OPENAI_API_KEY) and prompt_cache
-        // wiring. Tracked for a follow-up wave.
-        if std::env::var("CAREERAI_LLM_LIVE").ok().as_deref() == Some("1") {
-            anyhow::bail!(
-                "live-llm runtime path not wired yet; unset CAREERAI_LLM_LIVE and point \
-                 CAREERAI_LLM_FIXTURES_DIR at a fixtures directory for now"
-            );
-        }
-    }
-
-    let fixtures = fixtures_dir(root);
-    if !fixtures.is_dir() {
-        anyhow::bail!(
-            "no LLM fixtures at {}; either set CAREERAI_LLM_FIXTURES_DIR or enable \
-             --features live-llm (not yet available in this CLI build)",
-            fixtures.display()
-        );
-    }
-    let llm = MockLlm::from_dir(&fixtures)
-        .with_context(|| format!("load llm fixtures from {}", fixtures.display()))?;
-
     info!(
         target = "tailor",
         listing_id = %listing.id,
@@ -455,6 +429,55 @@ pub async fn tailor_one(
         company = %listing.company,
         "tailoring listing"
     );
+
+    // Try the live backend first when at least one live feature is on.
+    // The branch picks ClaudeCli vs Api per `cfg.llm.backend` (default
+    // Auto -> CLI when reachable, else API).
+    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+    {
+        use std::sync::Arc;
+        let cache_root = if cfg.llm.cache_dir.is_empty() {
+            root.join("data").join("cache").join("llm")
+        } else {
+            let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
+            if p.is_absolute() {
+                p
+            } else {
+                root.join(p)
+            }
+        };
+        let cache = Arc::new(careerai_llm::Cache::new(cache_root));
+        match careerai_llm::Backend::resolve(cfg.llm.backend, &cfg.llm, cache).await {
+            Ok(backend) => {
+                let outcome = tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm)
+                    .await
+                    .context("tailor_for_listing")?;
+                return Ok(TailoredOutcome {
+                    application_id: outcome.application_id,
+                    listing_title: listing.title,
+                    company: listing.company,
+                });
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target = "tailor",
+                    error = %e,
+                    "live backend unavailable; falling back to MockLlm fixtures"
+                );
+            }
+        }
+    }
+
+    let fixtures = fixtures_dir(root);
+    if !fixtures.is_dir() {
+        anyhow::bail!(
+            "no LLM fixtures at {}; either set CAREERAI_LLM_FIXTURES_DIR or enable \
+             a live backend (`--features live-llm-cli` or `--features live-llm-api`)",
+            fixtures.display()
+        );
+    }
+    let llm = MockLlm::from_dir(&fixtures)
+        .with_context(|| format!("load llm fixtures from {}", fixtures.display()))?;
 
     let outcome = tailor_for_listing(&pool, &llm, &listing.id, &profile, &cfg.llm)
         .await
