@@ -364,6 +364,7 @@ dependencies = [
  "careerai-profile",
  "chrono",
  "hex",
+ "keyring",
  "reqwest",
  "rig-core",
  "serde",
@@ -373,6 +374,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "which 7.0.3",
 ]
 
 [[package]]
