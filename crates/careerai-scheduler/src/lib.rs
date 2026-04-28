@@ -429,12 +429,26 @@ fn build_submit_job(
 ///   2. `cfg.sources.mcp[name=<name>].cron` (when enabled and `Some`) —
 ///      per-source override.
 ///
-/// Disabled MCP sources are ignored entirely so flipping `enabled: false`
-/// can never accidentally re-register a stale cadence override. ATS sources
-/// have no per-source `cron` field today; if that ever lands, extend this
-/// helper rather than the caller.
+/// Disabled MCP sources (`enabled: false`) are ignored entirely **and any
+/// matching `scheduler.cadence` entry is removed** before per-source
+/// overrides are applied. That way flipping `enabled: false` on an MCP
+/// source can never accidentally leave a stale global cadence active —
+/// disabling an MCP cancels its cron unconditionally. ATS sources have no
+/// per-source `cron` field today; if that ever lands, extend this helper
+/// rather than the caller.
 fn effective_cadence(cfg: &CoreConfig) -> std::collections::HashMap<String, String> {
     let mut cadence: std::collections::HashMap<String, String> = cfg.scheduler.cadence.clone();
+    // First pass: drop cadence entries for disabled MCP sources so a stale
+    // `scheduler.cadence` value cannot survive `enabled: false`.
+    for mcp in &cfg.sources.mcp {
+        if !mcp.enabled && cadence.remove(&mcp.name).is_some() {
+            info!(
+                source = %mcp.name,
+                "disabled mcp source removed stale scheduler.cadence entry",
+            );
+        }
+    }
+    // Second pass: apply per-source cron overrides for enabled MCP sources.
     for mcp in &cfg.sources.mcp {
         if !mcp.enabled {
             continue;
@@ -615,6 +629,28 @@ mod tests {
         assert!(
             cadence.is_empty(),
             "disabled mcp source must not register a cron entry",
+        );
+    }
+
+    #[test]
+    fn disabled_mcp_removes_global_cadence_entry() {
+        // Regression: a disabled MCP source must drop any matching
+        // `scheduler.cadence` entry, not just skip its own per-source cron.
+        // Previously a flipped-off MCP could leave a stale global cron alive.
+        let (_tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.scheduler
+            .cadence
+            .insert("linkedin-jobs".into(), "0 */6 * * *".into());
+        cfg.sources.mcp.clear();
+        let mut s = mcp_source_with_cron("linkedin-jobs", None);
+        s.enabled = false;
+        cfg.sources.mcp.push(s);
+
+        let cadence = effective_cadence(&cfg);
+        assert!(
+            !cadence.contains_key("linkedin-jobs"),
+            "disabled mcp source must drop the matching scheduler.cadence entry",
         );
     }
 
