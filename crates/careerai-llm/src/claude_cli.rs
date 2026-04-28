@@ -50,9 +50,12 @@
 //!
 //! Anthropic's prompt-cache `cache_control` blocks are an API-only feature
 //! and are not exposed by the CLI surface; `LlmRequest::cache_profile=true`
-//! is a no-op here (logged once via `tracing::debug!`). On-disk
-//! [`Cache`] still works because it keys on the same
-//! `(prompt_version, profile_hash, jd_hash, model)` tuple as the API path.
+//! is a no-op here (logged once via `tracing::debug!`). The on-disk
+//! response cache lives in the consumer wrapper (e.g.
+//! `careerai-tailor::tailor_for_listing`), keyed by
+//! [`compose_key`](crate::hashing::compose_key); this driver does not
+//! add a second layer (prior revisions did, with a `claude-cli:` key
+//! prefix; that caused duplicate writes to the same dir).
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -67,9 +70,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::{debug, trace};
 
-use sha2::{Digest, Sha256};
-
-use crate::cache::{Cache, CacheKey};
+use crate::cache::Cache;
 use crate::error::{LlmError, Result};
 use crate::trait_def::Llm;
 use crate::types::{LlmRequest, LlmResponse};
@@ -81,6 +82,9 @@ use crate::types::{LlmRequest, LlmResponse};
 pub enum ClaudeCliError {
     #[error("`claude` binary not found on PATH (install Claude Code or set CAREERAI_CLAUDE_BIN)")]
     NotInstalled,
+
+    #[error("`claude` binary at {path} is not usable: {reason}")]
+    BinaryUnusable { path: String, reason: String },
 
     #[error("claude CLI session is not authenticated; run `claude login` (or `/login` in claude)")]
     AuthExpired,
@@ -104,6 +108,7 @@ impl From<ClaudeCliError> for LlmError {
             ClaudeCliError::NotInstalled | ClaudeCliError::AuthExpired => {
                 LlmError::Upstream(value.to_string())
             }
+            ClaudeCliError::BinaryUnusable { .. } => LlmError::Upstream(value.to_string()),
             ClaudeCliError::RateLimited {
                 retry_after_seconds,
             } => LlmError::RateLimited {
@@ -159,7 +164,8 @@ impl ClaudeCliLlm {
     ///
     /// # Errors
     /// Returns [`ClaudeCliError::NotInstalled`] when the binary cannot be
-    /// resolved.
+    /// resolved, or [`ClaudeCliError::BinaryUnusable`] when the resolved
+    /// path is not a regular executable file.
     pub fn discover(
         model: impl Into<String>,
         cache: Arc<Cache>,
@@ -170,14 +176,13 @@ impl ClaudeCliLlm {
     }
 
     /// Spawn the subprocess once and capture its parsed JSON result.
-    /// Caching is the caller's job (see [`Self::complete`]).
+    /// Caching is the caller's job (the outer `tailor_for_listing`
+    /// `Cache` wrap is the canonical layer; this driver is a thin
+    /// transport).
     async fn send_once(
         &self,
         req: &LlmRequest,
     ) -> std::result::Result<LlmResponse, ClaudeCliError> {
-        // Build args. We pipe the user prompt through stdin to avoid
-        // argv length limits and shell-escaping pitfalls; the system
-        // prompt + profile_block are short enough to ride on flags.
         let model = if req.model.is_empty() {
             self.model.as_str()
         } else {
@@ -191,20 +196,33 @@ impl ClaudeCliLlm {
             .arg("--model")
             .arg(model);
 
-        // System prompt + profile block both go in via
-        // `--append-system-prompt`. The CLI accepts repeated flags
-        // (verified empirically); we send them as one concatenated
-        // string to stay version-tolerant.
-        if !req.system.is_empty() || !req.profile_block.is_empty() {
-            let combined = if req.profile_block.is_empty() {
-                req.system.clone()
-            } else if req.system.is_empty() {
-                req.profile_block.clone()
+        // SECURITY: the system prompt + profile block can carry PII
+        // (rendered profile YAML). Passing them via argv would expose
+        // that content to any local process via `/proc/<pid>/cmdline`
+        // (Linux) or `ps -ef` output. Write them to a 0o600 file in a
+        // private dir we own, and use `--append-system-prompt-file` so
+        // argv carries only flags + model id.
+        //
+        // The temp file is held alive until after `wait_with_output`
+        // returns; `_prompt_guard` keeps the `NamedTempFile` in scope so
+        // its destructor does not unlink before claude reads it.
+        let _prompt_guard: Option<tempfile::NamedTempFile> =
+            if !req.system.is_empty() || !req.profile_block.is_empty() {
+                let combined = if req.profile_block.is_empty() {
+                    req.system.clone()
+                } else if req.system.is_empty() {
+                    req.profile_block.clone()
+                } else {
+                    format!("{}\n\n{}", req.system, req.profile_block)
+                };
+                let tmp = write_private_prompt_file(&combined).map_err(|e| {
+                    ClaudeCliError::Transport(format!("write system-prompt tempfile: {e}"))
+                })?;
+                cmd.arg("--append-system-prompt-file").arg(tmp.path());
+                Some(tmp)
             } else {
-                format!("{}\n\n{}", req.system, req.profile_block)
+                None
             };
-            cmd.arg("--append-system-prompt").arg(combined);
-        }
 
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -313,39 +331,69 @@ impl Llm for ClaudeCliLlm {
             log_no_prompt_cache_once();
         }
 
-        let key = cache_key_for(req);
-        if let Some(hit) = self.cache.get(&key).await? {
-            return Ok(hit);
-        }
+        // The on-disk response cache lives in the outer
+        // `tailor_for_listing` wrapper (see `careerai-tailor::lib`),
+        // keyed by `compose_key(prompt_version, profile_hash, jd_hash,
+        // model)`. That layer is provider-agnostic and shared across
+        // CLI + API backends. This driver intentionally does NOT add a
+        // second on-disk cache layer with its own key shape — having
+        // two layers writing to the same dir caused duplicate I/O and
+        // surprised auditors.
+        //
+        // The `cache` field is retained on the struct for API
+        // compatibility (`Backend::resolve` still hands one in), but
+        // unused at the call site below.
+        let _ = &self.cache;
 
         let resp = self.send_once(req).await.map_err(LlmError::from)?;
-        self.cache.put(&key, &resp).await?;
         Ok(resp)
     }
 }
 
-/// Compose a provider-agnostic cache key from the request fields. Uses
-/// the same delimiter strategy as [`compose_key`] but operates directly
-/// on the (string-typed) `LlmRequest` so this driver doesn't have to
-/// reach into `careerai-profile` for a typed `Profile`.
-fn cache_key_for(req: &LlmRequest) -> CacheKey {
-    let mut h = Sha256::new();
-    let model_used = if req.model.is_empty() {
-        "default"
+/// Write `combined` to a 0o600 temp file in a private parent dir. The
+/// `--append-system-prompt-file` flag on `claude` reads the contents at
+/// startup; the caller keeps the returned `NamedTempFile` alive across
+/// the spawn so the destructor doesn't unlink it before claude reads.
+///
+/// SECURITY: prompts can carry rendered profile YAML (PII). We anchor
+/// the parent dir under `target/.careerai-prompts/` (project-local,
+/// `.gitignore`'d) when running inside a cargo workspace, falling back
+/// to `<system-tempdir>/careerai-prompts/` otherwise. Both the dir and
+/// the file get owner-only Unix modes; no predictable filename in
+/// world-readable `/tmp`.
+fn write_private_prompt_file(combined: &str) -> std::io::Result<tempfile::NamedTempFile> {
+    use std::io::Write;
+
+    let parent = if std::path::Path::new("target").is_dir() {
+        std::path::PathBuf::from("target").join(".careerai-prompts")
     } else {
-        req.model.as_str()
+        std::env::temp_dir().join("careerai-prompts")
     };
-    h.update(b"claude-cli\x1F");
-    h.update(req.prompt_version.as_bytes());
-    h.update([0x1F]);
-    h.update(req.system.as_bytes());
-    h.update([0x1F]);
-    h.update(req.profile_block.as_bytes());
-    h.update([0x1F]);
-    h.update(req.user.as_bytes());
-    h.update([0x1F]);
-    h.update(model_used.as_bytes());
-    CacheKey::new(hex::encode(h.finalize()))
+    std::fs::create_dir_all(&parent)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Best-effort tighten parent dir to owner-only. Ignore errors:
+        // a pre-existing dir we don't own would surface later via the
+        // tempfile open, with a clearer error.
+        let _ = std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700));
+    }
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("prompt-")
+        .suffix(".txt")
+        .tempfile_in(&parent)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let f = tmp.as_file();
+        let mut perms = f.metadata()?.permissions();
+        perms.set_mode(0o600);
+        f.set_permissions(perms)?;
+    }
+    tmp.write_all(combined.as_bytes())?;
+    tmp.as_file_mut().sync_all()?;
+    Ok(tmp)
 }
 
 /// One-shot debug log noting that prompt caching isn't available on the
@@ -361,17 +409,51 @@ fn log_no_prompt_cache_once() {
     });
 }
 
-/// Resolve the `claude` binary using the `CAREERAI_CLAUDE_BIN` override
-/// (used by tests) before falling back to a `PATH` lookup via the
-/// `which` crate. Returns [`ClaudeCliError::NotInstalled`] when neither
-/// resolves.
 pub(crate) fn locate_claude_binary() -> std::result::Result<PathBuf, ClaudeCliError> {
     if let Ok(p) = std::env::var("CAREERAI_CLAUDE_BIN") {
         if !p.is_empty() {
-            return Ok(PathBuf::from(p));
+            let path = PathBuf::from(&p);
+            return validate_claude_binary(path);
         }
     }
-    which::which("claude").map_err(|_| ClaudeCliError::NotInstalled)
+    let resolved = which::which("claude").map_err(|_| ClaudeCliError::NotInstalled)?;
+    validate_claude_binary(resolved)
+}
+
+/// Verify a candidate `claude` binary path exists and is executable. The
+/// `CAREERAI_CLAUDE_BIN` env override is owner-controlled by definition;
+/// we still sanity-check the path so a typo or stale value surfaces as a
+/// clear `BinaryUnusable` error rather than a confusing spawn ENOENT
+/// later. Trust assumption: the env var is set by the operator running
+/// the binary, never by network input.
+fn validate_claude_binary(path: PathBuf) -> std::result::Result<PathBuf, ClaudeCliError> {
+    let meta = match std::fs::metadata(&path) {
+        Ok(m) => m,
+        Err(e) => {
+            return Err(ClaudeCliError::BinaryUnusable {
+                path: path.display().to_string(),
+                reason: format!("stat: {e}"),
+            });
+        }
+    };
+    if !meta.is_file() {
+        return Err(ClaudeCliError::BinaryUnusable {
+            path: path.display().to_string(),
+            reason: "not a regular file".into(),
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode();
+        if mode & 0o111 == 0 {
+            return Err(ClaudeCliError::BinaryUnusable {
+                path: path.display().to_string(),
+                reason: format!("no executable bit set (mode 0o{mode:o})"),
+            });
+        }
+    }
+    Ok(path)
 }
 
 /// Best-effort classifier for stderr text when stdout had no JSON.
@@ -468,6 +550,13 @@ struct ClaudeCliUsage {
 mod tests {
     use super::*;
 
+    /// Serialize tests that mutate `CAREERAI_CLAUDE_BIN` /
+    /// `CAREERAI_SKIP_CLI_PROBE`. cargo runs tests in parallel by
+    /// default; without this lock, env-var flips race across threads
+    /// and produce intermittent failures (the var leaking from one
+    /// test's set into another's read).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn fixture_path(name: &str) -> PathBuf {
         let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         p.push("tests");
@@ -543,11 +632,67 @@ mod tests {
         }
     }
 
+    /// `CAREERAI_CLAUDE_BIN` pointing at a real executable file resolves
+    /// cleanly and the returned PathBuf matches the override.
     #[test]
     fn locate_binary_via_env_override() {
-        std::env::set_var("CAREERAI_CLAUDE_BIN", "/usr/local/bin/claude-fake");
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
         let p = locate_claude_binary().unwrap();
-        assert_eq!(p, PathBuf::from("/usr/local/bin/claude-fake"));
+        assert_eq!(p, bin);
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+    }
+
+    /// `CAREERAI_CLAUDE_BIN` pointing at a missing path surfaces
+    /// `BinaryUnusable` (NOT a vague NotInstalled), so users debugging a
+    /// stale env var see exactly which path failed.
+    #[test]
+    fn locate_binary_rejects_missing_override() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::env::set_var("CAREERAI_CLAUDE_BIN", "/tmp/careerai-does-not-exist");
+        let err = locate_claude_binary().unwrap_err();
+        match err {
+            ClaudeCliError::BinaryUnusable { path, reason } => {
+                assert!(path.contains("careerai-does-not-exist"));
+                assert!(reason.contains("stat") || reason.contains("not a regular file"));
+            }
+            other => panic!("expected BinaryUnusable, got {other:?}"),
+        }
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+    }
+
+    /// `CAREERAI_CLAUDE_BIN` pointing at a non-executable file (e.g. a
+    /// stale text file) surfaces `BinaryUnusable` with an "exec" hint.
+    #[cfg(unix)]
+    #[test]
+    fn locate_binary_rejects_non_executable_override() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("not-exec");
+        std::fs::write(&bin, b"plain text").unwrap();
+        // Default mode 0o644 — no exec bit.
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
+        let err = locate_claude_binary().unwrap_err();
+        match err {
+            ClaudeCliError::BinaryUnusable { reason, .. } => {
+                assert!(reason.contains("executable"), "reason was: {reason}");
+            }
+            other => panic!("expected BinaryUnusable, got {other:?}"),
+        }
         std::env::remove_var("CAREERAI_CLAUDE_BIN");
     }
 
@@ -615,10 +760,12 @@ mod tests {
         assert_eq!(resp.completion_tokens, 4);
         assert!(!resp.cache_hit);
 
-        // Second call should hit cache.
+        // Second call also returns ok. The on-disk response cache lives
+        // in the outer `tailor_for_listing` wrapper, not in this driver
+        // (see `complete()`), so `cache_hit` stays false here.
         let resp2 = llm.complete(&req).await.expect("ok2");
         assert_eq!(resp2.text, "OK");
-        assert!(resp2.cache_hit);
+        assert!(!resp2.cache_hit);
     }
 
     #[tokio::test]
@@ -757,5 +904,67 @@ mod tests {
         let argv = std::fs::read_to_string(&sentinel).unwrap();
         assert!(argv.contains("--model"), "argv missing --model: {argv}");
         assert!(argv.contains("haiku"), "argv missing haiku: {argv}");
+    }
+
+    /// SECURITY regression test: profile content (PII) must NOT appear
+    /// in the subprocess argv. Argv is visible to other local users via
+    /// `/proc/<pid>/cmdline` or `ps -ef`, so the system prompt + profile
+    /// block ride on a 0o600 file referenced by
+    /// `--append-system-prompt-file`. The argv carries only flags + the
+    /// temp-file path.
+    #[tokio::test]
+    async fn stub_binary_does_not_leak_profile_to_argv() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub_path = dir.path().join("claude");
+        let sentinel = dir.path().join("argv.txt");
+        // The stub records its argv to `sentinel` and emits a canned OK
+        // payload. The system prompt content is intentionally a
+        // distinctive PII-shaped string so we can assert its absence.
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\ncat <<'__P__'\n{{\"is_error\":false,\"result\":\"OK\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}\n__P__\n",
+            sentinel.display()
+        );
+        std::fs::write(&stub_path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Mirror `stub_binary_passes_model_flag`: go through
+            // `metadata().permissions()` first to nudge the kernel into
+            // releasing any lingering write fd before exec. Avoids the
+            // ETXTBSY race we hit with the more direct setter.
+            let mut perms = std::fs::metadata(&stub_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&stub_path, perms).unwrap();
+        }
+
+        let cache = Arc::new(Cache::new(dir.path().join("cache")));
+        let llm = ClaudeCliLlm::new(&stub_path, "sonnet", cache, 10);
+        let pii = "SECRET_PROFILE_EMAIL: capitalbluecity@example.org PHONE: 9999999999";
+        let req = LlmRequest {
+            system: "you are terse".into(),
+            profile_block: pii.into(),
+            user: "go".into(),
+            prompt_version: "v".into(),
+            model: String::new(),
+            temperature: 0.0,
+            max_tokens: 1,
+            cache_profile: false,
+        };
+        llm.complete(&req).await.expect("ok");
+        let argv = std::fs::read_to_string(&sentinel).unwrap();
+        assert!(
+            !argv.contains("SECRET_PROFILE_EMAIL"),
+            "profile content leaked to argv: {argv}"
+        );
+        assert!(
+            !argv.contains("you are terse"),
+            "system prompt leaked to argv: {argv}"
+        );
+        // The flag itself must be present so the prompt actually
+        // reaches claude.
+        assert!(
+            argv.contains("--append-system-prompt-file"),
+            "expected --append-system-prompt-file in argv: {argv}"
+        );
     }
 }
