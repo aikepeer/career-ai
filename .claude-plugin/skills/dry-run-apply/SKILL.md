@@ -1,15 +1,15 @@
 ---
 name: dry-run-apply
-description: "Submits applications with a hard dry-run-first gate. Refuses live submission to LinkedIn or Indeed without explicit ToS-risk acknowledgement, and without a per-source `submit_enabled` flip in `config/local.yaml`. Triggers when the user says 'submit application', 'apply to', or asks to send a tailored application."
+description: "Submits applications with a hard dry-run-first gate. Refuses live submission to LinkedIn or Indeed without explicit ToS-risk acknowledgement, and without a per-source `submit.per_source.<source>.enabled: true` flip in `config/local.yaml`. Triggers when the user says 'submit application', 'apply to', or asks to send a tailored application."
 ---
 
 # Dry-run apply
 
 Owns the submission step. **The default is dry-run.** Live submission
 requires (a) an explicit, literal confirmation phrase from the user,
-and (b) a deliberate per-source `submit_enabled: true` flip in
-`config/local.yaml` — the user does that themselves; you do not edit
-their config.
+and (b) a deliberate per-source `submit.per_source.<source>.enabled:
+true` flip in `config/local.yaml` — the user does that themselves;
+you do not edit their config.
 
 ## Trigger conditions
 
@@ -26,9 +26,11 @@ Activate when the user:
 
 Call `careerai_apply` MCP tool with `dry_run: true`. This:
 
-- Walks the apply flow up to the final submit click.
-- For browser-driven submitters, captures a screenshot of the
-  populated form at `data/screenshots/<app-id>.png`.
+- Calls each `Submitter::prepare()` to build the `would_submit`
+  envelope. The browser session is **not** launched — dry-run today
+  does not produce a screenshot for browser-driven submitters
+  (LinkedIn / Naukri). Screenshots only land on the live path (and
+  the LinkedIn assist/review flow).
 - Logs a `would_submit` event with the prepared payload (resume DOCX
   path, cover-letter excerpt, custom-question answers).
 - **Never issues a network write.**
@@ -37,7 +39,6 @@ Show the user:
 
 - The submitter that would have fired (greenhouse / lever / linkedin /
   naukri / ...).
-- The screenshot path (browser sources only).
 - A summary of the `would_submit` payload — endpoint or DOM target,
   resume path, cover-letter excerpt.
 
@@ -69,10 +70,10 @@ issue. Show the destination endpoint, a summary of the payload, and
 the source's submit-rate-limit budget remaining today. A plain `yes`
 is enough.
 
-#### 2b. `submit_enabled: true` for that ONE source
+#### 2b. `submit.per_source.<source>.enabled: true` for that ONE source
 
-Per-source `submit_enabled` gates default to `false` and are honored
-even when the user passes `--auto-submit`. **You do not edit
+Per-source `enabled` gates default to `false` and are honored even
+when the user passes `--auto-submit`. **You do not edit
 `config/local.yaml` yourself.** Print the YAML they should add:
 
 ```yaml
@@ -80,7 +81,7 @@ even when the user passes `--auto-submit`. **You do not edit
 submit:
   per_source:
     <source-name>:
-      submit_enabled: true
+      enabled: true
 ```
 
 Stop and wait for them to save the file. Then proceed.
@@ -90,8 +91,8 @@ Stop and wait for them to save the file. Then proceed.
 Call `careerai_apply` MCP tool with `dry_run: false`. The submitter
 still:
 
-- Re-checks the per-source `submit_enabled` config gate (the user
-  could have flipped it back; defense in depth).
+- Re-checks the per-source `submit.per_source.<source>.enabled`
+  config gate (the user could have flipped it back; defense in depth).
 - Acquires a `governor` rate-limit permit before any network call.
 - Respects quiet-hours config.
 
@@ -102,7 +103,7 @@ Surface the response: status code, follow-up state (`submitted`,
 
 After a live submission:
 
-- Run `careerai applied --since 1d` to confirm the row is recorded.
+- Run `careerai applied --limit 20` to confirm the row is recorded.
 - Run `careerai digest --since 24h` if the user wants the whole-pipeline
   view (counts by state, per-source breakdown, cookie expiry).
 
@@ -115,8 +116,9 @@ After a live submission:
 3. **Never edit `config/local.yaml` for the user.** Print the YAML
    they should add and wait. Editing config silently bypasses the
    deliberate per-source decision.
-4. **Never bypass `submit_enabled`.** If the user says "but I want to
-   submit anyway", point them at `config/local.yaml` and stop.
+4. **Never bypass `submit.per_source.<source>.enabled`.** If the user
+   says "but I want to submit anyway", point them at
+   `config/local.yaml` and stop.
 5. **Never retry a failed live submission silently.** Failures go
    through the normal pipeline-state path (`failed` state, audit
    event).
@@ -126,21 +128,29 @@ After a live submission:
 
 ## Failure modes + recovery
 
-The variants below come from `crates/careerai-submit/src/error.rs::SubmitError`:
+Outcomes / errors come from
+`crates/careerai-submit/src/base.rs::SubmitOutcome` and
+`crates/careerai-submit/src/error.rs::SubmitError`:
 
-- **`SubmitError::SourceDisabled("<source>")`** — `submit_enabled` is
-  `false` for that source in `config/local.yaml`. Tell the user to
-  flip it (per the YAML in step 2b). Don't edit the file. Note: this
-  error variant also surfaces when rate-limit or quiet-hours gating
-  fires — the message text distinguishes the cases.
+- **`SubmitOutcome::Skipped { reason: "source disabled" }`** —
+  `submit.per_source.<source>.enabled` is `false` (the default) for
+  that source in `config/local.yaml`. The application + listing
+  transition to `skipped`; there is no retry. Tell the user to flip
+  the gate (per the YAML in step 2b). Don't edit the file.
+- **`SubmitError::SourceDisabled(...)`** — used for *runtime* policy
+  blocks (rate-limit denied, quiet-hours window, missing credentials,
+  or a browser submitter like LinkedIn that intentionally aborts at
+  the pre-submit gate such as `allow_submit_click`). Use the message
+  text to distinguish the cases; if it is user-configurable, tell the
+  user what they need to change.
 - **`SubmitError::BadState { state }`** — application is not in
   `rendered` / `prepared` / `drafted`. Run the `tailor-resume` skill
   first; the error names the actual state.
 - **`SubmitError::NotImplemented(...)`** — submitter exists in the
   registry but its click/network flow has not been built. Distinct
-  from `SourceDisabled` so the audit log can tell "operator turned
-  this off" from "engineer hasn't shipped this yet". Tell the user
-  the source is on the roadmap.
+  from `SourceDisabled` so the audit log can tell "engineer hasn't
+  shipped this yet" from "operator turned this off / a runtime gate
+  fired". Tell the user the source is on the roadmap.
 - **`SubmitError::HttpStatus { status, body_tail }`** — the ATS
   rejected the submission. Surface the status + tail to the user; the
   audit row has the full response.

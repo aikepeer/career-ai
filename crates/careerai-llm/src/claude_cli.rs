@@ -179,15 +179,21 @@ impl ClaudeCliLlm {
     /// Caching is the caller's job (the outer `tailor_for_listing`
     /// `Cache` wrap is the canonical layer; this driver is a thin
     /// transport).
+    #[allow(clippy::too_many_lines)]
     async fn send_once(
         &self,
         req: &LlmRequest,
     ) -> std::result::Result<LlmResponse, ClaudeCliError> {
-        let model = if req.model.is_empty() {
+        let model_raw = if req.model.is_empty() {
             self.model.as_str()
         } else {
             req.model.as_str()
         };
+        // Strip a leading `anthropic/` namespace; the `claude` CLI
+        // rejects rig-style multi-provider names. `pick_default_model`
+        // strips for the backend default; the per-request path lives
+        // here.
+        let model = model_raw.split_once('/').map_or(model_raw, |(_, r)| r);
 
         let mut cmd = Command::new(&self.binary);
         cmd.arg("--print")
