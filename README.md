@@ -40,14 +40,18 @@ cargo install --git https://github.com/justdoGIT/career-ai careerai-mcp careerai
 /career:apply <id>   # DRY-RUN by default; --live needs an explicit confirm
 ```
 
-The plugin also registers two community LinkedIn MCPs in `.mcp.json`,
-both disabled by default. `linkedin-jobs` (RapidAPI-backed, ToS-clean)
-points at `Rom7699/linkedin-jobs-mcp-server`, which currently ships as
-`python main.py` with no script entry — see the comment in `.mcp.json`
-for manual-enable steps. `linkedin-browser` (`adhikasp/mcp-linkedin`,
-properly packaged) is a scraper that violates LinkedIn ToS §8.2 and
-stays opt-in. The first-class path for community MCP discovery sources
-is the upcoming `mcp_jobs` adapter (PR #19).
+For LinkedIn discovery, the supported path is the native
+`linkedin_browser` source (PR #21). It drives a stealth Chromium
+session, reuses the M5 `li_at` cookie + stealth-v2.js infrastructure,
+and integrates with the daemon's cron + `governor` rate limiter. It
+defaults to `enabled: false`; flip `sources.linkedin_browser.enabled`
+in `config/local.yaml` to opt in (see "Sources" below). The plugin
+also registers two community LinkedIn MCPs in `.mcp.json`, both
+disabled by default and kept only as alternative discovery surfaces
+for power users — `linkedin-jobs` (RapidAPI-backed) and
+`linkedin-browser` (community scraper). The native source is the
+recommended path. Generic MCP-exposed sources are supported through
+the separate `mcp_jobs` adapter (PR #19).
 
 ## Install — CLI / daemon
 
@@ -155,6 +159,42 @@ are the open items:
 
 Crate boundaries are deliberate. See [CLAUDE.md](./CLAUDE.md) for the
 full architecture, invariants, testing layers, and contribution rules.
+
+## Sources
+
+| Source              | Default   | Notes                                                                                                       |
+|---------------------|-----------|-------------------------------------------------------------------------------------------------------------|
+| `greenhouse`        | enabled   | Public ATS API, one entry per company slug.                                                                 |
+| `lever`             | enabled   | Public ATS API, one entry per company slug.                                                                 |
+| `remotive`          | enabled   | Public job feed.                                                                                            |
+| `remoteok`          | enabled   | Public job feed.                                                                                            |
+| `naukri`            | disabled  | Undocumented `jobapi/v3/search`; opt-in.                                                                    |
+| `linkedin_browser`  | disabled  | Native browser-driven discovery (M2/PR #21). Violates LinkedIn UA §8.2 — opt-in only. Requires `--features browser` and a `li_at` cookie stored in the OS keychain. |
+| `mcp_jobs`          | disabled  | Generic MCP-server adapter for community job-search MCPs (PR #19). Per-server opt-in.                       |
+
+To enable the native LinkedIn source, edit `config/local.yaml`:
+
+```yaml
+sources:
+  linkedin_browser:
+    enabled: true
+    keywords: "AI engineer remote"
+    location: "Worldwide"
+    filters:
+      remote: true
+      posted_within_days: 7
+      experience_level: ["mid", "senior"]
+    max_pages: 3
+    rate_per_minute: 2
+```
+
+Store the cookie once: `careerai cookies set linkedin` (writes to the OS
+keychain, service `career-ai`, user `linkedin/li_at`). Then rebuild with
+`cargo install --git ... careerai-cli --features browser`. **LinkedIn
+auto-discovery violates LinkedIn User Agreement §8.2.** This tool ships
+with conservative defaults (3 pages × 25 cards max per tick, 2 calls/min,
+1.5–3.5s randomized inter-page jitter), but the operator carries the
+ToS risk on opting in.
 
 ## Runtime dependencies
 

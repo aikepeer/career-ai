@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jobs · LinkedIn</title>
+</head>
+<body>
+<!--
+  Synthetic LinkedIn search-results page. NOT scraped from real
+  LinkedIn — every company / title / id below is fabricated. The
+  HTML structure mirrors the public `linkedin.com/jobs/search/`
+  layout as of 2026-04: `ul.jobs-search__results-list` containing
+  `li.jobs-search-results__list-item` cards with
+  `data-entity-urn`, a `base-card__full-link` anchor, and
+  `base-search-card__subtitle` / `job-search-card__location` /
+  `job-search-card__listdate` / `job-search-card__snippet` per
+  the linkedin_browser_selectors module.
+
+  Update path: when LinkedIn drifts, capture a fresh page (logged
+  in, sanitize PII, replace company/title/id with synthetic
+  values), drop it here, and bump linkedin_browser_selectors
+  in lockstep.
+-->
+<header><h1>Jobs · 5 results</h1></header>
+<main>
+<ul class="jobs-search__results-list">
+  <li class="jobs-search-results__list-item" data-entity-urn="urn:li:jobPosting:1000000001">
+    <div class="base-card">
+      <a class="base-card__full-link" href="/jobs/view/1000000001/?refId=fixture">
+        Senior Machine Learning Engineer
+      </a>
+      <h4 class="base-search-card__subtitle">
+        <a class="hidden-nested-link">Acme AI Labs</a>
+      </h4>
+      <span class="job-search-card__location">Remote (Worldwide)</span>
+      <time class="job-search-card__listdate">2 days ago</time>
+      <p class="job-search-card__snippet">
+        Build and deploy LLM-driven features at scale. Python, PyTorch, vLLM,
+        AWS. <strong>Remote-first</strong> team across 8 timezones.
+      </p>
+    </div>
+  </li>
+
+  <li class="jobs-search-results__list-item" data-entity-urn="urn:li:jobPosting:1000000002">
+    <div class="base-card">
+      <a class="base-card__full-link" href="/jobs/view/1000000002/?refId=fixture">
+        Robotics Software Engineer (Perception)
+      </a>
+      <h4 class="base-search-card__subtitle">
+        <a class="hidden-nested-link">FabricaBot</a>
+      </h4>
+      <span class="job-search-card__location">Bengaluru, Karnataka, India (Hybrid)</span>
+      <time class="job-search-card__listdate">5 days ago</time>
+      <p class="job-search-card__snippet">
+        ROS2, C++, SLAM, sensor fusion. Mid–senior level.
+      </p>
+    </div>
+  </li>
+
+  <li class="jobs-search-results__list-item" data-entity-urn="urn:li:jobPosting:1000000003">
+    <div class="base-card">
+      <a class="base-card__full-link" href="/jobs/view/1000000003/?refId=fixture">
+        Embedded Firmware Engineer
+      </a>
+      <h4 class="base-search-card__subtitle">
+        <a class="hidden-nested-link">Pulse Avionics</a>
+      </h4>
+      <span class="job-search-card__location">Delhi, Delhi, India</span>
+      <time class="job-search-card__listdate">1 week ago</time>
+      <p class="job-search-card__snippet">
+        STM32, FreeRTOS, CAN bus, MISRA-C. Avionics certification background a plus.
+      </p>
+    </div>
+  </li>
+
+  <li class="jobs-search-results__list-item" data-entity-urn="urn:li:jobPosting:1000000004">
+    <div class="base-card">
+      <a class="base-card__full-link" href="/jobs/view/1000000004/?refId=fixture">
+        Applied Scientist, Generative AI
+      </a>
+      <h4 class="base-search-card__subtitle">
+        <a class="hidden-nested-link">Northwind Research</a>
+      </h4>
+      <span class="job-search-card__location">Remote</span>
+      <time class="job-search-card__listdate">3 hours ago</time>
+      <p class="job-search-card__snippet">
+        Foundation-model research, training infrastructure, &amp; eval design.
+      </p>
+    </div>
+  </li>
+
+  <!-- Card with title + URL but missing company subtitle.
+       The parser must still emit a listing (with company = "")
+       rather than panic. -->
+  <li class="jobs-search-results__list-item" data-entity-urn="urn:li:jobPosting:1000000005">
+    <div class="base-card">
+      <a class="base-card__full-link" href="/jobs/view/1000000005/?refId=fixture">
+        AI Engineer (Stealth)
+      </a>
+      <span class="job-search-card__location">Remote (US)</span>
+      <time class="job-search-card__listdate">12 hours ago</time>
+    </div>
+  </li>
+
+  <!-- Malformed card: data-entity-urn but no anchor / no title.
+       The parser must skip it without emitting and without
+       panicking. -->
+  <li class="jobs-search-results__list-item" data-entity-urn="urn:li:jobPosting:1000000006">
+    <div class="base-card">
+      <span class="job-search-card__location">Somewhere</span>
+    </div>
+  </li>
+
+  <!-- Card with no urn but a /jobs/view/<id> URL. The
+       extract_listing_id fallback must pull "1000000007". -->
+  <li class="jobs-search-results__list-item">
+    <div class="base-card">
+      <a class="base-card__full-link" href="/jobs/view/1000000007/?refId=fixture-fallback">
+        ML Platform Engineer
+      </a>
+      <h4 class="base-search-card__subtitle">
+        <a class="hidden-nested-link">Lattice Compute</a>
+      </h4>
+      <span class="job-search-card__location">Remote (EU)</span>
+      <time class="job-search-card__listdate">Just now</time>
+      <p class="job-search-card__snippet">Kubernetes, Ray, model serving.</p>
+    </div>
+  </li>
+</ul>
+</main>
+</body>
+</html>

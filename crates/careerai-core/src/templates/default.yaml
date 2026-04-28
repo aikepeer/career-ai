@@ -118,12 +118,16 @@ llm:
 
 scheduler:
   cadence:
-    greenhouse: "0 0 */1 * * *"
-    lever:      "0 0 */1 * * *"
-    remotive:   "0 0 */2 * * *"
-    naukri:     "0 15 */3 * * *"
-    linkedin:   "0 0 */4 * * *"
-    indeed:     "0 30 */4 * * *"
+    greenhouse:       "0 0 */1 * * *"
+    lever:            "0 0 */1 * * *"
+    remotive:         "0 0 */2 * * *"
+    naukri:           "0 15 */3 * * *"
+    linkedin:         "0 0 */4 * * *"
+    # Native browser-driven LinkedIn discovery (Source::name() = "linkedin-browser").
+    # Listings emitted by this adapter set listing.source = "linkedin" so the M5
+    # submitter routes them. Cron only fires when sources.linkedin_browser.enabled = true.
+    linkedin-browser: "0 30 */4 * * *"
+    indeed:           "0 30 */4 * * *"
   # Periodic dry-run apply sweep over rendered/prepared applications. The
   # daemon hard-pins auto_submit=false on every tick — live submission is
   # operator-driven only (`careerai apply --auto-submit ...`). Left unset
@@ -165,6 +169,26 @@ sources:
     location: ""
     fromage: 7                 # last 7 days
     rate_per_minute: 4
+  # Native LinkedIn browser-driven discovery (PR #25). Reuses the M5
+  # `BrowserSession` (stealth-v2.js + `li_at` cookie from the OS
+  # keychain) to scrape public search results. Defaults to
+  # `enabled: false` because LinkedIn User Agreement §8.2 forbids
+  # automated access — same posture as the M5 submitter. The
+  # commented-out block below is the recommended starter shape; copy
+  # into `config/local.yaml` and flip `enabled: true` to opt in.
+  #
+  # linkedin_browser:
+  #   enabled: false
+  #   keywords: "AI engineer remote"
+  #   location: "Worldwide"
+  #   filters:
+  #     remote: true
+  #     posted_within_days: 7
+  #     experience_level: ["mid", "senior"]
+  #   max_pages: 3
+  #   rate_per_minute: 2
+  #   headless: true
+  #   action_timeout_seconds: 30
   # Community / third-party Model-Context-Protocol servers used as
   # discovery sources. Each entry spawns a stdio MCP server (the same
   # way Claude itself spawns one), runs `tools/list`, and invokes the

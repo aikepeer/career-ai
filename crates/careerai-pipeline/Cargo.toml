@@ -30,7 +30,12 @@ live-llm-cli = ["careerai-llm/live-llm-cli"]
 live-llm-api = ["careerai-llm/live-llm-api"]
 # Back-compat umbrella; flips both backends on.
 live-llm = ["live-llm-cli", "live-llm-api"]
-browser = ["careerai-submit/browser"]
+# Forwards the browser flag down both the submit and sources crates.
+# `careerai-submit/browser` enables the M5 LinkedIn submitter; the
+# new `careerai-sources/browser` enables the M2 LinkedIn discovery
+# adapter (PR #25). Both share the same `BrowserSession` + stealth
+# script + cookie store, so they're toggled together.
+browser = ["careerai-submit/browser", "careerai-sources/browser"]
 
 [dev-dependencies]
 sqlx.workspace = true

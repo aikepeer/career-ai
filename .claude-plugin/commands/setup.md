@@ -70,7 +70,40 @@ filesystem paths to their resume and LinkedIn data export.
    non-zero if no channels are wired. Skip this step if the
    user only wants in-terminal output. See
    `docs/NOTIFICATIONS.md` for the full channel walkthroughs.
-7. **Print next steps.** Suggest:
+7. **Offer LinkedIn discovery setup (optional).** Ask: "Do you want to
+   enable native LinkedIn discovery? (y/N)". If yes:
+   - Confirm the user has stored their `li_at` cookie via `careerai
+     cookies set linkedin` (the same flow M5 uses for the submitter).
+   - Ask for two values:
+     - "LinkedIn search keywords?" (free-form, e.g. `AI engineer remote`).
+     - "Location filter? (default: Worldwide)" — accept Enter to keep default.
+   - Print the YAML snippet for copy-paste into `config/local.yaml`.
+     **Do NOT auto-write the file** — operators tune their own configs;
+     overwriting a hand-tuned `local.yaml` is a footgun. Format:
+     ```yaml
+     # Copy into config/local.yaml. Defaults to enabled=false until you
+     # acknowledge LinkedIn ToS §8.2 forbids automated access. Per-tick
+     # caps: 3 pages × ~25 cards × 2 calls/min, randomized 1.5–3.5s
+     # inter-page jitter.
+     sources:
+       linkedin_browser:
+         enabled: true
+         keywords: "<KEYWORDS>"
+         location: "<LOCATION>"
+         filters:
+           remote: true
+           posted_within_days: 7
+           experience_level: ["mid", "senior"]
+         max_pages: 3
+     ```
+     Substitute `<KEYWORDS>` / `<LOCATION>` with the answers; leave the
+     filters block as a starter that the user can prune.
+   - Note that the daemon will only register this source when the
+     binary is built with `--features browser`. The default `cargo
+     install --git ... careerai-cli` build is feature-off; rebuild with
+     `--features browser` to activate.
+   If the user says no, skip this step entirely.
+8. **Print next steps.** Suggest:
    - `/career:discover` to pull listings from configured sources
    - `/career:status` to see pipeline counts
    - Edit `config/local.yaml` to tune sources, cadences, and the score
