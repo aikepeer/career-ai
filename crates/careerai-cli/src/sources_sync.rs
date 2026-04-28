@@ -73,7 +73,7 @@ fn write_atomic(dest: &Path, contents: &str) -> Result<()> {
     std::fs::write(&tmp_path, contents)
         .with_context(|| format!("write tempfile {}", tmp_path.display()))?;
     std::fs::rename(&tmp_path, dest)
-        .with_context(|| format!("rename {} -> {}", tmp_path.display(), dest.display(),))?;
+        .with_context(|| format!("rename {} -> {}", tmp_path.display(), dest.display()))?;
     Ok(())
 }
 
