@@ -299,16 +299,20 @@ mod tests {
     #[test]
     fn cookie_event_maps_health_to_severity() {
         // Healthy → no event.
-        assert!(cookie_event_for("linkedin", &CookieHealth::Healthy(Duration::hours(96))).is_none());
+        assert!(
+            cookie_event_for("linkedin", &CookieHealth::Healthy(Duration::hours(96))).is_none()
+        );
         // ExpiringSoon → Warning, hours_left clamped to >= 1.
         let (_, sev) =
             cookie_event_for("linkedin", &CookieHealth::ExpiringSoon(Duration::hours(3))).unwrap();
         assert_eq!(sev, Severity::Warning);
         // Sub-hour remaining must still surface as a non-zero hour
         // count so the alert reads "1h left" rather than "0h left".
-        let (event_under_1h, _) =
-            cookie_event_for("linkedin", &CookieHealth::ExpiringSoon(Duration::minutes(20)))
-                .unwrap();
+        let (event_under_1h, _) = cookie_event_for(
+            "linkedin",
+            &CookieHealth::ExpiringSoon(Duration::minutes(20)),
+        )
+        .unwrap();
         match event_under_1h {
             NotifyEvent::CookieExpiringSoon { hours_left, .. } => assert_eq!(hours_left, 1),
             _ => panic!("expected CookieExpiringSoon"),

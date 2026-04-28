@@ -28,7 +28,7 @@ impl std::fmt::Debug for NtfyNotifier {
         f.debug_struct("NtfyNotifier")
             .field("server", &self.server)
             .field("topic", &"<redacted>")
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -179,7 +179,10 @@ mod tests {
             !dbg.contains("secret-topic-xyz"),
             "ntfy topic leaked into Debug output: {dbg}"
         );
-        assert!(dbg.contains("<redacted>"), "missing redaction marker: {dbg}");
+        assert!(
+            dbg.contains("<redacted>"),
+            "missing redaction marker: {dbg}"
+        );
     }
 
     #[test]

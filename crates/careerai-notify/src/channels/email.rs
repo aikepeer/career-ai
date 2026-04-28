@@ -59,10 +59,11 @@ pub struct EmailNotifier {
 impl std::fmt::Debug for EmailNotifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Delegate to ParsedConfig::Debug, which redacts the password.
-        // The transport itself does not implement Debug.
+        // The transport itself does not implement Debug; intentionally
+        // omitted (use `finish_non_exhaustive` per clippy).
         f.debug_struct("EmailNotifier")
             .field("parsed", &self.parsed)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -134,10 +135,11 @@ impl EmailNotifier {
             .body(event.summary())
             .expect("lettre Message::body cannot fail for plain string body")
     }
-
 }
 
-fn build_transport(parsed: &ParsedConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, NotifyError> {
+fn build_transport(
+    parsed: &ParsedConfig,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, NotifyError> {
     let creds = Credentials::new(parsed.smtp_username.clone(), parsed.smtp_password.clone());
     let builder = if parsed.starttls_disabled {
         AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&parsed.smtp_host)
@@ -180,7 +182,7 @@ fn keyring_key(host: &str, username: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

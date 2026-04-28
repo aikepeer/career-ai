@@ -25,7 +25,7 @@ impl std::fmt::Debug for SlackNotifier {
         f.debug_struct("SlackNotifier")
             .field("webhook_url", &"<redacted>")
             .field("channel", &self.channel)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -194,7 +194,10 @@ mod tests {
             !dbg.contains("SUPER-SECRET-TOKEN"),
             "webhook leaked into Debug output: {dbg}"
         );
-        assert!(dbg.contains("<redacted>"), "missing redaction marker: {dbg}");
+        assert!(
+            dbg.contains("<redacted>"),
+            "missing redaction marker: {dbg}"
+        );
     }
 
     #[test]

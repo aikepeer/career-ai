@@ -35,7 +35,7 @@ impl std::fmt::Debug for TelegramNotifier {
             .field("base_url", &self.base_url)
             .field("bot_token", &"<redacted>")
             .field("chat_id", &self.chat_id)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -162,11 +162,8 @@ fn scrub_token(s: &str) -> String {
     for (idx, _) in s.match_indices("bot") {
         let after = &s[idx + 3..];
         // A token starts with at least one digit before the colon.
-        let looks_like_token = after
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
-            && after.contains(':');
+        let looks_like_token =
+            after.chars().next().is_some_and(|c| c.is_ascii_digit()) && after.contains(':');
         if !looks_like_token {
             continue;
         }
@@ -209,7 +206,10 @@ mod tests {
             !dbg.contains("SUPERSECRETTGBOTKEY"),
             "bot token leaked into Debug output: {dbg}"
         );
-        assert!(dbg.contains("<redacted>"), "missing redaction marker: {dbg}");
+        assert!(
+            dbg.contains("<redacted>"),
+            "missing redaction marker: {dbg}"
+        );
     }
 
     #[test]
