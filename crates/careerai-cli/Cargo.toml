@@ -28,6 +28,7 @@ async-trait.workspace = true
 chrono.workspace = true
 clap.workspace = true
 keyring.workspace = true
+serde_yaml.workspace = true
 rpassword = "7"
 tempfile = { workspace = true, optional = true }
 tokio.workspace = true

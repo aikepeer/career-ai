@@ -7,6 +7,7 @@
 mod cookies;
 mod digest;
 mod review;
+mod sources_sync;
 
 use careerai_pipeline as pipeline;
 
@@ -144,6 +145,11 @@ enum Command {
         #[command(subcommand)]
         command: NotifyCommand,
     },
+    /// Manage discovery sources (auto-discover companies from seed list).
+    Sources {
+        #[command(subcommand)]
+        command: SourcesCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -160,6 +166,19 @@ enum NotifyCommand {
     /// configured channel. Lets you verify Slack / Telegram / email /
     /// ntfy are wired correctly without waiting for a real event.
     Test,
+}
+
+#[derive(Debug, Subcommand)]
+enum SourcesCommand {
+    /// Probe the seeded ATS list against the configured `domains:`
+    /// keywords and either preview or merge the new companies into
+    /// `config/local.yaml`. Default is preview.
+    Sync {
+        /// Write the merged lists into `config/local.yaml`. Without
+        /// this flag, the diff is printed and no file is touched.
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -339,6 +358,11 @@ async fn main() -> Result<()> {
             NotifyCommand::Test => {
                 let cfg = load_cfg(&cwd)?;
                 run_notify_test(&cfg).await?;
+            }
+        },
+        Command::Sources { command } => match command {
+            SourcesCommand::Sync { apply } => {
+                sources_sync::run(&cwd, apply).await?;
             }
         },
         Command::Inspect { application_id } => {
