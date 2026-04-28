@@ -87,16 +87,34 @@ pub enum BackendError {
     Llm(#[from] LlmError),
 }
 
-/// Outcome of [`Backend::probe_choice`] — what the auto-detector picked
+/// Outcome of [`Backend::probe`] — what the auto-detector picked
 /// without actually constructing the driver. Useful for `careerai llm
 /// probe` and the plugin setup script.
+///
+/// `chosen` always reflects what `Backend::resolve` *would* hand back
+/// for the same `cfg.backend`. `forced` records the operator's override
+/// (from `--llm-backend` / `cfg.llm.backend`) so the CLI can flag when
+/// a forced choice is unusable (e.g. `--llm-backend=api` with no key).
+/// When `forced.is_some()` and `forced != Some(chosen)`, the override
+/// will fail to resolve — the CLI surfaces this as a non-zero exit.
 #[derive(Debug, Clone)]
 pub struct BackendProbe {
+    /// What the auto-detector would hand back from `Backend::resolve`.
+    /// `Auto` means neither backend is reachable.
     pub chosen: BackendChoice,
+    /// Operator override from `cfg.backend`, if not `Auto`. Tracked
+    /// separately from `chosen` so the CLI can detect forced-but-
+    /// unusable cases (forced API with no key, forced CLI with no
+    /// binary, etc.).
+    pub forced: Option<BackendChoice>,
     pub claude_binary: Option<PathBuf>,
     pub claude_version: Option<String>,
     pub claude_ping_ms: Option<u128>,
     pub claude_auth_ok: bool,
+    /// True if an Anthropic API key is reachable (env or keyring). Set
+    /// in tandem with `api_key_source` from a single cached read of
+    /// `api_key_source()`.
+    pub api_key_present: bool,
     pub api_key_source: Option<&'static str>,
 }
 
@@ -122,10 +140,12 @@ impl Backend {
     pub async fn probe(cfg: &LlmConfig) -> BackendProbe {
         let mut probe = BackendProbe {
             chosen: BackendChoice::Auto,
+            forced: None,
             claude_binary: None,
             claude_version: None,
             claude_ping_ms: None,
             claude_auth_ok: false,
+            api_key_present: false,
             api_key_source: None,
         };
 
@@ -153,29 +173,32 @@ impl Backend {
         }
 
         // Always look for an API key, even when CLI wins, so `probe`
-        // output can show the fallback status.
-        if api_key_source().is_some() {
-            probe.api_key_source = api_key_source();
-            if probe.chosen == BackendChoice::Auto {
-                #[cfg(feature = "live-llm-api")]
-                {
-                    probe.chosen = BackendChoice::Api;
-                }
+        // output can show the fallback status. Cache the result — each
+        // `api_key_source()` call reads env + keyring, and on macOS the
+        // keychain query can pop a confirmation dialog. One read per
+        // probe.
+        let api_source = api_key_source();
+        probe.api_key_present = api_source.is_some();
+        probe.api_key_source = api_source;
+        if probe.api_key_present && probe.chosen == BackendChoice::Auto {
+            #[cfg(feature = "live-llm-api")]
+            {
+                probe.chosen = BackendChoice::Api;
             }
         }
 
-        // Honor a forced backend choice in cfg.llm.backend. Without
-        // this, `careerai --llm-backend=api llm probe` ignored the
-        // override even after the global flag was plumbed in. Mirrors
-        // `Backend::resolve`'s match on `BackendChoice`.
-        match cfg.backend {
-            BackendChoice::ClaudeCli => {
-                probe.chosen = BackendChoice::ClaudeCli;
-            }
-            BackendChoice::Api => {
-                probe.chosen = BackendChoice::Api;
-            }
-            BackendChoice::Auto => { /* keep auto-resolved value */ }
+        // Track a forced backend choice from `cfg.backend` separately
+        // from the auto-detected `chosen`. Previously `chosen` was
+        // overwritten unconditionally with `cfg.backend`, which lied in
+        // three cases:
+        //   - forced `Api` but `live-llm-api` not compiled
+        //   - forced `Api` but no API key
+        //   - forced `ClaudeCli` but binary not present / not authed
+        // Now `chosen` always reflects what would actually resolve, and
+        // `forced` records what the operator asked for. The CLI prints
+        // both so the operator can see when their override is unusable.
+        if matches!(cfg.backend, BackendChoice::ClaudeCli | BackendChoice::Api) {
+            probe.forced = Some(cfg.backend);
         }
 
         probe
@@ -349,8 +372,10 @@ async fn read_claude_version(bin: &std::path::Path) -> Option<String> {
 }
 
 /// Cheap auth probe: invoke `claude --print --output-format json --model
-/// sonnet "ping"` with a 5s ceiling, treat exit-0 + `is_error: false` as
-/// success.
+/// sonnet "ping"` with a 15s ceiling (cold-start of a fresh shell can
+/// run 4-10s in practice; the previous 5s ceiling timed out spuriously).
+/// Treats exit-0 + `is_error: false` as success. Tests bypass this
+/// entirely via `CAREERAI_SKIP_CLI_PROBE=1`.
 #[cfg(feature = "live-llm-cli")]
 async fn probe_claude_auth(bin: &std::path::Path) -> bool {
     let started = std::time::Instant::now();
@@ -551,15 +576,22 @@ mod tests {
         assert_eq!(probe.chosen, BackendChoice::ClaudeCli);
     }
 
-    /// `Backend::probe` must honor `cfg.llm.backend` when forced. The
-    /// `--llm-backend=api llm probe` path was silently ignoring the
-    /// override even after the global flag was plumbed in.
+    /// `Backend::probe` records a forced backend choice in `probe.forced`
+    /// without lying in `chosen`. `chosen` always reflects what would
+    /// actually resolve. So forcing `Api` while the only reachable
+    /// backend is the CLI yields `forced=Some(Api), chosen=ClaudeCli`,
+    /// and the CLI surfaces the mismatch as a non-zero exit.
     #[cfg(feature = "live-llm-cli")]
     #[tokio::test]
-    async fn probe_honors_forced_backend_choice() {
+    async fn probe_records_forced_choice_separately_from_chosen() {
         let _guard = ENV_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Stash + clear the API key so the API-key branch in probe()
+        // doesn't accidentally satisfy the forced=Api request from the
+        // host's keyring.
+        let prev_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("claude");
         std::fs::write(&bin, "#!/bin/sh\necho not-json\n").unwrap();
@@ -575,6 +607,33 @@ mod tests {
         let probe = Backend::probe(&c).await;
         std::env::remove_var("CAREERAI_CLAUDE_BIN");
         std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
-        assert_eq!(probe.chosen, BackendChoice::Api);
+        if let Some(v) = prev_key {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+        assert_eq!(probe.forced, Some(BackendChoice::Api));
+        // `chosen` must not lie: with no API key reachable, the API
+        // backend would not resolve, so `chosen` stays on the
+        // auto-detected ClaudeCli (skip env makes the stub binary look
+        // healthy). The keyring may have a real key on a dev box; in
+        // that case `chosen` is allowed to land on `Api`.
+        assert!(
+            matches!(probe.chosen, BackendChoice::ClaudeCli | BackendChoice::Api),
+            "chosen={:?} not in {{ClaudeCli, Api}}",
+            probe.chosen
+        );
+    }
+
+    /// Forced `Auto` is a no-op — `forced` stays `None` even when
+    /// `cfg.backend == Auto`. Only the explicit overrides (`ClaudeCli`,
+    /// `Api`) populate `forced`.
+    #[tokio::test]
+    async fn probe_forced_none_when_cfg_auto() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut c = cfg();
+        c.backend = BackendChoice::Auto;
+        let probe = Backend::probe(&c).await;
+        assert_eq!(probe.forced, None);
     }
 }
