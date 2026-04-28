@@ -48,23 +48,14 @@ pub const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum NotifyEvent {
     /// LinkedIn `li_at` cookie within 48h of expiry. Detected by
     /// `careerai digest`.
-    CookieExpiringSoon {
-        provider: String,
-        hours_left: u64,
-    },
+    CookieExpiringSoon { provider: String, hours_left: u64 },
     /// A discovery source returned an error mid-run (HTTP failure, DNS,
     /// auth, etc.).
-    SourceUnreachable {
-        source: String,
-        reason: String,
-    },
+    SourceUnreachable { source: String, reason: String },
     /// Cookie or token-based auth failed during a discovery / submit
     /// pass — distinct from a transport failure because the recovery is
     /// always "refresh the credential."
-    AuthFailureMidRun {
-        provider: String,
-        action: String,
-    },
+    AuthFailureMidRun { provider: String, action: String },
     /// Submitter encountered an unknown form field; operator must
     /// review the captured screenshot.
     ManualReviewNeeded {
@@ -113,9 +104,9 @@ impl NotifyEvent {
             Self::ManualReviewNeeded { application_id, .. } => {
                 format!("[career-ai] manual review needed: {application_id}")
             }
-            Self::HighScoreMatch {
-                title, company, ..
-            } => format!("[career-ai] high-score match: {title} @ {company}"),
+            Self::HighScoreMatch { title, company, .. } => {
+                format!("[career-ai] high-score match: {title} @ {company}")
+            }
             Self::RateLimitExhausted { source, .. } => {
                 format!("[career-ai] rate-limit exhausted: {source}")
             }

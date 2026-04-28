@@ -96,7 +96,7 @@ impl TelegramNotifier {
         );
         if out.len() > MAX_MESSAGE_LEN {
             out.truncate(MAX_MESSAGE_LEN);
-            out.push_str("…");
+            out.push('…');
         }
         out
     }

@@ -306,6 +306,7 @@ dependencies = [
  "careerai-core",
  "careerai-db",
  "careerai-llm",
+ "careerai-notify",
  "careerai-pipeline",
  "careerai-profile",
  "careerai-render",
@@ -383,6 +384,7 @@ name = "careerai-match"
 version = "0.1.0"
 dependencies = [
  "careerai-core",
+ "careerai-notify",
  "careerai-profile",
  "careerai-sources",
  "insta",
@@ -443,6 +445,7 @@ dependencies = [
  "careerai-db",
  "careerai-llm",
  "careerai-match",
+ "careerai-notify",
  "careerai-profile",
  "careerai-render",
  "careerai-sources",

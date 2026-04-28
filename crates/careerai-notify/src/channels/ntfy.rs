@@ -11,8 +11,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 
 use crate::{
-    config::NtfyConfig, error::NotifyError, severity::Severity, Notifier, NotifyEvent,
-    HTTP_TIMEOUT,
+    config::NtfyConfig, error::NotifyError, severity::Severity, Notifier, NotifyEvent, HTTP_TIMEOUT,
 };
 
 const DEFAULT_SERVER: &str = "https://ntfy.sh";

@@ -43,13 +43,17 @@ impl EmailNotifier {
             return Err(NotifyError::Config("email: smtp_host is required".into()));
         }
         if cfg.smtp_username.trim().is_empty() {
-            return Err(NotifyError::Config("email: smtp_username is required".into()));
+            return Err(NotifyError::Config(
+                "email: smtp_username is required".into(),
+            ));
         }
         if cfg.from.trim().is_empty() {
             return Err(NotifyError::Config("email: from is required".into()));
         }
         if cfg.to.is_empty() {
-            return Err(NotifyError::Config("email: at least one to address required".into()));
+            return Err(NotifyError::Config(
+                "email: at least one to address required".into(),
+            ));
         }
         let key = keyring_key(&cfg.smtp_host, &cfg.smtp_username);
         let entry = keyring::Entry::new(KEYRING_SERVICE, &key).map_err(|e| {
@@ -65,10 +69,10 @@ impl EmailNotifier {
             .map_err(|e| NotifyError::Config(format!("email: from address invalid: {e}")))?;
         let mut to_list = Vec::with_capacity(cfg.to.len());
         for addr in &cfg.to {
-            to_list.push(
-                addr.parse::<Mailbox>()
-                    .map_err(|e| NotifyError::Config(format!("email: to `{addr}` invalid: {e}")))?,
-            );
+            to_list
+                .push(addr.parse::<Mailbox>().map_err(|e| {
+                    NotifyError::Config(format!("email: to `{addr}` invalid: {e}"))
+                })?);
         }
 
         Ok(Self {
@@ -115,7 +119,10 @@ impl EmailNotifier {
                 .map_err(|e| NotifyError::Config(format!("email: starttls relay: {e}")))?
                 .port(self.parsed.smtp_port)
         };
-        Ok(builder.credentials(creds).timeout(Some(HTTP_TIMEOUT)).build())
+        Ok(builder
+            .credentials(creds)
+            .timeout(Some(HTTP_TIMEOUT))
+            .build())
     }
 }
 
@@ -176,7 +183,10 @@ mod tests {
         let n = EmailNotifier { parsed: cfg() };
         let msg = n.build_message(&ev(), Severity::Critical);
         let raw = String::from_utf8(msg.formatted()).unwrap();
-        assert!(raw.contains("Subject: [CRIT]"), "subject missing tag: {raw}");
+        assert!(
+            raw.contains("Subject: [CRIT]"),
+            "subject missing tag: {raw}"
+        );
         assert!(raw.contains("manual review needed"));
         assert!(
             !raw.contains("ULTRA-SECRET-PASSWORD"),
@@ -186,6 +196,9 @@ mod tests {
 
     #[test]
     fn keyring_key_is_stable() {
-        assert_eq!(keyring_key("smtp.gmail.com", "me"), "smtp/smtp.gmail.com/me");
+        assert_eq!(
+            keyring_key("smtp.gmail.com", "me"),
+            "smtp/smtp.gmail.com/me"
+        );
     }
 }

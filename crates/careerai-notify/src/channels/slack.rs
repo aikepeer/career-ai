@@ -31,10 +31,7 @@ impl SlackNotifier {
             ));
         }
         let webhook_url = std::env::var(&cfg.webhook_url_env).map_err(|_| {
-            NotifyError::SecretMissing(format!(
-                "slack: env var `{}` is unset",
-                cfg.webhook_url_env
-            ))
+            NotifyError::SecretMissing(format!("slack: env var `{}` is unset", cfg.webhook_url_env))
         })?;
         if webhook_url.trim().is_empty() {
             return Err(NotifyError::SecretMissing(format!(
@@ -187,7 +184,10 @@ mod tests {
             .and(path("/services/X/Y/Z"))
             .respond_with(|req: &Request| {
                 let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
-                assert!(body["attachments"][0]["color"].as_str().unwrap().starts_with('#'));
+                assert!(body["attachments"][0]["color"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with('#'));
                 ResponseTemplate::new(200)
             })
             .expect(1)

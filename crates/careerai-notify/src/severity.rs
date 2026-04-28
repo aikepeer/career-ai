@@ -3,23 +3,18 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     /// Routine signal. Default sink for `careerai notify test`.
     Info,
     /// Operator should look at this within a day (cookie expiring,
     /// rate-limit caps).
+    #[default]
     Warning,
     /// Pipeline blocked / cookie already expired / submitter cannot
     /// proceed without a human.
     Critical,
-}
-
-impl Default for Severity {
-    fn default() -> Self {
-        Self::Warning
-    }
 }
 
 impl Severity {

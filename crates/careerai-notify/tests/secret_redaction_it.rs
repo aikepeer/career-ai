@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 //! Asserts that channel failure paths NEVER log known-secret shapes
 //! (webhook URLs, bot tokens, SMTP passwords). Mirrors the existing
 //! `careerai-submit` regex-based redaction test.
@@ -8,7 +9,7 @@
 
 use careerai_notify::{
     channels::{ntfy::NtfyNotifier, slack::SlackNotifier, telegram::TelegramNotifier},
-    NotifyEvent, Notifier, Severity,
+    Notifier, NotifyEvent, Severity,
 };
 use reqwest::Client;
 use std::time::Duration;
