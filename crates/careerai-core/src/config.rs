@@ -66,6 +66,12 @@ pub struct SourcesConfig {
     pub remoteok: ToggleSource,
     #[serde(default)]
     pub naukri: NaukriSourceConfig,
+    /// Indeed public RSS feed (`https://rss.indeed.com/rss?q=&l=&fromage=`).
+    /// Stable, ToS-clean, no auth needed. Single configurable feed: one
+    /// keyword query + optional location + recency window. Disabled by
+    /// default so a fresh install never makes outbound requests unprompted.
+    #[serde(default)]
+    pub indeed_rss: IndeedRssSourceConfig,
     /// Community / third-party Model-Context-Protocol servers used as
     /// discovery sources. Each entry spawns a stdio MCP server process,
     /// calls `tools/list`, and invokes the first matching job-search
@@ -113,6 +119,34 @@ pub struct NaukriSourceConfig {
     pub location: Option<String>,
     #[serde(default)]
     pub max_results: Option<usize>,
+}
+
+/// Indeed RSS feed source. Maps to a single `https://rss.indeed.com/rss`
+/// query. Defaults to disabled. The keyword/location strings are sent
+/// to Indeed verbatim; Indeed handles its own URL encoding when we hand
+/// the values to `reqwest`'s query builder.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IndeedRssSourceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Search keywords; passed as the `q` query parameter. Empty string
+    /// is allowed (Indeed returns a generic feed in that case).
+    #[serde(default)]
+    pub keywords: String,
+    /// Optional location string passed as the `l` parameter. `None`
+    /// (or unset in YAML) omits the parameter entirely so the feed is
+    /// not location-restricted.
+    #[serde(default)]
+    pub location: Option<String>,
+    /// Optional `fromage` (recency in days) parameter — Indeed accepts
+    /// values like `1`, `3`, `7`, `14`. `None` omits the parameter.
+    #[serde(default)]
+    pub fromage: Option<u32>,
+    /// Soft cap on `discover()` calls per minute. `0` disables the
+    /// gate. Mirrors `McpSourceConfig.rate_per_minute`; sized for the
+    /// read-side, not write-side traffic that lives in `rates.*`.
+    #[serde(default)]
+    pub rate_per_minute: u32,
 }
 
 /// One MCP-server discovery source. Spawns the configured stdio
