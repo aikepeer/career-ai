@@ -74,6 +74,24 @@ full driver through a tempdir-installed shell script.
    `enabled: false` if the source has any ToS gray area).
 5. Add at least one snapshot test against a real-shape JSON fixture.
 
+## Adding a new notification channel
+
+1. Create `crates/careerai-notify/src/channels/<channel>.rs`.
+2. Implement the `Notifier` trait. The 5s `HTTP_TIMEOUT` constant
+   from `careerai_notify` is the spec ceiling for any outbound
+   request — notifications must never block a daemon tick.
+3. **Never accept inline secrets in YAML.** Resolve from env vars
+   (`std::env::var`) or the OS keyring (service `career-ai`,
+   key from config). Missing secrets must surface as
+   `NotifyError::SecretMissing` and the channel disables itself
+   with a `tracing::warn`; the surrounding pipeline must still
+   run.
+4. Wire the channel through `NotifyChannels` and `Pipeline::from_config`.
+5. Add `wiremock`-driven unit tests for both 2xx and non-2xx paths.
+   The redaction integration test in `tests/secret_redaction_it.rs`
+   asserts no known-secret shape leaks into tracing — extend it
+   with any channel-specific token format.
+
 ## Adding a new submitter
 
 1. Create `crates/careerai-submit/src/<submitter>.rs`.
