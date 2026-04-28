@@ -139,6 +139,11 @@ enum Command {
         #[command(subcommand)]
         command: LlmCommand,
     },
+    /// Notification pipeline tools (Slack / Telegram / email / ntfy).
+    Notify {
+        #[command(subcommand)]
+        command: NotifyCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -147,6 +152,14 @@ enum LlmCommand {
     /// and report a brief health status (binary path/version, ping
     /// latency, API-key source).
     Probe,
+}
+
+#[derive(Debug, Subcommand)]
+enum NotifyCommand {
+    /// Fire a synthetic `SourceUnreachable` event through every
+    /// configured channel. Lets you verify Slack / Telegram / email /
+    /// ntfy are wired correctly without waiting for a real event.
+    Test,
 }
 
 #[derive(Debug, Subcommand)]
@@ -322,6 +335,12 @@ async fn main() -> Result<()> {
                 run_llm_probe(&cfg, backend_override).await?;
             }
         },
+        Command::Notify { command } => match command {
+            NotifyCommand::Test => {
+                let cfg = load_cfg(&cwd)?;
+                run_notify_test(&cfg).await?;
+            }
+        },
         Command::Inspect { application_id } => {
             run_inspect(&cwd, &application_id).await?;
         }
@@ -485,6 +504,38 @@ async fn probe_forced_resolve(
     drop(cache_root);
     res
 }
+
+/// Fire a synthetic notification through every configured channel so
+/// the operator can verify the pipeline end-to-end without waiting for
+/// a real event. Reports the number of channels active; exits with a
+/// non-zero code if there are zero channels (so a missing config is
+/// surfaced loudly even though `Pipeline::fire` itself is best-effort).
+async fn run_notify_test(cfg: &CoreConfig) -> Result<()> {
+    let pipe = careerai_notify::Pipeline::from_config(&cfg.notify)?;
+    let count = pipe.channel_count();
+    if count == 0 {
+        println!(
+            "no notify channels are configured. Edit config/local.yaml and \
+             add a slack / telegram / email / ntfy block under `notify.channels`."
+        );
+        std::process::exit(2);
+    }
+    println!(
+        "firing test notification through {count} channel(s): {:?}",
+        pipe.channel_names()
+    );
+    pipe.fire(
+        careerai_notify::NotifyEvent::SourceUnreachable {
+            source: "test".to_string(),
+            reason: "manual test via `careerai notify test`".to_string(),
+        },
+        careerai_notify::Severity::Info,
+    )
+    .await;
+    println!("done. Check each channel's destination — failures are logged at WARN.");
+    Ok(())
+}
+
 
 /// Dispatch for `careerai apply`. Errors short-circuit the process with a
 /// typed exit code; success paths print one line per application.

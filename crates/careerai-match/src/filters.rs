@@ -153,6 +153,7 @@ mod tests {
                 embedding_model: String::new(),
                 score_threshold: 0.0,
                 must_include_skills: vec![],
+                notify_threshold: 0.85,
             },
             rates: careerai_core::config::RatesConfig::default(),
             submit: careerai_core::config::SubmitConfig::default(),
@@ -160,6 +161,7 @@ mod tests {
             scheduler: careerai_core::config::SchedulerConfig::default(),
             sources: careerai_core::config::SourcesConfig::default(),
             render: careerai_core::config::RenderConfig::default(),
+            notify: careerai_notify::NotifyConfig::default(),
         }
     }
 
@@ -300,6 +302,7 @@ mod must_include_tests {
             embedding_model: "x".into(),
             score_threshold: 0.0,
             must_include_skills: skills.iter().map(|s| (*s).into()).collect(),
+            notify_threshold: 0.85,
         }
     }
 

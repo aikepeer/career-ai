@@ -17,6 +17,7 @@ serde_yaml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+careerai-notify = { path = "../careerai-notify" }
 insta = { version = "1", features = ["yaml"] }
 tempfile = "3"
 

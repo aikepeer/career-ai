@@ -22,6 +22,7 @@ careerai-submit = { path = "../careerai-submit" }
 careerai-scheduler = { path = "../careerai-scheduler" }
 careerai-pipeline = { path = "../careerai-pipeline" }
 careerai-sources = { path = "../careerai-sources" }
+careerai-notify = { path = "../careerai-notify" }
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true

@@ -11,6 +11,7 @@ use anyhow::{anyhow, Result};
 use chrono::Duration;
 
 use careerai_core::config::CoreConfig;
+use careerai_notify::{NotifyEvent, Pipeline as NotifyPipeline, Severity};
 use careerai_pipeline as pipeline;
 use careerai_submit::credentials::CookieHealth;
 
@@ -86,19 +87,56 @@ fn collect_cookie_warnings_from(health: CookieHealth) -> Vec<String> {
     }
 }
 
-fn collect_cookie_warnings() -> Vec<String> {
-    collect_cookie_warnings_from(careerai_submit::credentials::cookie_health("linkedin"))
+/// Map a `CookieHealth` reading to a `NotifyEvent` + severity, if any.
+/// Returns `None` for healthy cookies so the caller can use a single
+/// `if let Some(...)` without nested matches.
+fn cookie_event_for(provider: &str, health: &CookieHealth) -> Option<(NotifyEvent, Severity)> {
+    match health {
+        CookieHealth::Healthy(_) => None,
+        CookieHealth::ExpiringSoon(remaining) => {
+            // Round up so a remaining < 1h still surfaces a non-zero
+            // hour count to the operator. `num_hours` returns `i64`;
+            // negative values are impossible here (ExpiringSoon means
+            // strictly positive) but clamp defensively before casting.
+            let hours_left = u64::try_from(remaining.num_hours().max(1)).unwrap_or(0);
+            Some((
+                NotifyEvent::CookieExpiringSoon {
+                    provider: provider.to_string(),
+                    hours_left,
+                },
+                Severity::Warning,
+            ))
+        }
+        CookieHealth::Expired(_) | CookieHealth::NotStored | CookieHealth::Unparseable => Some((
+            NotifyEvent::CookieExpiringSoon {
+                provider: provider.to_string(),
+                hours_left: 0,
+            },
+            Severity::Critical,
+        )),
+    }
 }
 
 /// Run `careerai digest` end to end.
-pub async fn run_digest(root: &Path, _cfg: &CoreConfig, since_arg: &str) -> Result<()> {
+pub async fn run_digest(root: &Path, cfg: &CoreConfig, since_arg: &str) -> Result<()> {
     let since = parse_since(since_arg)?;
     let mut report = pipeline::digest_summary(root, since).await?;
     // Populate cookie warnings here so `digest_summary` itself stays
     // focused on pipeline state and never calls keyring/submit code.
     // (`careerai-pipeline` links `careerai-submit` for the apply path,
     // but the digest read path stays clean.)
-    report.cookie_warnings = collect_cookie_warnings();
+    let health = careerai_submit::credentials::cookie_health("linkedin");
+    report.cookie_warnings = collect_cookie_warnings_from(health);
+
+    // Fire a notification if the cookie is unhealthy. Best-effort —
+    // `Pipeline::fire` swallows channel errors so this never breaks
+    // the digest output.
+    if let Some((event, severity)) = cookie_event_for("linkedin", &health) {
+        match NotifyPipeline::from_config(&cfg.notify) {
+            Ok(pipe) => pipe.fire(event, severity).await,
+            Err(e) => tracing::warn!(error = %e, "notify pipeline init failed"),
+        }
+    }
 
     println!(
         "career-ai digest — last {} (since {})",
