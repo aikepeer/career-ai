@@ -5,7 +5,7 @@
 //! Resolution order when [`BackendChoice::Auto`]:
 //!
 //! 1. `which("claude")` succeeds AND `claude --print "ping"` exits 0
-//!    within 5 seconds (skipped when `CAREERAI_SKIP_CLI_PROBE=1`)
+//!    within 15 seconds (skipped when `CAREERAI_SKIP_CLI_PROBE=1`)
 //!    -> [`Backend::ClaudeCli`].
 //! 2. `ANTHROPIC_API_KEY` is reachable (env or
 //!    `keyring::Entry::new("career-ai", "anthropic/api_key")`) AND the
@@ -337,8 +337,11 @@ async fn read_claude_version(bin: &std::path::Path) -> Option<String> {
 #[cfg(feature = "live-llm-cli")]
 async fn probe_claude_auth(bin: &std::path::Path) -> bool {
     let started = std::time::Instant::now();
+    // Allow up to 15s on the auth probe — cold-start of the `claude`
+    // CLI on a fresh shell can run 4-10s in practice. Tests bypass
+    // this entirely via CAREERAI_SKIP_CLI_PROBE=1.
     let result = timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(15),
         Command::new(bin)
             .arg("--print")
             .arg("--output-format")
