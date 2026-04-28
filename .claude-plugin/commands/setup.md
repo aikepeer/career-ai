@@ -14,14 +14,20 @@ filesystem paths to their resume and LinkedIn data export.
 1. **Detect `pandoc`.** Run `pandoc --version`. If missing, print the
    distro-specific install command (Debian/Ubuntu: `sudo apt install pandoc`,
    macOS: `brew install pandoc`, Arch: `sudo pacman -S pandoc`) and stop.
-2. **Detect Anthropic API key.** Check the `ANTHROPIC_API_KEY` env var.
-   The current CLI reads the key from this env var only — there is no
-   `careerai cookies set anthropic` subcommand (the `careerai cookies`
-   command only handles LinkedIn / Naukri session cookies, see
-   `/career:apply`'s failure-modes section). If `ANTHROPIC_API_KEY` is
-   unset, tell the user to export it for the current shell (or add it to
-   their shell rc file) and stop. Keyring-backed storage for the
-   Anthropic key is a future capability and is not wired today.
+2. **Detect an LLM backend.** Run `careerai llm probe` and capture the
+   `backend:` line. Three outcomes:
+   - `backend: claude-cli` — the local `claude` CLI is installed and
+     authed. No further action needed; the pipeline will reuse the
+     user's Claude Code session (Max/Pro or API key).
+   - `backend: api` — the CLI isn't reachable but `ANTHROPIC_API_KEY`
+     is set; the rig-core API path will be used. This is fine.
+   - The probe exits non-zero with `no LLM backend reachable` — tell
+     the user to either install Claude Code
+     (https://claude.ai/download) and run `claude login`, or export
+     `ANTHROPIC_API_KEY` for the current shell, then re-run setup.
+   The careerai CLI no longer requires `ANTHROPIC_API_KEY` for
+   subscribers; only set it if you don't have Claude Code or want to
+   force the API path with `--llm-backend=api`.
 3. **Collect file paths.** If the user passed args, use them. Otherwise ask:
    - "Path to your resume PDF or DOCX?"
    - "Path to your LinkedIn data export ZIP (optional, press Enter to skip)?"
@@ -31,12 +37,12 @@ filesystem paths to their resume and LinkedIn data export.
    careerai profile import <resume_path> [<linkedin_zip>]
    careerai profile validate
    ```
-   The current CLI on `main` only supports `--force` on
-   `careerai profile import`; the regex heuristic is the only import
-   path. Surface any `LinkedInMissingColumn` or schema-drift warnings
-   prominently — those indicate LinkedIn changed its export format and
-   need a code-side fix rather than a user fix. (See Notes for the
-   future LLM-extractor flag.)
+   `profile import` now auto-detects whether to use the LLM extractor
+   based on what `careerai llm probe` reports — no `--features
+   live-llm` rebuild required for Claude Code subscribers. Surface any
+   `LinkedInMissingColumn` or schema-drift warnings prominently —
+   those indicate LinkedIn changed its export format and need a
+   code-side fix rather than a user fix.
 5. **Probe MCP-source servers (optional).** If the user has configured
    any `kind: mcp` entries under `sources.mcp` in `config/default.yaml`
    or `config/local.yaml`, run `careerai mcp probe` and surface the
@@ -61,15 +67,10 @@ filesystem paths to their resume and LinkedIn data export.
 
 ## Notes
 
-- **Future: LLM extractor (PR #16, `feat/profile-llm-extract`).** An
-  LLM-backed PDF/DOCX extractor is in review. Until that PR merges,
-  the regex heuristic is the only import path on `main` and the
-  `careerai profile import` CLI does not accept a `--use-llm` flag.
-  Once PR #16 merges, builds produced with `cargo install --features
-  live-llm` will accept `--use-llm` (auto-detected when an Anthropic
-  key is reachable; pass `--use-llm=false` to force the heuristic). Do
-  not suggest the flag before the PR lands — the current CLI rejects
-  it.
+- **LLM backend selection.** `careerai llm probe` reports which path
+  the CLI will use; override per-invocation with the global flag
+  `--llm-backend=auto|claude-cli|api`, or persistently in
+  `config/local.yaml` under `llm.backend`.
 - This command is idempotent — re-running it will not overwrite an existing
   `profile/profile.yaml` unless the user passes `--force` to the underlying
   CLI.

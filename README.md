@@ -21,6 +21,10 @@ Delhi-NCR fallback.
 
 ## Install — Claude Code plugin (recommended)
 
+**Claude Code (Max/Pro) subscriber? No API key needed.** career-ai's
+default LLM backend is the `claude` CLI subprocess driver — every
+inference call bills against your existing Claude Code session.
+
 ```bash
 # 1. Add the plugin
 claude plugins install github.com/justdoGIT/career-ai
@@ -29,7 +33,7 @@ claude plugins install github.com/justdoGIT/career-ai
 cargo install --git https://github.com/justdoGIT/career-ai careerai-mcp careerai-cli
 
 # 3. Inside Claude Code
-/career:setup        # walks pandoc check + key prompts + profile import
+/career:setup        # walks pandoc check + LLM probe + profile import
 /career:discover     # pulls fresh listings
 /career:status       # shortlist + pipeline overview
 /career:tailor <id>  # constrained-diff resume + cover-letter for one listing
@@ -51,24 +55,31 @@ is the upcoming `mcp_jobs` adapter (PR #19).
 cargo install --git https://github.com/justdoGIT/career-ai careerai-cli
 
 careerai init
-careerai profile import resume.pdf LinkedIn-Export.zip   # +--use-llm with --features live-llm
+careerai llm probe                                        # confirm a backend is reachable
+careerai profile import resume.pdf LinkedIn-Export.zip    # auto-uses LLM when reachable
 careerai discover --source greenhouse,lever
 careerai match
 careerai shortlist show --limit 20
 careerai tailor <listing-id>
 careerai render <application-id>
-careerai apply <application-id>                          # dry-run
-careerai daemon                                          # long-running scheduler
+careerai apply <application-id>                           # dry-run
+careerai daemon                                           # long-running scheduler
 careerai digest --since 24h
 ```
 
-For LLM features:
+The default install ships with the `claude` CLI subprocess backend
+enabled — Claude Code subscribers don't need an API key. To also
+build the rig-core / Anthropic API path (for hosts without Claude
+Code, or to force `--llm-backend=api`):
 
 ```bash
 cargo install --git https://github.com/justdoGIT/career-ai \
-    careerai-cli --features live-llm
+    careerai-cli --features live-llm-api
 export ANTHROPIC_API_KEY=...      # or store in OS keyring
 ```
+
+Override the backend per command with `--llm-backend=auto|claude-cli|api`,
+or persistently via `llm.backend` in `config/local.yaml`.
 
 ## Architecture
 

@@ -6,6 +6,17 @@ versions don't promise semver yet.
 
 ## [Unreleased]
 
+- `feat/claude-cli-backend` — new `careerai-llm::ClaudeCliLlm` driver
+  that subprocesses the local `claude` CLI (`--print --output-format
+  json`). Default for Claude Code subscribers — no `ANTHROPIC_API_KEY`
+  required. Adds `careerai-llm::Backend` resolver and `BackendChoice`
+  enum (auto | claude-cli | api), `--llm-backend` global CLI flag,
+  `careerai llm probe` subcommand. The `live-llm` feature is split
+  into `live-llm-cli` (default) and `live-llm-api`; the umbrella
+  `live-llm` alias still toggles both for back-compat. Anthropic
+  prompt caching is not exposed via the CLI surface, so
+  `cache_profile=true` is silently ignored on the CLI backend
+  (logged once).
 - `feat/mcp-sources-adapter` (PR #19, in review) —
   `careerai-sources::mcp_jobs` adapter consumes any community MCP
   server as a discovery source. New CLI: `careerai mcp probe`

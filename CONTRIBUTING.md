@@ -47,6 +47,22 @@ works equivalently without `nextest`.
 `INSTA_UPDATE=always cargo test` accepts intentional snapshot changes —
 review the diff before accepting.
 
+### LLM backend matrix
+
+The LLM gateway has two real backends; a non-trivial change to
+`careerai-llm` must be exercised against both feature combinations:
+
+| Build | What it pulls in | Use |
+|---|---|---|
+| `cargo build` (default features) | `live-llm-cli` only — `claude` CLI subprocess driver | What Claude Code subscribers ship with. Smaller binary. |
+| `cargo build --features live-llm-api` | `live-llm-cli` + `live-llm-api` (rig-core + reqwest) | API path. Required for hosts without Claude Code. |
+| `cargo build --features live-llm` | umbrella alias: both | Back-compat. |
+
+Tests gated on a real `claude` binary live behind a future
+`live-claude-cli-real` feature so CI doesn't shell out. Stub-binary
+unit tests in `crates/careerai-llm/src/claude_cli.rs` exercise the
+full driver through a tempdir-installed shell script.
+
 ## Adding a new job source
 
 1. Create `crates/careerai-sources/src/<source>.rs`.
