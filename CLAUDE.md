@@ -95,6 +95,41 @@ All tunables (domains, locations, LLM models, rate caps, cron cadences, score th
 
 OS keychain via the `keyring` crate is the primary store (LinkedIn cookies, Anthropic/OpenAI keys, SMTP creds). `.env` is the fallback for CI-like environments. Secrets must never hit logs — `tracing` has a redaction filter; there is a regex-based test in `careerai-submit` asserting captured events contain no known-secret shapes.
 
+## TDD is the default for this project (MANDATORY)
+
+The Iron Law: **NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST.** This applies
+to every behavior change in this repo — features, bug fixes, refactors that
+touch behavior. The full protocol lives in the `superpowers:test-driven-development`
+skill; load it via the `Skill` tool at the start of any non-trivial work.
+
+Project-specific application:
+
+- **RED**: write the failing test as the first commit-worthy artifact. For
+  binaries, that often means an integration test in `crates/<crate>/tests/<name>_it.rs`
+  using `env!("CARGO_BIN_EXE_<bin-name>")` to spawn the actual binary. For
+  pure functions, use a `#[cfg(test)]` module next to the code.
+- **Verify RED** by running `cargo test -p <crate> --test <name_it>` (or
+  the targeted unit test path) and pasting the failure into the conversation.
+  If the test passes immediately or fails for the wrong reason, fix it
+  before writing implementation.
+- **GREEN**: minimal change to make the test pass. Don't add unrelated
+  cleanup, don't add fields "for the future", don't refactor adjacent code.
+- **Verify GREEN** with the same targeted command. Then run the affected
+  crate's full suite (`cargo test -p <crate>`) before pushing — clippy +
+  fmt + the broader workspace can wait for CI per `ci-trust-when-green`.
+- **REFACTOR** under the green test if useful; keep the test green.
+
+Bug fixes always start with a regression test that fails on the buggy
+code and passes on the fix. This is non-negotiable in this repo because
+the LLM tailor + submit modules have safety invariants that depend on
+the test suite catching drift (`careerai-tailor/src/diff.rs` constrained
+grammar; `careerai-submit` dry-run + per-source gate).
+
+Exceptions (still ask first): throwaway prototypes, scaffolding that
+will be deleted in the same PR, generated code, configuration-only
+changes. "Just one line" / "trivially safe" / "I'll add the test after"
+are not exceptions — they are red flags.
+
 ## Testing layers
 
 Match the layer to what you're testing:

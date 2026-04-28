@@ -20,6 +20,7 @@ careerai-submit = { path = "../careerai-submit" }
 
 anyhow.workspace = true
 chrono.workspace = true
+clap.workspace = true
 rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
