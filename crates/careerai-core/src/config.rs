@@ -137,14 +137,13 @@ pub struct McpSourceConfig {
     /// avoid downstream confusion.
     #[serde(default)]
     pub submit_enabled: bool,
-    /// Optional cron expression for this MCP source. Currently parsed
-    /// but **not yet wired** to the scheduler — the daemon picks cron
-    /// expressions exclusively from the global `scheduler.cadence` map,
-    /// keyed by source `name`. To run an MCP source on a custom cron,
-    /// add `scheduler.cadence.<name>: "<cron>"` in `config/local.yaml`.
-    /// This field is preserved for forward-compatibility; it will
-    /// override `scheduler.cadence` once the scheduler crate learns to
-    /// read it. Tracked as a follow-up in the PR-19 review.
+    /// Optional per-source cron expression. When set, the scheduler
+    /// registers a job for this MCP source on this cadence and the
+    /// override wins over any matching entry in `scheduler.cadence`
+    /// keyed by `name`. When unset, the scheduler falls back to
+    /// `scheduler.cadence.<name>` (and skips the source if that is also
+    /// unset). Wired in `careerai-scheduler::Scheduler::from_config`
+    /// via `effective_cadence`.
     #[serde(default)]
     pub cron: Option<String>,
     /// Soft cap on `tools/call` invocations per minute against this
