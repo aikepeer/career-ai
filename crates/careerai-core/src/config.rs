@@ -133,9 +133,9 @@ pub struct IndeedRssSourceConfig {
     /// is allowed (Indeed returns a generic feed in that case).
     #[serde(default)]
     pub keywords: String,
-    /// Optional location string passed as the `l` parameter. `None`
-    /// (or unset in YAML) omits the parameter entirely so the feed is
-    /// not location-restricted.
+    /// Optional location string passed as the `l` parameter. `None`,
+    /// an unset YAML key, or `Some("")` / an empty string omits the
+    /// parameter entirely so the feed is not location-restricted.
     #[serde(default)]
     pub location: Option<String>,
     /// Optional `fromage` (recency in days) parameter — Indeed accepts
