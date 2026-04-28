@@ -57,7 +57,20 @@ filesystem paths to their resume and LinkedIn data export.
    source**; ToS exposure varies per server and the user must flip
    `enabled: true` themselves. If the user has no `kind: mcp` entries
    configured yet, skip this step silently.
-6. **Print next steps.** Suggest:
+6. **Configure notifications (optional).** If the user wants
+   pings outside the CLI when something needs attention (cookie
+   expiring, source unreachable, high-score match), add a
+   `notify.channels.<slack|telegram|email|ntfy>` block to
+   `config/local.yaml` and verify it via:
+   ```
+   careerai notify test
+   ```
+   The command fires a synthetic `SourceUnreachable` event at
+   `Severity::Info` through every configured channel and exits
+   non-zero if no channels are wired. Skip this step if the
+   user only wants in-terminal output. See
+   `docs/NOTIFICATIONS.md` for the full channel walkthroughs.
+7. **Print next steps.** Suggest:
    - `/career:discover` to pull listings from configured sources
    - `/career:status` to see pipeline counts
    - Edit `config/local.yaml` to tune sources, cadences, and the score

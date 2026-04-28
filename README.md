@@ -175,6 +175,27 @@ Prebuilt binaries for Linux / macOS / Windows are published to
 [GitHub Releases](https://github.com/justdoGIT/career-ai/releases) once
 tagged.
 
+## Notifications
+
+career-ai pings you outside the CLI when something needs human
+attention — cookie expiring within 48h, discovery source unreachable,
+high-score match worth applying same-day, rate-limit window
+exhausted, etc. Configure any subset of these channels under
+`notify.channels` in `config/local.yaml`:
+
+| Channel  | Cost | Setup                                                          |
+|----------|------|----------------------------------------------------------------|
+| Slack    | free | Incoming webhook + `webhook_url_env: CAREERAI_SLACK_WEBHOOK`   |
+| Telegram | free | Bot token in OS keyring + numeric `chat_id`                    |
+| Email    | free | SMTP relay; password in OS keyring                             |
+| ntfy.sh  | free | Random topic name; phone push via the ntfy app                 |
+
+All secrets come from env vars or the OS keyring — inline secrets
+in YAML are intentionally rejected. Run `careerai notify test`
+after editing config to verify each channel end-to-end. See
+[docs/NOTIFICATIONS.md](./docs/NOTIFICATIONS.md) for full setup
+walkthroughs and the event reference (what gets sent when).
+
 ## Safety + legal
 
 LinkedIn and Indeed auto-apply violate their Terms of Service. This tool

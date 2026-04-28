@@ -14,6 +14,7 @@ members = [
     "crates/careerai-scheduler",
     "crates/careerai-pipeline",
     "crates/careerai-mcp",
+    "crates/careerai-notify",
 ]
 
 [workspace.package]

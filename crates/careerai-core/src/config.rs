@@ -30,6 +30,12 @@ pub struct CoreConfig {
     pub sources: SourcesConfig,
     #[serde(default)]
     pub render: RenderConfig,
+    /// Notification pipeline (Slack / Telegram / email / ntfy).
+    /// Defaults to `min_severity = warning` with no channels enabled,
+    /// so a fresh install never tries to talk to an external endpoint
+    /// until the operator configures one.
+    #[serde(default)]
+    pub notify: careerai_notify::NotifyConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,6 +278,17 @@ pub struct MatchConfig {
     /// behavior matches pre-W1 builds).
     #[serde(default)]
     pub must_include_skills: Vec<String>,
+    /// Score threshold above which a shortlisted listing fires a
+    /// `HighScoreMatch` notification through `careerai-notify`. Set
+    /// strictly higher than `score_threshold` so only the most
+    /// promising listings trigger pings — same-day applies tend to
+    /// convert at this band.
+    #[serde(default = "default_match_notify_threshold")]
+    pub notify_threshold: f32,
+}
+
+fn default_match_notify_threshold() -> f32 {
+    0.85
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
