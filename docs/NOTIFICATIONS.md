@@ -164,20 +164,26 @@ career-ai fires the following events. Channels render each one via
 the same `title()` + `summary()` shape; severity controls the
 visual color (Slack), priority (ntfy), and ordering (filter).
 
-| Event                  | Severity         | When fired                                                                                                       |
-|------------------------|------------------|-------------------------------------------------------------------------------------------------------------------|
-| `CookieExpiringSoon`   | warning/critical | `careerai digest` reads LinkedIn `li_at` and finds it within 48h of expiry (warning) or already broken (critical) |
-| `SourceUnreachable`    | warning          | A `Source::discover()` returned an error mid-run (HTTP failure, DNS, schema drift)                                 |
-| `AuthFailureMidRun`    | critical         | A cookie or token-based credential failed inside a discover/submit pass (M5 follow-up)                             |
-| `ManualReviewNeeded`   | warning          | Submitter encountered an unknown form field; operator must review the captured screenshot (M5 follow-up)           |
-| `HighScoreMatch`       | info             | Matcher shortlisted a listing with score ≥ `match.notify_threshold` (default 0.85)                                  |
-| `RateLimitExhausted`   | warning          | A submit attempt was skipped because the daily cap or quiet-hours window was active                                 |
-| `ApplicationResponded` | info             | M7 (future) — application got a recruiter / ATS response                                                          |
+| Event                  | Severity         | When fired                                                                                                                  | Wired in |
+|------------------------|------------------|------------------------------------------------------------------------------------------------------------------------------|----------|
+| `CookieExpiringSoon`   | warning/critical | `careerai digest` reads LinkedIn `li_at` and finds it within 48h of expiry (warning) or already broken (critical)            | this PR  |
+| `SourceUnreachable`    | warning          | A `Source::discover()` returned an error mid-run (HTTP failure, DNS, schema drift)                                            | follow-up |
+| `AuthFailureMidRun`    | critical         | A cookie or token-based credential failed inside a discover/submit pass                                                       | follow-up |
+| `ManualReviewNeeded`   | warning          | Submitter encountered an unknown form field; operator must review the captured screenshot                                     | follow-up |
+| `HighScoreMatch`       | info             | Matcher shortlisted a listing with score ≥ `match.notify_threshold` (default 0.85)                                             | follow-up |
+| `RateLimitExhausted`   | warning          | A submit attempt was skipped because the daily cap or quiet-hours window was active                                            | follow-up |
+| `ApplicationResponded` | info             | M7 (future) — application got a recruiter / ATS response                                                                     | M7       |
 
-The default `min_severity` is `warning`, so only `HighScoreMatch`
-and `ApplicationResponded` are silently dropped on a fresh
-install — bump to `info` to see those, or to `critical` to see
-only blocking events.
+> **Status:** event variants and channel implementations are
+> complete in this PR; the integration call sites for everything
+> except `CookieExpiringSoon` are deferred to a follow-up so the
+> M5 browser submit path stays untouched. `careerai notify test`
+> exercises the channel layer end-to-end today.
+
+The default `min_severity` is `warning`, so `HighScoreMatch` and
+`ApplicationResponded` (both `info`) will be silently dropped on a
+fresh install once they are wired — bump to `info` to see those,
+or to `critical` to see only blocking events.
 
 ## Severities
 

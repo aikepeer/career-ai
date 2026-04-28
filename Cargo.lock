@@ -445,7 +445,6 @@ dependencies = [
  "careerai-db",
  "careerai-llm",
  "careerai-match",
- "careerai-notify",
  "careerai-profile",
  "careerai-render",
  "careerai-sources",
