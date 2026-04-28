@@ -222,6 +222,7 @@ fn apply_filter_params(filters: &LinkedinBrowserFilters, out: &mut Vec<(String, 
 /// Minimal application/x-www-form-urlencoded encoder. Only space and
 /// the URL-reserved chars need escaping for LinkedIn's search params.
 pub fn urlencode(s: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         let safe = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~');
@@ -230,7 +231,8 @@ pub fn urlencode(s: &str) -> String {
         } else if b == b' ' {
             out.push('+');
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            // write! into a String never errors; ignore the Result.
+            let _ = write!(out, "%{b:02X}");
         }
     }
     out

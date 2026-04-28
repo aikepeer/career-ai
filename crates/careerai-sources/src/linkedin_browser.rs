@@ -91,7 +91,7 @@ fn get_rate_limiter(rate_per_minute: u32) -> Option<Arc<ReadRateLimiter>> {
     }
     let rl = NonZeroU32::new(rate_per_minute)
         .map(|n| Arc::new(RateLimiter::direct(Quota::per_minute(n))));
-    *guard = rl.clone();
+    guard.clone_from(&rl);
     rl
 }
 
@@ -107,7 +107,7 @@ impl LinkedinBrowserSource {
         // Drop unknown experience levels at construction so the URL
         // builder never emits them. Logged once so an operator typo
         // is visible in startup output.
-        let mut sanitized = cfg.clone();
+        let mut sanitized = cfg;
         sanitized.filters.experience_level.retain(|lvl| {
             let lvl_lc = lvl.to_ascii_lowercase();
             let known = KNOWN_EXPERIENCE_LEVELS

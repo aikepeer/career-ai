@@ -67,7 +67,7 @@ fn every_listing_has_required_fields() {
 fn external_ids_are_unique() {
     let listings = parse_search_html(FIXTURE_HTML);
     let mut ids: Vec<&str> = listings.iter().map(|l| l.external_id.as_str()).collect();
-    ids.sort();
+    ids.sort_unstable();
     let total = ids.len();
     ids.dedup();
     assert_eq!(
