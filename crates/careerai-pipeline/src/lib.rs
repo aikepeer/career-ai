@@ -391,13 +391,22 @@ fn fixtures_dir(root: &Path) -> PathBuf {
     )
 }
 
+/// Returns true when the caller has opted in to a live LLM backend via
+/// `CAREERAI_LLM_LIVE=1`. Any other value (including unset) means use
+/// fixtures. Centralized so the gate logic is unit-testable without
+/// spinning up a DB.
+fn live_llm_opt_in() -> bool {
+    std::env::var("CAREERAI_LLM_LIVE").ok().as_deref() == Some("1")
+}
+
 /// Tailor a shortlisted listing into an application row + persisted payload.
 ///
-/// Backend selection: when either `live-llm-cli` or `live-llm-api` is on
-/// (default), `careerai_llm::Backend::resolve` picks between the
-/// `claude` CLI subprocess and the rig-core Anthropic API per
-/// `cfg.llm.backend`. Without any live feature, falls back to the
-/// `MockLlm` fixtures dir at `CAREERAI_LLM_FIXTURES_DIR`.
+/// Backend selection: `CAREERAI_LLM_LIVE=1` opts in to a live backend
+/// (`Backend::resolve` picks CLI vs API per `cfg.llm.backend`). Without
+/// the env var, falls back to the `MockLlm` fixtures dir at
+/// `CAREERAI_LLM_FIXTURES_DIR` (default `<root>/data/cache/llm/fixtures`)
+/// — this keeps integration tests deterministic even on dev boxes with
+/// a real `claude` install or `ANTHROPIC_API_KEY`.
 pub async fn tailor_one(
     root: &Path,
     cfg: &CoreConfig,
@@ -430,40 +439,52 @@ pub async fn tailor_one(
         "tailoring listing"
     );
 
-    // Try the live backend first when at least one live feature is on.
-    // The branch picks ClaudeCli vs Api per `cfg.llm.backend` (default
-    // Auto -> CLI when reachable, else API).
+    // Backend selection rules:
+    //
+    // * `CAREERAI_LLM_LIVE=1` → resolve a live backend (CLI or API per
+    //   `cfg.llm.backend`). Falls back to fixtures only on resolve error.
+    // * Unset → use `MockLlm::from_dir(<fixtures>)` deterministically.
+    //   This keeps integration tests (e.g. `tailor_render_it.rs`) on a
+    //   fixed code path even on dev boxes that have an authed `claude`
+    //   binary or a populated `ANTHROPIC_API_KEY`.
+    //
+    // The env var is the historical contract; the previous revision
+    // dropped it and made every call attempt a live resolve, which
+    // caused flaky integration runs on machines with `claude` on PATH.
     #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
     {
-        use std::sync::Arc;
-        let cache_root = if cfg.llm.cache_dir.is_empty() {
-            root.join("data").join("cache").join("llm")
-        } else {
-            let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
-            if p.is_absolute() {
-                p
+        if live_llm_opt_in() {
+            use std::sync::Arc;
+            let cache_root = if cfg.llm.cache_dir.is_empty() {
+                root.join("data").join("cache").join("llm")
             } else {
-                root.join(p)
-            }
-        };
-        let cache = Arc::new(careerai_llm::Cache::new(cache_root));
-        match careerai_llm::Backend::resolve(cfg.llm.backend, &cfg.llm, cache).await {
-            Ok(backend) => {
-                let outcome = tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm)
-                    .await
-                    .context("tailor_for_listing")?;
-                return Ok(TailoredOutcome {
-                    application_id: outcome.application_id,
-                    listing_title: listing.title,
-                    company: listing.company,
-                });
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target = "tailor",
-                    error = %e,
-                    "live backend unavailable; falling back to MockLlm fixtures"
-                );
+                let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
+                if p.is_absolute() {
+                    p
+                } else {
+                    root.join(p)
+                }
+            };
+            let cache = Arc::new(careerai_llm::Cache::new(cache_root));
+            match careerai_llm::Backend::resolve(cfg.llm.backend, &cfg.llm, cache).await {
+                Ok(backend) => {
+                    let outcome =
+                        tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm)
+                            .await
+                            .context("tailor_for_listing")?;
+                    return Ok(TailoredOutcome {
+                        application_id: outcome.application_id,
+                        listing_title: listing.title,
+                        company: listing.company,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target = "tailor",
+                        error = %e,
+                        "live backend unavailable; falling back to MockLlm fixtures"
+                    );
+                }
             }
         }
     }
@@ -471,8 +492,9 @@ pub async fn tailor_one(
     let fixtures = fixtures_dir(root);
     if !fixtures.is_dir() {
         anyhow::bail!(
-            "no LLM fixtures at {}; either set CAREERAI_LLM_FIXTURES_DIR or enable \
-             a live backend (`--features live-llm-cli` or `--features live-llm-api`)",
+            "no LLM fixtures at {}; either set CAREERAI_LLM_LIVE=1 (with a live \
+             backend compiled in) or provide fixtures via CAREERAI_LLM_FIXTURES_DIR \
+             / `<root>/data/cache/llm/fixtures/`",
             fixtures.display()
         );
     }
@@ -959,4 +981,38 @@ pub async fn digest_summary(root: &Path, since: chrono::Duration) -> Result<Dige
     report.last_tick = last.and_then(|(s,)| if s.is_empty() { None } else { Some(s) });
 
     Ok(report)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    /// Serialize the env-var mutations in this module's tests so parallel
+    /// cargo-test threads can't race on `CAREERAI_LLM_LIVE`.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Regression for the `tailor_one` live-call gate. The helper must
+    /// return `true` only for the literal value "1"; any other value
+    /// (or absence) means use the `MockLlm` fixtures path. Without this
+    /// gate, `tailor_one` made nondeterministic live calls on dev boxes
+    /// with an authed `claude` binary, breaking `tailor_render_it.rs`.
+    #[test]
+    fn live_llm_opt_in_true_only_for_literal_one() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev = std::env::var("CAREERAI_LLM_LIVE").ok();
+        std::env::set_var("CAREERAI_LLM_LIVE", "1");
+        assert!(live_llm_opt_in(), "literal '1' must opt in");
+        std::env::set_var("CAREERAI_LLM_LIVE", "true");
+        assert!(!live_llm_opt_in(), "'true' must NOT opt in (only '1')");
+        std::env::set_var("CAREERAI_LLM_LIVE", "");
+        assert!(!live_llm_opt_in(), "empty must NOT opt in");
+        std::env::remove_var("CAREERAI_LLM_LIVE");
+        assert!(!live_llm_opt_in(), "unset must NOT opt in");
+        if let Some(v) = prev {
+            std::env::set_var("CAREERAI_LLM_LIVE", v);
+        }
+    }
 }
