@@ -32,8 +32,8 @@ use careerai_match::{
 use careerai_profile::Profile;
 use careerai_render::render_application;
 use careerai_sources::{
-    GreenhouseSource, LeverSource, McpJobsSource, NaukriSource, RawListing, RemoteOkSource,
-    RemotiveSource, Source,
+    GreenhouseSource, IndeedRssSource, LeverSource, McpJobsSource, NaukriSource, RawListing,
+    RemoteOkSource, RemotiveSource, Source,
 };
 use careerai_tailor::model::{CoverLetter, ResumeView};
 use careerai_tailor::tailor_for_listing;
@@ -76,6 +76,11 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
             s = s.with_max_results(n);
         }
         out.push(Arc::new(s));
+    }
+    if cfg.sources.indeed_rss.enabled {
+        out.push(Arc::new(IndeedRssSource::new(
+            cfg.sources.indeed_rss.clone(),
+        )));
     }
     for mcp_cfg in &cfg.sources.mcp {
         if !mcp_cfg.enabled {

@@ -120,7 +120,14 @@ impl Scheduler {
         async move {
             let inner = JobScheduler::new().await?;
 
-            if cfg_clone.scheduler.cadence.is_empty() {
+            // Build the effective per-source cron map: start from
+            // `scheduler.cadence`, then let each enabled `sources.mcp[*]`
+            // entry with a `cron` field override its name's entry. This
+            // closes the PR-19 follow-up that flagged
+            // `McpSourceConfig.cron` as parsed but unused.
+            let cadence = effective_cadence(&cfg_clone);
+
+            if cadence.is_empty() {
                 warn!("scheduler.cadence is empty — daemon will idle with no jobs");
             }
 
@@ -134,7 +141,7 @@ impl Scheduler {
 
             // Sort to keep startup logs deterministic across runs (HashMap is
             // not ordered). Helps a lot when diffing daemon logs in CI / local.
-            let mut entries: Vec<(&String, &String)> = cfg.scheduler.cadence.iter().collect();
+            let mut entries: Vec<(&String, &String)> = cadence.iter().collect();
             entries.sort_by(|a, b| a.0.cmp(b.0));
 
             for (source_name, cron_expr) in entries {
@@ -414,6 +421,60 @@ fn build_submit_job(
     })
 }
 
+/// Compose the effective per-source cron map from `cfg.scheduler.cadence`
+/// plus per-source overrides on enabled `sources.mcp[*]` entries.
+///
+/// Resolution order, highest priority last:
+///   1. `cfg.scheduler.cadence.<name>` — global cadence map.
+///   2. `cfg.sources.mcp[name=<name>].cron` (when enabled and `Some`) —
+///      per-source override.
+///
+/// Disabled MCP sources (`enabled: false`) are ignored entirely **and any
+/// matching `scheduler.cadence` entry is removed** before per-source
+/// overrides are applied. That way flipping `enabled: false` on an MCP
+/// source can never accidentally leave a stale global cadence active —
+/// disabling an MCP cancels its cron unconditionally. ATS sources have no
+/// per-source `cron` field today; if that ever lands, extend this helper
+/// rather than the caller.
+fn effective_cadence(cfg: &CoreConfig) -> std::collections::HashMap<String, String> {
+    let mut cadence: std::collections::HashMap<String, String> = cfg.scheduler.cadence.clone();
+    // First pass: drop cadence entries for disabled MCP sources so a stale
+    // `scheduler.cadence` value cannot survive `enabled: false`.
+    for mcp in &cfg.sources.mcp {
+        if !mcp.enabled && cadence.remove(&mcp.name).is_some() {
+            info!(
+                source = %mcp.name,
+                "disabled mcp source removed stale scheduler.cadence entry",
+            );
+        }
+    }
+    // Second pass: apply per-source cron overrides for enabled MCP sources.
+    for mcp in &cfg.sources.mcp {
+        if !mcp.enabled {
+            continue;
+        }
+        if let Some(cron_expr) = &mcp.cron {
+            if let Some(prev) = cadence.insert(mcp.name.clone(), cron_expr.clone()) {
+                if &prev != cron_expr {
+                    info!(
+                        source = %mcp.name,
+                        global = %prev,
+                        per_source = %cron_expr,
+                        "mcp source cron overrides scheduler.cadence",
+                    );
+                }
+            } else {
+                info!(
+                    source = %mcp.name,
+                    cron = %cron_expr,
+                    "mcp source cron registered (no cadence entry)",
+                );
+            }
+        }
+    }
+    cadence
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -478,5 +539,133 @@ mod tests {
         sched.start().await.unwrap();
         // Use the public shutdown API — same path `run_until_shutdown` uses.
         sched.shutdown().await.expect("shutdown should not error");
+    }
+
+    /// Helper: minimal enabled MCP source with the given name + cron.
+    fn mcp_source_with_cron(
+        name: &str,
+        cron: Option<&str>,
+    ) -> careerai_core::config::McpSourceConfig {
+        careerai_core::config::McpSourceConfig {
+            name: name.to_owned(),
+            enabled: true,
+            submit_enabled: false,
+            cron: cron.map(str::to_owned),
+            rate_per_minute: 0,
+            mcp: careerai_core::config::McpTransportConfig {
+                command: "/bin/true".to_owned(),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn effective_cadence_uses_mcp_per_source_cron_when_set() {
+        let (_tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.sources.mcp.clear();
+        cfg.sources
+            .mcp
+            .push(mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *")));
+
+        let cadence = effective_cadence(&cfg);
+        assert_eq!(
+            cadence.get("linkedin-mcp").map(String::as_str),
+            Some("0 */2 * * * *"),
+            "per-source cron must register when no global cadence entry exists",
+        );
+    }
+
+    #[test]
+    fn effective_cadence_per_source_cron_overrides_global() {
+        let (_tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.scheduler
+            .cadence
+            .insert("linkedin-mcp".into(), "0 0 */1 * * *".into());
+        cfg.sources.mcp.clear();
+        cfg.sources
+            .mcp
+            .push(mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *")));
+
+        let cadence = effective_cadence(&cfg);
+        assert_eq!(
+            cadence.get("linkedin-mcp").map(String::as_str),
+            Some("0 */2 * * * *"),
+            "per-source cron must beat the global cadence entry",
+        );
+    }
+
+    #[test]
+    fn effective_cadence_falls_back_to_cadence_map_when_cron_unset() {
+        let (_tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.scheduler
+            .cadence
+            .insert("linkedin-mcp".into(), "0 0 */1 * * *".into());
+        cfg.sources.mcp.clear();
+        cfg.sources
+            .mcp
+            .push(mcp_source_with_cron("linkedin-mcp", None));
+
+        let cadence = effective_cadence(&cfg);
+        assert_eq!(
+            cadence.get("linkedin-mcp").map(String::as_str),
+            Some("0 0 */1 * * *"),
+            "with no per-source cron, the global cadence wins",
+        );
+    }
+
+    #[test]
+    fn effective_cadence_skips_disabled_mcp_sources() {
+        let (_tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.sources.mcp.clear();
+        let mut s = mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *"));
+        s.enabled = false;
+        cfg.sources.mcp.push(s);
+
+        let cadence = effective_cadence(&cfg);
+        assert!(
+            cadence.is_empty(),
+            "disabled mcp source must not register a cron entry",
+        );
+    }
+
+    #[test]
+    fn disabled_mcp_removes_global_cadence_entry() {
+        // Regression: a disabled MCP source must drop any matching
+        // `scheduler.cadence` entry, not just skip its own per-source cron.
+        // Previously a flipped-off MCP could leave a stale global cron alive.
+        let (_tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.scheduler
+            .cadence
+            .insert("linkedin-jobs".into(), "0 */6 * * *".into());
+        cfg.sources.mcp.clear();
+        let mut s = mcp_source_with_cron("linkedin-jobs", None);
+        s.enabled = false;
+        cfg.sources.mcp.push(s);
+
+        let cadence = effective_cadence(&cfg);
+        assert!(
+            !cadence.contains_key("linkedin-jobs"),
+            "disabled mcp source must drop the matching scheduler.cadence entry",
+        );
+    }
+
+    #[tokio::test]
+    async fn from_config_registers_mcp_per_source_cron() {
+        // End-to-end check: per-source cron flows all the way into
+        // `Scheduler::from_config` and the scheduler builds cleanly.
+        let (tmp, mut cfg) = embedded_cfg();
+        cfg.scheduler.cadence.clear();
+        cfg.sources.mcp.clear();
+        cfg.sources
+            .mcp
+            .push(mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *")));
+
+        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
+        assert!(sched.is_ok(), "mcp per-source cron must register cleanly");
     }
 }

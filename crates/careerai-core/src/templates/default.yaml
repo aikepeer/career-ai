@@ -149,6 +149,18 @@ sources:
       - "robotics"
     location: "Delhi / NCR"
     max_results: 20
+  # Indeed public RSS feed. ToS-clean and stable — no auth, light rate
+  # limits, plain XML. One query (keywords + optional location +
+  # recency window). Disabled by default; flip `enabled: true` to opt
+  # in. The cron cadence for this source is read from
+  # `scheduler.cadence.indeed_rss` below; add an entry like
+  # `indeed_rss: "0 */6 * * * *"` to the cadence map to schedule it.
+  indeed_rss:
+    enabled: false
+    keywords: "AI engineer remote"
+    location: ""
+    fromage: 7                 # last 7 days
+    rate_per_minute: 4
   # Community / third-party Model-Context-Protocol servers used as
   # discovery sources. Each entry spawns a stdio MCP server (the same
   # way Claude itself spawns one), runs `tools/list`, and invokes the

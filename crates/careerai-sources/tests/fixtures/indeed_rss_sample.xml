@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Indeed Job Search</title>
+    <link>https://www.indeed.com/</link>
+    <description>jobs - Indeed.com</description>
+    <language>en-us</language>
+    <item>
+      <title>Senior AI Engineer - Acme Robotics - Remote</title>
+      <link>https://www.indeed.com/viewjob?jk=abc123</link>
+      <description><![CDATA[<p>Build LLM agents at scale. Rust + Python.</p><ul><li>5+ yrs experience</li></ul>]]></description>
+      <pubDate>Mon, 14 Apr 2025 09:30:00 GMT</pubDate>
+      <guid isPermaLink="false">abc123-stable-guid</guid>
+      <source url="https://www.indeed.com/">Indeed</source>
+    </item>
+    <item>
+      <title>Robotics Software Engineer - Beta Labs - Bengaluru, KA</title>
+      <link>https://www.indeed.com/viewjob?jk=def456</link>
+      <description><![CDATA[<p>ROS2, embedded Linux, motion planning.</p>]]></description>
+      <pubDate>Tue, 15 Apr 2025 14:00:00 GMT</pubDate>
+      <source url="https://www.indeed.com/">Indeed</source>
+    </item>
+  </channel>
+</rss>
