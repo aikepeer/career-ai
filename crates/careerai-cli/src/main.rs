@@ -520,8 +520,14 @@ async fn run_notify_test(cfg: &CoreConfig) -> Result<()> {
         );
         std::process::exit(2);
     }
+    // Fire at the configured `min_severity` so the test event is never
+    // silently dropped by the pipeline filter. Default `min_severity`
+    // is `Warning`, so an `Info` test event would never reach any
+    // channel and the operator would (rightly) believe the wiring is
+    // broken.
+    let severity = cfg.notify.min_severity;
     println!(
-        "firing test notification through {count} channel(s): {:?}",
+        "firing test notification ({severity:?}) through {count} channel(s): {:?}",
         pipe.channel_names()
     );
     pipe.fire(
@@ -529,7 +535,7 @@ async fn run_notify_test(cfg: &CoreConfig) -> Result<()> {
             source: "test".to_string(),
             reason: "manual test via `careerai notify test`".to_string(),
         },
-        careerai_notify::Severity::Info,
+        severity,
     )
     .await;
     println!("done. Check each channel's destination — failures are logged at WARN.");

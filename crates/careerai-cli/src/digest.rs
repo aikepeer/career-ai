@@ -95,10 +95,12 @@ fn cookie_event_for(provider: &str, health: &CookieHealth) -> Option<(NotifyEven
         CookieHealth::Healthy(_) => None,
         CookieHealth::ExpiringSoon(remaining) => {
             // Round up so a remaining < 1h still surfaces a non-zero
-            // hour count to the operator. `num_hours` returns `i64`;
-            // negative values are impossible here (ExpiringSoon means
-            // strictly positive) but clamp defensively before casting.
-            let hours_left = u64::try_from(remaining.num_hours().max(1)).unwrap_or(0);
+            // hour count. Clamp to >= 1 before the cast so the
+            // operator never sees a misleading "0h left" warning. The
+            // earlier `unwrap_or(0)` defeated the clamp — pin that
+            // contract with `unwrap_or(1)` so any future cast slip
+            // still respects the floor.
+            let hours_left = u64::try_from(remaining.num_hours().max(1)).unwrap_or(1);
             Some((
                 NotifyEvent::CookieExpiringSoon {
                     provider: provider.to_string(),
@@ -292,5 +294,33 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("unparseable"));
         assert!(warnings[0].contains("careerai cookies refresh linkedin"));
+    }
+
+    #[test]
+    fn cookie_event_maps_health_to_severity() {
+        // Healthy → no event.
+        assert!(cookie_event_for("linkedin", &CookieHealth::Healthy(Duration::hours(96))).is_none());
+        // ExpiringSoon → Warning, hours_left clamped to >= 1.
+        let (_, sev) =
+            cookie_event_for("linkedin", &CookieHealth::ExpiringSoon(Duration::hours(3))).unwrap();
+        assert_eq!(sev, Severity::Warning);
+        // Sub-hour remaining must still surface as a non-zero hour
+        // count so the alert reads "1h left" rather than "0h left".
+        let (event_under_1h, _) =
+            cookie_event_for("linkedin", &CookieHealth::ExpiringSoon(Duration::minutes(20)))
+                .unwrap();
+        match event_under_1h {
+            NotifyEvent::CookieExpiringSoon { hours_left, .. } => assert_eq!(hours_left, 1),
+            _ => panic!("expected CookieExpiringSoon"),
+        }
+        // Expired / NotStored / Unparseable → Critical.
+        for h in [
+            CookieHealth::Expired(Duration::hours(1)),
+            CookieHealth::NotStored,
+            CookieHealth::Unparseable,
+        ] {
+            let (_, sev) = cookie_event_for("linkedin", &h).unwrap();
+            assert_eq!(sev, Severity::Critical, "wrong severity for {h:?}");
+        }
     }
 }
