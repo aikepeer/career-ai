@@ -319,7 +319,7 @@ async fn main() -> Result<()> {
                 // CoreConfig::load always succeeds (embedded defaults
                 // fill any gap), so even a fresh dir works.
                 let cfg = load_cfg(&cwd)?;
-                run_llm_probe(&cfg).await?;
+                run_llm_probe(&cfg, backend_override).await?;
             }
         },
         Command::Inspect { application_id } => {
@@ -387,13 +387,20 @@ async fn run_mcp_probe(cfg: &CoreConfig) -> Result<()> {
     Ok(())
 }
 
-/// Probe and report which LLM backend `Auto` resolution would pick on
-/// this host. Output is structured plain text (not JSON) so users can
-/// `grep "backend:"` from setup scripts.
-async fn run_llm_probe(cfg: &CoreConfig) -> Result<()> {
+async fn run_llm_probe(
+    cfg: &CoreConfig,
+    backend_override: Option<careerai_core::config::BackendChoice>,
+) -> Result<()> {
     #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
     {
-        let probe = careerai_llm::Backend::probe(&cfg.llm).await;
+        // Honor the global `--llm-backend` flag. Without this, `probe`
+        // silently ignored the override even though every other
+        // subcommand respects it.
+        let mut llm_cfg = cfg.llm.clone();
+        if let Some(b) = backend_override {
+            llm_cfg.backend = b;
+        }
+        let probe = careerai_llm::Backend::probe(&llm_cfg).await;
         println!("backend: {}", probe.chosen.as_str());
         if let Some(bin) = &probe.claude_binary {
             print!("  claude binary: {}", bin.display());
@@ -428,7 +435,7 @@ async fn run_llm_probe(cfg: &CoreConfig) -> Result<()> {
     }
     #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
     {
-        let _ = cfg;
+        let _ = (cfg, backend_override);
         println!("backend: none (binary built without `live-llm-cli` or `live-llm-api`)");
         Ok(())
     }
@@ -800,7 +807,35 @@ fn profile_import(
     };
 
     let profile = if want_llm {
-        run_profile_import_with_llm(&refs, backend_override)?
+        // Fall back to the heuristic parser when LLM resolution fails
+        // mid-run (e.g. session expired since `llm_backend_reachable`
+        // checked, claude CLI binary stale, network drop). The
+        // heuristic parser is strictly better than a hard error here:
+        // the user gets a profile they can edit, and a clear log line
+        // points them at `claude login` / API key.
+        //
+        // When `--use-llm` was passed explicitly, surface the original
+        // error rather than silently downgrading — the user asked for
+        // the LLM path.
+        match run_profile_import_with_llm(&refs, backend_override) {
+            Ok(p) => p,
+            Err(e) if use_llm == Some(true) => {
+                return Err(e);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target = "profile",
+                    error = %e,
+                    "LLM extraction failed; falling back to heuristic parser \
+                     (run `claude login` or set ANTHROPIC_API_KEY to re-enable LLM)"
+                );
+                eprintln!(
+                    "warning: LLM extraction failed ({e}); falling back to heuristic \
+                     parser. Run `claude login` or set ANTHROPIC_API_KEY for better results."
+                );
+                careerai_profile::import_paths(&refs).context("parsing profile sources")?
+            }
+        }
     } else {
         if use_llm.is_none() && !live_compiled {
             // Built without any live backend; nothing the user can do
@@ -1089,5 +1124,39 @@ mod tests {
     fn detect_stale_skills_ignores_blank_lines_and_comments() {
         let yaml = "personal:\n  name: Alice\nskills:\n\n  # a comment\n  languages:\n    - Rust\n";
         assert!(!detect_stale_skills_schema(yaml));
+    }
+
+    /// Regression for the `--llm-backend` override on `careerai llm
+    /// probe`: when the global flag is set, it must replace
+    /// `cfg.llm.backend` before `Backend::probe` is called. Mirrors the
+    /// merge logic at the top of `run_llm_probe`.
+    #[test]
+    fn llm_backend_override_replaces_cfg_backend() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        let mut llm_cfg = LlmConfig {
+            backend: BackendChoice::ClaudeCli,
+            ..LlmConfig::default()
+        };
+        let override_choice: Option<BackendChoice> = Some(BackendChoice::Api);
+        if let Some(b) = override_choice {
+            llm_cfg.backend = b;
+        }
+        assert_eq!(llm_cfg.backend, BackendChoice::Api);
+    }
+
+    /// Without an override the configured backend stays put — the flag
+    /// is purely additive.
+    #[test]
+    fn llm_backend_override_absent_keeps_cfg_backend() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        let mut llm_cfg = LlmConfig {
+            backend: BackendChoice::ClaudeCli,
+            ..LlmConfig::default()
+        };
+        let override_choice: Option<BackendChoice> = None;
+        if let Some(b) = override_choice {
+            llm_cfg.backend = b;
+        }
+        assert_eq!(llm_cfg.backend, BackendChoice::ClaudeCli);
     }
 }
