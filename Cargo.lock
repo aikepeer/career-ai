@@ -519,6 +519,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "careerai-core",
+ "careerai-submit",
+ "chromiumoxide",
  "chrono",
  "governor",
  "hex",
@@ -528,6 +530,7 @@ dependencies = [
  "reqwest",
  "rmcp",
  "schemars 1.2.1",
+ "scraper",
  "serde",
  "serde_json",
  "serde_yaml",

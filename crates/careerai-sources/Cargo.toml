@@ -9,6 +9,15 @@ description = "Job-board discovery adapters behind a unified Source trait"
 
 [dependencies]
 careerai-core = { path = "../careerai-core" }
+# Optional dep — only pulled in when the `browser` feature is on.
+# Sources do not call submission logic; this dep is *purely* for
+# `BrowserSession` + `Credential` reuse so the LinkedIn browser
+# discovery adapter doesn't duplicate the stealth-v2.js / cookie /
+# CDP-launch machinery the M5 submitter already maintains. The
+# crate-boundary rule in CLAUDE.md ("sources never does submission")
+# is preserved at the call-site level: this adapter does NOT call
+# anything from `careerai_submit::base` / `linkedin` / `naukri`.
+careerai-submit = { path = "../careerai-submit", features = ["browser"], optional = true }
 thiserror.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -23,6 +32,16 @@ tokio = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 governor.workspace = true
 quick-xml.workspace = true
+chromiumoxide = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enables the LinkedIn browser-driven discovery adapter. Pulls in
+# `careerai-submit` for `BrowserSession` + `Credential` reuse and
+# `chromiumoxide` for the CDP element-handle API used to scrape
+# search-result cards. CI default is off; the workspace `--features
+# browser` build (driven from `careerai-cli`) opts in.
+browser = ["dep:careerai-submit", "dep:chromiumoxide"]
 
 [dev-dependencies]
 wiremock.workspace = true
@@ -31,6 +50,7 @@ serde_yaml.workspace = true
 rmcp = { workspace = true, features = ["client", "server", "macros", "transport-io", "transport-child-process", "transport-async-rw", "schemars"] }
 schemars.workspace = true
 insta.workspace = true
+scraper.workspace = true
 
 # Integration test for the MCP-jobs adapter. `harness = false` so we
 # can hijack `main()` to switch between client-test mode and
