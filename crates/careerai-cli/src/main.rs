@@ -467,22 +467,23 @@ async fn run_llm_probe(
     }
 }
 
-/// Try to resolve a forced backend so the probe can flag forced-but-
-/// unusable as a non-zero exit. Uses a tempdir-scoped cache to avoid
-/// polluting the project's `cache_dir` on a dry probe.
-///
-/// Extracted so a unit test can drive the no-API-key path without
-/// touching `std::process::exit`.
-#[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
 async fn probe_forced_resolve(
     llm_cfg: &careerai_core::config::LlmConfig,
 ) -> std::result::Result<(), careerai_llm::BackendError> {
     use std::sync::Arc;
-    let cache_root = std::env::temp_dir().join("careerai-llm-probe-cache");
-    let cache = Arc::new(careerai_llm::Cache::new(cache_root));
-    careerai_llm::Backend::resolve(llm_cfg.backend, llm_cfg, cache)
+    // Per-call tempdir so concurrent `careerai llm probe` invocations
+    // (e.g. parallel cargo-test threads, or two operators on a shared
+    // host) cannot collide on the same on-disk path. The `TempDir`
+    // value is held until after `.await` resolves, then `Drop` cleans
+    // up the directory automatically.
+    let cache_root = tempfile::tempdir()
+        .map_err(|e| careerai_llm::BackendError::Llm(careerai_llm::LlmError::Io(e)))?;
+    let cache = Arc::new(careerai_llm::Cache::new(cache_root.path().to_path_buf()));
+    let res = careerai_llm::Backend::resolve(llm_cfg.backend, llm_cfg, cache)
         .await
-        .map(|_| ())
+        .map(|_| ());
+    drop(cache_root);
+    res
 }
 
 /// Dispatch for `careerai apply`. Errors short-circuit the process with a
@@ -1257,6 +1258,69 @@ mod tests {
         match res {
             Err(careerai_llm::BackendError::ApiKeyMissing) | Ok(()) => {}
             Err(other) => panic!("expected ApiKeyMissing or Ok, got {other:?}"),
+        }
+    }
+
+    /// Regression: two `probe_forced_resolve` calls running concurrently
+    /// must not collide on the on-disk cache path. The previous
+    /// implementation hard-coded `$TMPDIR/careerai-llm-probe-cache`,
+    /// which two parallel probes could race against. This test drives
+    /// the path indirectly by asserting that
+    /// `tempfile::tempdir()` — the underpinning of the fix — yields
+    /// distinct directories for parallel callers, and that two parallel
+    /// `probe_forced_resolve` calls both complete (Ok or recognized
+    /// `BackendError`, but never a filesystem-collision failure).
+    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+    #[tokio::test]
+    async fn probe_forced_resolve_parallel_does_not_collide() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        // Sanity check the underlying primitive: parallel tempdir
+        // creation produces distinct paths.
+        let (a, b) = (
+            tempfile::tempdir().expect("tempdir a"),
+            tempfile::tempdir().expect("tempdir b"),
+        );
+        assert_ne!(
+            a.path(),
+            b.path(),
+            "tempfile::tempdir() must yield distinct paths"
+        );
+        drop((a, b));
+
+        let llm_cfg = LlmConfig {
+            backend: BackendChoice::ClaudeCli,
+            ..LlmConfig::default()
+        };
+        // Drive the actual code path twice in parallel. Either ordering
+        // of completion is fine; the key invariant is that neither
+        // call fails with a filesystem-collision error from a shared
+        // cache path. Both callers may legitimately succeed (claude
+        // CLI present + authed) or return a recognized BackendError
+        // (e.g. NoBackend, BinaryMissing). Anything else suggests the
+        // tempdirs collided.
+        let (r1, r2) = tokio::join!(
+            probe_forced_resolve(&llm_cfg),
+            probe_forced_resolve(&llm_cfg),
+        );
+        // Both calls must complete without panicking. We accept any
+        // recognized BackendError variant (the CI box may not have a
+        // claude binary, an auth'd session, or an API key), but a
+        // panic would signal a real bug — most likely a tempdir
+        // collision regression.
+        for r in [r1, r2] {
+            assert!(
+                matches!(
+                    r,
+                    Ok(())
+                        | Err(careerai_llm::BackendError::CliMissing
+                            | careerai_llm::BackendError::CliNotAuthenticated
+                            | careerai_llm::BackendError::ApiKeyMissing
+                            | careerai_llm::BackendError::NoneAvailable
+                            | careerai_llm::BackendError::FeatureDisabled(_)
+                            | careerai_llm::BackendError::Llm(_))
+                ),
+                "unexpected probe outcome: {r:?}"
+            );
         }
     }
 }

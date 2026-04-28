@@ -91,21 +91,37 @@ pub enum BackendError {
 /// without actually constructing the driver. Useful for `careerai llm
 /// probe` and the plugin setup script.
 ///
-/// `chosen` always reflects what `Backend::resolve` *would* hand back
-/// for the same `cfg.backend`. `forced` records the operator's override
-/// (from `--llm-backend` / `cfg.llm.backend`) so the CLI can flag when
-/// a forced choice is unusable (e.g. `--llm-backend=api` with no key).
-/// When `forced.is_some()` and `forced != Some(chosen)`, the override
-/// will fail to resolve — the CLI surfaces this as a non-zero exit.
+/// `chosen` and `forced` are computed independently — do not infer one
+/// from the other:
+///
+/// * `chosen` reflects strictly what `Backend::resolve(Auto, ...)` would
+///   return on this host: claude binary on PATH and ping succeeded
+///   (`ClaudeCli`), or an Anthropic API key reachable (`Api`), else
+///   `Auto`. It does NOT consider `cfg.backend`.
+/// * `forced` records the operator's override from `cfg.backend` (set
+///   via `--llm-backend` or `cfg.llm.backend`). Independent of
+///   `chosen`; may or may not match.
+///
+/// The two fields can legitimately disagree without implying the
+/// override is broken. For example, with `forced = Some(Api)` and
+/// `chosen = ClaudeCli`, auto-detection would pick the CLI, but the
+/// operator forced API; that path can still resolve successfully when
+/// `api_key_present = true`. Whether the override actually works is
+/// answered by calling `Backend::resolve(forced, ...)` — the CLI does
+/// this in `probe_forced_resolve` and surfaces a non-zero exit only
+/// when that resolve errors. Field comparison alone is not sufficient.
 #[derive(Debug, Clone)]
 pub struct BackendProbe {
-    /// What the auto-detector would hand back from `Backend::resolve`.
+    /// What `Backend::resolve(Auto, ...)` would hand back on this host
+    /// (claude binary on PATH + ping ok, or API key reachable).
+    /// Strictly auto-detection — does NOT consider `cfg.backend`.
     /// `Auto` means neither backend is reachable.
     pub chosen: BackendChoice,
-    /// Operator override from `cfg.backend`, if not `Auto`. Tracked
-    /// separately from `chosen` so the CLI can detect forced-but-
-    /// unusable cases (forced API with no key, forced CLI with no
-    /// binary, etc.).
+    /// Operator override from `cfg.backend`, if not `Auto`. Independent
+    /// of `chosen` — may legitimately differ when the operator forces a
+    /// backend that auto-detection would not have picked. Whether the
+    /// override actually resolves is determined by calling
+    /// `Backend::resolve(forced, ...)`, not by comparing fields.
     pub forced: Option<BackendChoice>,
     pub claude_binary: Option<PathBuf>,
     pub claude_version: Option<String>,
