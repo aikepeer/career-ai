@@ -20,6 +20,7 @@ sha2.workspace = true
 hex.workspace = true
 backon.workspace = true
 chrono.workspace = true
+keyring.workspace = true
 # rig-core 0.10 exposes Anthropic and OpenAI providers unconditionally from
 # `rig::providers::{anthropic,openai}` — there are no `anthropic` /
 # `openai` cargo features in the 0.10 line, and no `rig-anthropic` /
@@ -30,13 +31,23 @@ chrono.workspace = true
 # prompt-cache `cache_control` onto content blocks.
 rig-core = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
+which = { workspace = true, optional = true }
+# Used by the claude CLI driver to write system prompts to a 0o600
+# tempfile (PII must not flow through `--append-system-prompt` argv).
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
 
 [features]
-default = []
-live-llm = ["dep:rig-core", "dep:reqwest"]
+default = ["live-llm-cli"]
+# claude CLI subprocess backend — reuses the user's logged-in Claude
+# Code session. No ANTHROPIC_API_KEY required.
+live-llm-cli = ["dep:which", "dep:tempfile"]
+# rig-core / Anthropic API backend — requires ANTHROPIC_API_KEY.
+live-llm-api = ["dep:rig-core", "dep:reqwest"]
+# Back-compat umbrella alias; equivalent to enabling both backends.
+live-llm = ["live-llm-cli", "live-llm-api"]
 
 [lints]
 workspace = true

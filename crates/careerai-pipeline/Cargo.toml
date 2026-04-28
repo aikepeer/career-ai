@@ -24,8 +24,12 @@ sqlx.workspace = true
 tracing.workspace = true
 
 [features]
-default = []
-live-llm = ["careerai-llm/live-llm"]
+default = ["live-llm-cli"]
+# Granular pass-through into careerai-llm.
+live-llm-cli = ["careerai-llm/live-llm-cli"]
+live-llm-api = ["careerai-llm/live-llm-api"]
+# Back-compat umbrella; flips both backends on.
+live-llm = ["live-llm-cli", "live-llm-api"]
 browser = ["careerai-submit/browser"]
 
 [dev-dependencies]

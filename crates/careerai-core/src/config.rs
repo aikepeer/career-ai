@@ -480,6 +480,50 @@ impl Default for NaukriSubmitConfig {
     }
 }
 
+/// Inference backend selector for the LLM gateway.
+///
+/// `Auto` lets `careerai-llm::Backend::resolve` decide:
+/// 1. `claude` CLI on PATH and authed -> `ClaudeCli`
+/// 2. `ANTHROPIC_API_KEY` reachable (env or keyring) -> `Api`
+/// 3. Else error.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackendChoice {
+    /// Detect at runtime; prefer `claude` CLI over API key.
+    #[default]
+    Auto,
+    /// Force the `claude` CLI subprocess backend.
+    ClaudeCli,
+    /// Force the rig-core / Anthropic API backend (requires
+    /// `ANTHROPIC_API_KEY`).
+    Api,
+}
+
+impl BackendChoice {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ClaudeCli => "claude-cli",
+            Self::Api => "api",
+        }
+    }
+}
+
+impl std::str::FromStr for BackendChoice {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "claude-cli" | "cli" | "claude" => Ok(Self::ClaudeCli),
+            "api" | "anthropic-api" | "rig" => Ok(Self::Api),
+            other => Err(format!(
+                "unknown backend choice `{other}`; expected one of: auto, claude-cli, api"
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LlmConfig {
     #[serde(default)]
@@ -506,6 +550,13 @@ pub struct LlmConfig {
     /// attaches Anthropic prompt-cache metadata to the profile block.
     #[serde(default = "default_anthropic_prompt_cache")]
     pub anthropic_prompt_cache: bool,
+    /// Which inference backend to use: `auto`, `claude-cli`, or `api`.
+    /// Defaults to `auto` — the `careerai-llm` resolver picks the
+    /// `claude` CLI when the binary is reachable + authed, otherwise the
+    /// rig-based API path. Surface a CLI override via
+    /// `--llm-backend=<choice>`.
+    #[serde(default)]
+    pub backend: BackendChoice,
 }
 
 fn default_cache_dir() -> String {

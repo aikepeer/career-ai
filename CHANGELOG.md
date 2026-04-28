@@ -6,6 +6,53 @@ versions don't promise semver yet.
 
 ## [Unreleased]
 
+### Security
+
+- **`careerai-llm::ClaudeCliLlm` no longer leaks profile content to
+  argv** (PR #21 review). The system prompt + profile block (rendered
+  YAML, includes PII) used to ride on `--append-system-prompt <text>`,
+  which made the data visible to any local user via
+  `/proc/<pid>/cmdline` or `ps -ef`. The driver now writes the
+  combined prompt to a 0o600-mode tempfile under
+  `target/.careerai-prompts/` (project-local, `.gitignore`'d) and
+  passes `--append-system-prompt-file <path>`. argv carries only flags
+  + model id. Unit test
+  `claude_cli::tests::stub_binary_does_not_leak_profile_to_argv`
+  asserts the absence regression.
+
+### Changed
+
+- `feat/claude-cli-backend` — new `careerai-llm::ClaudeCliLlm` driver
+  that subprocesses the local `claude` CLI (`--print --output-format
+  json`). Default for Claude Code subscribers — no `ANTHROPIC_API_KEY`
+  required. Adds `careerai-llm::Backend` resolver and `BackendChoice`
+  enum (auto | claude-cli | api), `--llm-backend` global CLI flag,
+  `careerai llm probe` subcommand. The `live-llm` feature is split
+  into `live-llm-cli` (default) and `live-llm-api`; the umbrella
+  `live-llm` alias still toggles both for back-compat. Anthropic
+  prompt caching is not exposed via the CLI surface, so
+  `cache_profile=true` is silently ignored on the CLI backend
+  (logged once).
+- `careerai llm probe` honors the global `--llm-backend` flag
+  (previously silently ignored). `Backend::probe` also honors
+  `CAREERAI_SKIP_CLI_PROBE=1` for parity with `Backend::resolve` and
+  `build_cli`.
+- `locate_claude_binary` now validates the resolved path is a regular
+  executable file. A stale `CAREERAI_CLAUDE_BIN` pointing at a missing
+  or non-exec path surfaces as `ClaudeCliError::BinaryUnusable {
+  path, reason }` rather than a confusing spawn ENOENT later.
+- `careerai profile import` falls back to the heuristic parser when
+  LLM resolution fails mid-run (claude session expired, network drop,
+  etc.). The user gets a usable profile and a clear log line pointing
+  at `claude login` / `ANTHROPIC_API_KEY`. Explicit `--use-llm=true`
+  preserves the previous fail-fast behavior.
+- `ClaudeCliLlm::complete` no longer maintains a second on-disk cache
+  layer with a `claude-cli:` key prefix. The on-disk response cache
+  lives in the consumer wrapper (e.g.
+  `careerai-tailor::tailor_for_listing`), keyed by the
+  provider-agnostic `compose_key(...)` shared with the API backend.
+  Two cache layers had been writing duplicate files to the same dir
+  with different filenames.
 - `feat/mcp-sources-adapter` (PR #19, in review) —
   `careerai-sources::mcp_jobs` adapter consumes any community MCP
   server as a discovery source. New CLI: `careerai mcp probe`

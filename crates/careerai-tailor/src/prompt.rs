@@ -167,6 +167,7 @@ mod tests {
             timeout_seconds: 120,
             prompt_version: "tailor.v1".into(),
             anthropic_prompt_cache: true,
+            backend: careerai_core::config::BackendChoice::default(),
         }
     }
 

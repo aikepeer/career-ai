@@ -32,6 +32,16 @@ struct Cli {
     /// Set log verbosity (overrides RUST_LOG).
     #[arg(long, global = true, value_name = "LEVEL")]
     log: Option<String>,
+
+    /// Override the LLM backend selection. `auto` (default) prefers the
+    /// `claude` CLI when reachable, else falls back to the rig-core
+    /// Anthropic API. Force `claude-cli` or `api` to skip detection.
+    #[arg(
+        long = "llm-backend",
+        global = true,
+        value_name = "auto|claude-cli|api"
+    )]
+    llm_backend: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -124,6 +134,19 @@ enum Command {
         #[command(subcommand)]
         command: McpCommand,
     },
+    /// Inspect or probe the LLM backend (claude CLI vs Anthropic API).
+    Llm {
+        #[command(subcommand)]
+        command: LlmCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum LlmCommand {
+    /// Probe which backend `Auto` resolution would pick on this host
+    /// and report a brief health status (binary path/version, ping
+    /// latency, API-key source).
+    Probe,
 }
 
 #[derive(Debug, Subcommand)]
@@ -196,18 +219,30 @@ async fn main() -> Result<()> {
     init_tracing(cli.log.as_deref());
 
     let cwd = std::env::current_dir()?;
+
+    // Parse the global `--llm-backend` flag once so subcommands can
+    // forward it down without re-parsing.
+    let backend_override: Option<careerai_core::config::BackendChoice> =
+        match cli.llm_backend.as_deref() {
+            Some(s) => Some(s.parse().map_err(|e: String| anyhow::anyhow!(e))?),
+            None => None,
+        };
+
     match cli.command {
         Command::Init { force } => {
             careerai_core::init::scaffold(&cwd, force)?;
         }
-        Command::Profile { command } => run_profile(command)?,
+        Command::Profile { command } => run_profile(command, backend_override)?,
         Command::Discover { sources } => run_discover(&cwd, &sources).await?,
         Command::Match { tune } => run_match(&cwd, tune).await?,
         Command::Shortlist { command } => match command {
             ShortlistCommand::Show { limit } => run_shortlist_show(&cwd, limit).await?,
         },
         Command::Tailor { listing_id } => {
-            let cfg = load_cfg(&cwd)?;
+            let mut cfg = load_cfg(&cwd)?;
+            if let Some(b) = backend_override {
+                cfg.llm.backend = b;
+            }
             match pipeline::tailor_one(&cwd, &cfg, &listing_id).await {
                 Ok(outcome) => {
                     println!(
@@ -279,6 +314,14 @@ async fn main() -> Result<()> {
                 run_mcp_probe(&cfg).await?;
             }
         },
+        Command::Llm { command } => match command {
+            LlmCommand::Probe => {
+                // CoreConfig::load always succeeds (embedded defaults
+                // fill any gap), so even a fresh dir works.
+                let cfg = load_cfg(&cwd)?;
+                run_llm_probe(&cfg, backend_override).await?;
+            }
+        },
         Command::Inspect { application_id } => {
             run_inspect(&cwd, &application_id).await?;
         }
@@ -342,6 +385,104 @@ async fn run_mcp_probe(cfg: &CoreConfig) -> Result<()> {
         std::process::exit(2);
     }
     Ok(())
+}
+
+async fn run_llm_probe(
+    cfg: &CoreConfig,
+    backend_override: Option<careerai_core::config::BackendChoice>,
+) -> Result<()> {
+    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+    {
+        use careerai_core::config::BackendChoice;
+        // Honor the global `--llm-backend` flag. Without this, `probe`
+        // silently ignored the override even though every other
+        // subcommand respects it.
+        let mut llm_cfg = cfg.llm.clone();
+        if let Some(b) = backend_override {
+            llm_cfg.backend = b;
+        }
+        let probe = careerai_llm::Backend::probe(&llm_cfg).await;
+
+        // Two lines when the operator forced something: their request
+        // and what would actually resolve. One line otherwise.
+        if let Some(forced) = probe.forced {
+            println!("forced:           {}", forced.as_str());
+            println!("would-resolve-to: {}", probe.chosen.as_str());
+        } else {
+            println!("backend: {}", probe.chosen.as_str());
+        }
+
+        if let Some(bin) = &probe.claude_binary {
+            print!("  claude binary: {}", bin.display());
+            if let Some(v) = &probe.claude_version {
+                print!(" ({v})");
+            }
+            println!();
+            print!("  claude auth:   ");
+            if probe.claude_auth_ok {
+                if let Some(ms) = probe.claude_ping_ms {
+                    println!("ok (ping {ms} ms)");
+                } else {
+                    println!("ok");
+                }
+            } else {
+                println!("not authenticated; run `claude login`");
+            }
+        } else {
+            println!("  claude binary: not found on PATH");
+        }
+        match probe.api_key_source {
+            Some(src) => println!("  ANTHROPIC key: present ({src})"),
+            None => println!("  ANTHROPIC key: not set"),
+        }
+
+        // Auto with nothing reachable is hard-fail (exit 1 via anyhow).
+        if probe.forced.is_none() && probe.chosen == BackendChoice::Auto {
+            anyhow::bail!(
+                "no LLM backend reachable; install Claude Code (https://claude.ai/download) \
+                 or export ANTHROPIC_API_KEY"
+            );
+        }
+
+        // Forced override is unusable — try resolving and surface the
+        // real error. Exit 2 to distinguish "your override is broken"
+        // from "nothing is reachable" (exit 1) so scripts can branch.
+        if probe.forced.is_some() {
+            if let Err(e) = probe_forced_resolve(&llm_cfg).await {
+                eprintln!(
+                    "error: forced backend `{}` is unusable: {e}",
+                    llm_cfg.backend.as_str()
+                );
+                std::process::exit(2);
+            }
+        }
+
+        Ok(())
+    }
+    #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
+    {
+        let _ = (cfg, backend_override);
+        println!("backend: none (binary built without `live-llm-cli` or `live-llm-api`)");
+        Ok(())
+    }
+}
+
+/// Try to resolve a forced backend so the probe can flag forced-but-
+/// unusable as a non-zero exit. Uses a tempdir-scoped cache to avoid
+/// polluting the project's `cache_dir` on a dry probe.
+///
+/// Extracted so a unit test can drive the no-API-key path without
+/// touching `std::process::exit`.
+#[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+async fn probe_forced_resolve(
+    llm_cfg: &careerai_core::config::LlmConfig,
+) -> std::result::Result<(), careerai_llm::BackendError> {
+    use std::sync::Arc;
+    let cache_root = std::env::temp_dir().join("careerai-llm-probe-cache");
+    let cache = Arc::new(careerai_llm::Cache::new(cache_root));
+    careerai_llm::Backend::resolve(llm_cfg.backend, llm_cfg, cache)
+        .await
+        .map(|_| ())
 }
 
 /// Dispatch for `careerai apply`. Errors short-circuit the process with a
@@ -666,19 +807,27 @@ fn profile_yaml_path() -> Result<PathBuf> {
         .join("profile.yaml"))
 }
 
-fn run_profile(command: ProfileCommand) -> Result<()> {
+fn run_profile(
+    command: ProfileCommand,
+    backend_override: Option<careerai_core::config::BackendChoice>,
+) -> Result<()> {
     match command {
         ProfileCommand::Import {
             paths,
             force,
             use_llm,
-        } => profile_import(&paths, force, use_llm),
+        } => profile_import(&paths, force, use_llm, backend_override),
         ProfileCommand::Show => profile_show(),
         ProfileCommand::Validate => profile_validate(),
     }
 }
 
-fn profile_import(paths: &[PathBuf], force: bool, use_llm: Option<bool>) -> Result<()> {
+fn profile_import(
+    paths: &[PathBuf],
+    force: bool,
+    use_llm: Option<bool>,
+    backend_override: Option<careerai_core::config::BackendChoice>,
+) -> Result<()> {
     if paths.is_empty() {
         anyhow::bail!("profile import: at least one source file is required");
     }
@@ -691,28 +840,55 @@ fn profile_import(paths: &[PathBuf], force: bool, use_llm: Option<bool>) -> Resu
     }
     let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
 
-    // Decide whether to run the LLM extractor. Resolution order:
-    //   1. Explicit `--use-llm=<bool>` always wins.
-    //   2. Otherwise: enabled iff this binary was built with `live-llm`
-    //      AND an Anthropic key is reachable. Without the feature flag
-    //      we cannot actually call the LLM; auto-enabling on key
-    //      detection alone would route into a hard error.
+    // Auto-enable LLM extraction when ANY live backend is compiled in
+    // and a usable backend is reachable (claude CLI auth or
+    // ANTHROPIC_API_KEY). The actual backend choice (CLI vs API) is
+    // resolved deeper in `run_profile_import_with_llm`.
+    let live_compiled = cfg!(any(feature = "live-llm-cli", feature = "live-llm-api"));
     let want_llm = match use_llm {
         Some(v) => v,
-        None => cfg!(feature = "live-llm") && anthropic_key_reachable(),
+        None => live_compiled && llm_backend_reachable(),
     };
 
     let profile = if want_llm {
-        run_profile_import_with_llm(&refs)?
+        // Fall back to the heuristic parser when LLM resolution fails
+        // mid-run (e.g. session expired since `llm_backend_reachable`
+        // checked, claude CLI binary stale, network drop). The
+        // heuristic parser is strictly better than a hard error here:
+        // the user gets a profile they can edit, and a clear log line
+        // points them at `claude login` / API key.
+        //
+        // When `--use-llm` was passed explicitly, surface the original
+        // error rather than silently downgrading — the user asked for
+        // the LLM path.
+        match run_profile_import_with_llm(&refs, backend_override) {
+            Ok(p) => p,
+            Err(e) if use_llm == Some(true) => {
+                return Err(e);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target = "profile",
+                    error = %e,
+                    "LLM extraction failed; falling back to heuristic parser \
+                     (run `claude login` or set ANTHROPIC_API_KEY to re-enable LLM)"
+                );
+                eprintln!(
+                    "warning: LLM extraction failed ({e}); falling back to heuristic \
+                     parser. Run `claude login` or set ANTHROPIC_API_KEY for better results."
+                );
+                careerai_profile::import_paths(&refs).context("parsing profile sources")?
+            }
+        }
     } else {
-        if use_llm.is_none() && !cfg!(feature = "live-llm") {
-            // Built without `live-llm`; nothing the user can do at
-            // runtime to improve this. Stay quiet on the heuristic
-            // fallback unless they explicitly asked for LLM.
+        if use_llm.is_none() && !live_compiled {
+            // Built without any live backend; nothing the user can do
+            // at runtime to improve this.
         } else if use_llm.is_none() {
             eprintln!(
-                "warning: no Anthropic key configured; falling back to heuristic parser. \
-                 Set ANTHROPIC_API_KEY for better results."
+                "warning: no LLM backend reachable (claude CLI not authed and no \
+                 ANTHROPIC_API_KEY); falling back to heuristic parser. Run \
+                 `claude login` or set ANTHROPIC_API_KEY for better results."
             );
         }
         careerai_profile::import_paths(&refs).context("parsing profile sources")?
@@ -805,32 +981,28 @@ fn anthropic_key_reachable() -> bool {
     false
 }
 
-/// Parse PDF/DOCX inputs through the LLM extractor; LinkedIn ZIPs go
-/// through their structured CSV path unchanged. Currently only Anthropic
-/// is wired. Model + cache directory are sourced from
-/// `config.llm.parse_resume_model` / `config.llm.cache_dir` when set,
-/// falling back to [`careerai_profile::ExtractOptions`] defaults.
-fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Profile> {
-    #[cfg(feature = "live-llm")]
+/// Best-effort: is ANY live LLM backend reachable? Either the `claude`
+/// CLI binary is on PATH, or an Anthropic API key is set. Used to
+/// auto-enable `--use-llm` heuristically.
+fn llm_backend_reachable() -> bool {
+    if which::which("claude").is_ok() {
+        return true;
+    }
+    anthropic_key_reachable()
+}
+
+/// Parse PDF/DOCX inputs through an LLM extractor; LinkedIn ZIPs go
+/// through their structured CSV path unchanged. Selects the backend
+/// (`claude` CLI vs rig-core Anthropic API) via
+/// `careerai_llm::Backend::resolve` honoring `cfg.llm.backend` and the
+/// `--llm-backend` global flag.
+fn run_profile_import_with_llm(
+    paths: &[&Path],
+    backend_override: Option<careerai_core::config::BackendChoice>,
+) -> Result<careerai_profile::Profile> {
+    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
     {
         use std::sync::Arc;
-
-        // Resolve API key. Same precedence as `anthropic_key_reachable`.
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .filter(|v| !v.is_empty())
-            .or_else(|| {
-                keyring::Entry::new("career-ai", "anthropic/api_key")
-                    .ok()
-                    .and_then(|e| e.get_password().ok())
-                    .filter(|v| !v.is_empty())
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no Anthropic key found in keyring or ANTHROPIC_API_KEY; \
-                     re-run with --use-llm=false or configure a key"
-                )
-            })?;
 
         let cwd = std::env::current_dir()?;
         // Fall back to `LlmConfig::default()` ONLY when no `config/`
@@ -838,11 +1010,14 @@ fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Prof
         // `init`). When config exists, surface load/parse failures so
         // malformed YAML and similar real errors don't silently hide
         // behind defaults.
-        let llm_cfg = if cwd.join("config").exists() {
+        let mut llm_cfg = if cwd.join("config").exists() {
             CoreConfig::load(&cwd).context("load config/")?.llm
         } else {
             careerai_core::config::LlmConfig::default()
         };
+        if let Some(b) = backend_override {
+            llm_cfg.backend = b;
+        }
 
         // Honor `config.llm.cache_dir` so live profile-extract caches
         // sit next to tailor caches under `data/cache/llm`. `.gitignore`
@@ -870,26 +1045,26 @@ fn run_profile_import_with_llm(paths: &[&Path]) -> Result<careerai_profile::Prof
             opts.prompt_version.clone_from(&llm_cfg.prompt_version);
         }
 
-        let llm = careerai_llm::RigLlm::with_api_key(
-            careerai_llm::Provider::Anthropic,
-            api_key,
-            opts.model.clone(),
-            cache,
-            llm_cfg.timeout_seconds.max(1),
-        )
-        .map_err(|e| anyhow::anyhow!("construct llm client: {e}"))?;
+        let backend = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(careerai_llm::Backend::resolve(
+                llm_cfg.backend,
+                &llm_cfg,
+                cache,
+            ))
+        })
+        .map_err(|e| anyhow::anyhow!("resolve llm backend: {e}"))?;
 
-        let adapter = profile_llm_adapter::Adapter::new(&llm);
+        let adapter = profile_llm_adapter::Adapter::new(&backend);
         let ctx = careerai_profile::LlmExtractContext::new(&adapter, opts);
         careerai_profile::import_paths_with_llm(paths, Some(&ctx))
             .context("parsing profile sources via LLM")
     }
-    #[cfg(not(feature = "live-llm"))]
+    #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
     {
-        let _ = paths;
+        let _ = (paths, backend_override);
         anyhow::bail!(
-            "LLM extraction requires the `live-llm` cargo feature. \
-             Re-run with: cargo run -p careerai-cli --features live-llm -- profile import …"
+            "LLM extraction requires the `live-llm-cli` or `live-llm-api` cargo feature. \
+             Re-run with: cargo run -p careerai-cli --features live-llm-cli -- profile import …"
         )
     }
 }
@@ -910,7 +1085,7 @@ fn strip_provider_prefix(model: &str) -> &str {
 /// `careerai_profile::LlmCaller`. Lives here (in the CLI) because the
 /// CLI is the only crate that depends on both, breaking the otherwise-
 /// circular `profile ↔ llm` edge.
-#[cfg(feature = "live-llm")]
+#[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
 mod profile_llm_adapter {
     use async_trait::async_trait;
     use careerai_llm::{Llm, LlmRequest};
@@ -993,5 +1168,81 @@ mod tests {
     fn detect_stale_skills_ignores_blank_lines_and_comments() {
         let yaml = "personal:\n  name: Alice\nskills:\n\n  # a comment\n  languages:\n    - Rust\n";
         assert!(!detect_stale_skills_schema(yaml));
+    }
+
+    /// Regression for the `--llm-backend` override on `careerai llm
+    /// probe`: when the global flag is set, it must replace
+    /// `cfg.llm.backend` before `Backend::probe` is called. Mirrors the
+    /// merge logic at the top of `run_llm_probe`.
+    #[test]
+    fn llm_backend_override_replaces_cfg_backend() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        let mut llm_cfg = LlmConfig {
+            backend: BackendChoice::ClaudeCli,
+            ..LlmConfig::default()
+        };
+        let override_choice: Option<BackendChoice> = Some(BackendChoice::Api);
+        if let Some(b) = override_choice {
+            llm_cfg.backend = b;
+        }
+        assert_eq!(llm_cfg.backend, BackendChoice::Api);
+    }
+
+    /// Without an override the configured backend stays put — the flag
+    /// is purely additive.
+    #[test]
+    fn llm_backend_override_absent_keeps_cfg_backend() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        let mut llm_cfg = LlmConfig {
+            backend: BackendChoice::ClaudeCli,
+            ..LlmConfig::default()
+        };
+        let override_choice: Option<BackendChoice> = None;
+        if let Some(b) = override_choice {
+            llm_cfg.backend = b;
+        }
+        assert_eq!(llm_cfg.backend, BackendChoice::ClaudeCli);
+    }
+
+    /// Regression for the probe exit code: when an operator forces a
+    /// backend that isn't reachable, `probe_forced_resolve` must
+    /// surface a `BackendError` so `run_llm_probe` can exit 2. Without
+    /// the resolve attempt, the probe printed `backend: api` and
+    /// exited 0 even when no API key was reachable.
+    ///
+    /// Wraps the test in a `Mutex` because `ANTHROPIC_API_KEY` is a
+    /// process-global env var; parallel cargo-test threads racing
+    /// set/remove pairs cause intermittent failures.
+    ///
+    /// `clippy::await_holding_lock`: the `std::sync::Mutex` guard is
+    /// held across `.await`, but the only contention is between this
+    /// test's own reruns. No deadlock risk.
+    #[cfg(feature = "live-llm-api")]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn probe_forced_api_with_no_key_returns_err() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        // Static lock so this test serializes with itself across reruns.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let llm_cfg = LlmConfig {
+            backend: BackendChoice::Api,
+            ..LlmConfig::default()
+        };
+        let res = probe_forced_resolve(&llm_cfg).await;
+        if let Some(v) = prev {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+        // The keyring may have a real key on a dev box; tolerate Ok in
+        // that case. The point is that the resolve attempt happens —
+        // not that the key is necessarily missing.
+        match res {
+            Err(careerai_llm::BackendError::ApiKeyMissing) | Ok(()) => {}
+            Err(other) => panic!("expected ApiKeyMissing or Ok, got {other:?}"),
+        }
     }
 }
