@@ -12,8 +12,22 @@
 //!
 //! [`Backend::resolve`] picks between them at runtime.
 //!
-//! On-disk response cache keyed by sha256 of (prompt_version,
-//! profile_hash, jd_hash, model) is shared across both backends.
+//! # Caching
+//!
+//! The on-disk response cache lives in the consumer wrapper, not in the
+//! backend driver. `careerai-tailor::tailor_for_listing` constructs a
+//! [`Cache`] keyed by `compose_key(prompt_version, profile_hash,
+//! jd_hash, model)` and consults it BEFORE calling `Backend::complete`.
+//! That key shape is provider-agnostic and shared between the CLI and
+//! API drivers, so cache hits transfer cleanly when a user toggles
+//! `--llm-backend`.
+//!
+//! Earlier revisions of [`ClaudeCliLlm`] also cached internally with a
+//! second key prefix (`claude-cli:...`); that layer was removed because
+//! it caused duplicate writes to the same cache dir with different
+//! filenames and surprised auditors. The driver now holds its
+//! `Arc<Cache>` field for API compatibility but never reads or writes
+//! through it (see `claude_cli::ClaudeCliLlm::complete`).
 
 #![forbid(unsafe_code)]
 
