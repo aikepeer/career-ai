@@ -7,17 +7,36 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use clap::Parser;
 use rmcp::transport::stdio;
 use rmcp::ServiceExt;
 use tracing_subscriber::EnvFilter;
 
 use careerai_mcp::CareerAiServer;
 
+/// MCP (Model Context Protocol) server exposing the career-ai pipeline
+/// as tool calls. Speaks JSON-RPC over stdio; logs go to stderr only.
+///
+/// Set `CAREERAI_ROOT` to override the project root (defaults to the
+/// current working directory). Set `CAREERAI_LOG` to override the
+/// tracing filter (defaults to `info,careerai_mcp=debug`).
+#[derive(Parser, Debug)]
+#[command(name = "careerai-mcp", version, about, long_about = None)]
+struct Cli {
+    /// Override the project root. Equivalent to setting CAREERAI_ROOT.
+    #[arg(long, value_name = "DIR", env = "CAREERAI_ROOT")]
+    root: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
     init_tracing();
 
-    let root = resolve_root().context("resolve project root")?;
+    let root = match cli.root {
+        Some(p) => p,
+        None => std::env::current_dir().context("current_dir")?,
+    };
     tracing::info!(root = %root.display(), "starting careerai-mcp on stdio");
 
     let server = CareerAiServer::new(root);
@@ -28,13 +47,6 @@ async fn main() -> Result<()> {
 
     service.waiting().await?;
     Ok(())
-}
-
-fn resolve_root() -> Result<PathBuf> {
-    if let Ok(env_root) = std::env::var("CAREERAI_ROOT") {
-        return Ok(PathBuf::from(env_root));
-    }
-    std::env::current_dir().context("current_dir")
 }
 
 fn init_tracing() {

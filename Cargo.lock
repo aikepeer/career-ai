@@ -407,6 +407,7 @@ dependencies = [
  "careerai-profile",
  "careerai-submit",
  "chrono",
+ "clap",
  "rmcp",
  "schemars 1.2.1",
  "serde",
