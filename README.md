@@ -96,7 +96,12 @@ needed. The end-to-end run after `cargo install` is:
 # 0. One-time prereqs: pandoc on PATH, `claude login` succeeded.
 careerai init                                        # create config + DB
 careerai profile import resume.pdf LinkedIn.zip      # +--use-llm to route through claude
-careerai discover --source greenhouse,lever,remotive,remoteok
+careerai sources sync                                # preview ~80 known-good Greenhouse /
+                                                     # Lever / Ashby slugs filtered against
+                                                     # your `domains:` keywords
+careerai sources sync --apply                        # merge into config/local.yaml (preserves
+                                                     # other user keys; manual additions kept)
+careerai discover --source greenhouse,lever,ashby,remotive,remoteok
 careerai match                                       # filter + rank against profile
 careerai shortlist show --limit 20                   # pick a listing-id
 careerai tailor <listing-id>                         # constrained-diff resume + cover letter
