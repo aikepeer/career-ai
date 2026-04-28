@@ -29,5 +29,19 @@ sqlx = { workspace = true }
 tempfile.workspace = true
 insta.workspace = true
 
+[features]
+# End-to-end smoke for the claude CLI backend (PR #21). Gated so the
+# tailor crate continues to build on `main` before that PR lands.
+#
+# Once PR #21 merges (which adds the `live-llm-cli` feature to
+# `careerai-llm`), update this line to:
+#   tailor-claude-cli-smoke = ["careerai-llm/live-llm-cli"]
+# so `cargo test -p careerai-tailor --features tailor-claude-cli-smoke`
+# pulls in the CLI backend transitively. Until then, the feature
+# stays empty and the gated `tests/claude_cli_smoke_it.rs` module is
+# also referenced by the same cfg, so toggling this feature flips the
+# test on once the underlying backend is on `main`.
+tailor-claude-cli-smoke = []
+
 [lints]
 workspace = true
