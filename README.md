@@ -81,6 +81,57 @@ export ANTHROPIC_API_KEY=...      # or store in OS keyring
 Override the backend per command with `--llm-backend=auto|claude-cli|api`,
 or persistently via `llm.backend` in `config/local.yaml`.
 
+## What works today on a Max plan (no API key)
+
+The LLM-backed steps (`tailor`, `cover-letter`, `parse-resume`) drive
+the locally installed `claude` CLI by default. If you have a Claude
+Max plan and have run `claude login` once, no `ANTHROPIC_API_KEY` is
+needed. The end-to-end run after `cargo install` is:
+
+```bash
+# 0. One-time prereqs: pandoc on PATH, `claude login` succeeded.
+careerai init                                        # create config + DB
+careerai profile import resume.pdf LinkedIn.zip      # +--use-llm to route through claude
+careerai discover --source greenhouse,lever,remotive,remoteok
+careerai match                                       # filter + rank against profile
+careerai shortlist show --limit 20                   # pick a listing-id
+careerai tailor <listing-id>                         # constrained-diff resume + cover letter
+careerai render <application-id>                     # DOCX + PDF via pandoc
+careerai apply <application-id>                      # DRY-RUN; see /career:apply walkthrough
+careerai applied --since 1d                          # confirm row + cadence
+careerai digest --since 24h                          # whole-pipeline rollup
+```
+
+Live submission is gated three ways: dry-run is the default, you
+must flip `submit_enabled: true` for that one source in
+`config/local.yaml`, and LinkedIn / Indeed additionally require the
+literal `I_UNDERSTAND_TOS_RISK` confirmation. See the
+[`/career:apply`](.claude-plugin/commands/apply.md) walkthrough.
+
+## Known gaps
+
+The pipeline is end-to-end usable for ATS-API sources today. These
+are the open items:
+
+- **LinkedIn discovery** — first-class adapter is the `mcp_jobs`
+  source (PR #19, merged), which discovers via any MCP server that
+  advertises a known job-search tool name. The bundled
+  `linkedin-jobs` MCP (`Rom7699/linkedin-jobs-mcp-server`) currently
+  ships as `python main.py` with no script entry — manual enable
+  steps are in `.mcp.json`. The `linkedin-browser` MCP is a
+  ToS-violating scraper and stays opt-in. A native chromiumoxide
+  LinkedIn discovery adapter is in flight separately.
+- **Response tracking (M7, planned)** — `submitted` applications do
+  not yet roll up into a `responded` state automatically. Until M7
+  lands, watch your inbox; `careerai applied --since <window>` shows
+  what was submitted, but not whether the employer replied.
+- **Semantic matching upgrade (planned)** — current ranking is
+  `fastembed` cosine over JD + profile text plus filter-config
+  predicates. Roadmap items: per-skill weight tuning from response
+  outcomes, per-source priors, and a learned threshold for
+  shortlist cutoff.
+
+
 ## Architecture
 
 ```
