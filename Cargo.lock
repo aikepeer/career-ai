@@ -522,6 +522,7 @@ dependencies = [
  "careerai-submit",
  "chromiumoxide",
  "chrono",
+ "futures",
  "governor",
  "hex",
  "insta",

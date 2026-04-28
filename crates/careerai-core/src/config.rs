@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 
 /// Embedded fallback so the binary works without an `init`-scaffolded tree.
 /// Source of truth for both this constant and the file written by `init` is
-/// `templates/default.yaml`.
-const EMBEDDED_DEFAULTS: &str = include_str!("templates/default.yaml");
+/// `templates/default.yaml`. Public so downstream crates (notably the
+/// `careerai-sources` company-sync tests) can hydrate a default
+/// `CoreConfig` without depending on the on-disk layout.
+pub const EMBEDDED_DEFAULTS: &str = include_str!("templates/default.yaml");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreConfig {
@@ -66,6 +68,13 @@ pub struct SourcesConfig {
     pub greenhouse: CompaniesSource,
     #[serde(default)]
     pub lever: CompaniesSource,
+    /// Ashby public posting API (`https://api.ashbyhq.com/posting-api/job-board/<slug>`).
+    /// Same shape as Greenhouse / Lever — one entry per company slug.
+    /// Discovery adapter ships in `careerai-sources` as `AshbySource`;
+    /// the `careerai sources sync` subcommand auto-populates this list
+    /// by probing seed slugs against the user's `domains:` keywords.
+    #[serde(default)]
+    pub ashby: CompaniesSource,
     #[serde(default)]
     pub remotive: RemotiveSourceConfig,
     #[serde(default)]

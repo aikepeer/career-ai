@@ -54,6 +54,11 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     for company in &cfg.sources.lever.companies {
         out.push(Arc::new(LeverSource::new(company.clone())));
     }
+    for company in &cfg.sources.ashby.companies {
+        out.push(Arc::new(careerai_sources::AshbySource::new(
+            company.clone(),
+        )));
+    }
     if cfg.sources.remotive.enabled {
         let mut s = RemotiveSource::new();
         if let Some(cat) = &cfg.sources.remotive.category {

@@ -9,6 +9,8 @@ description = "Job-board discovery adapters behind a unified Source trait"
 
 [dependencies]
 careerai-core = { path = "../careerai-core" }
+serde_yaml.workspace = true
+futures.workspace = true
 # Optional dep — only pulled in when the `browser` feature is on.
 # Sources do not call submission logic; this dep is *purely* for
 # `BrowserSession` + `Credential` reuse so the LinkedIn browser
