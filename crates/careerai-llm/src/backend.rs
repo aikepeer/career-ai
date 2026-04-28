@@ -399,11 +399,18 @@ async fn read_claude_version(bin: &std::path::Path) -> Option<String> {
 ///    unparseable JSON, or omits the `loggedIn` field. The ping path
 ///    runs a real inference and costs ~$0.08, but stays correct.
 ///
-/// Both paths record elapsed time in `LAST_PING_MS` so the `probe`
-/// report still shows latency. Tests bypass everything via
+/// Both paths record elapsed time in `LAST_PING_MS` on success so
+/// the `probe` report shows latency. On total failure (both tiers
+/// returned `None`/`false`) `LAST_PING_MS` is left cleared so a
+/// stale value from a previous probe on the same thread cannot leak
+/// into the new report. Tests bypass everything via
 /// `CAREERAI_SKIP_CLI_PROBE=1`.
 #[cfg(feature = "live-llm-cli")]
 async fn probe_claude_auth(bin: &std::path::Path) -> bool {
+    // Clear stale ping_ms from any previous probe on this thread.
+    // Both tiers re-set on success; absent that, the report
+    // correctly shows ping_ms=None alongside auth_ok=false.
+    LAST_PING_MS.with(|c| c.set(None));
     // Try the cheap path first. `claude auth status` exits in <2s on a
     // warm shell and never invokes the model — zero token cost. Older
     // `claude` builds don't ship the subcommand; on any failure mode
@@ -424,14 +431,15 @@ async fn probe_claude_auth(bin: &std::path::Path) -> bool {
 ///   was missing or non-boolean, or the call timed out. The caller
 ///   must fall back to the inference-based ping probe.
 ///
-/// Records `LAST_PING_MS` on the success paths so the probe report
-/// still shows latency.
+/// Records `LAST_PING_MS` on the `Some(_)` paths so the probe report
+/// still shows latency; leaves it untouched on `None` so the
+/// surrounding orchestrator can decide whether to clear or overwrite.
 #[cfg(feature = "live-llm-cli")]
 async fn probe_claude_auth_status(bin: &std::path::Path) -> Option<bool> {
     let started = std::time::Instant::now();
-    // 10s is generous for a `claude auth status` call that the user
-    // reports completing in <2s. We only need enough headroom for a
-    // cold environment where keychain/dbus probes can briefly stall.
+    // 10s is generous for `claude auth status` (typical <2s). The
+    // headroom covers cold environments where keychain/dbus probes
+    // briefly stall.
     let result = timeout(
         Duration::from_secs(10),
         Command::new(bin).arg("auth").arg("status").output(),
@@ -861,5 +869,149 @@ exit 99
             "ping fallback should report auth_ok when ping JSON is healthy"
         );
         assert_eq!(probe.chosen, BackendChoice::ClaudeCli);
+    }
+
+    /// `claude auth status` returns valid JSON but the `loggedIn`
+    /// field is absent. Defensive parsing should treat the response
+    /// as unusable and fall through to the ping path. The stub
+    /// returns a healthy ping so the fallback succeeds, proving the
+    /// missing-field case did NOT cause a misclassified `auth_ok`.
+    #[cfg(all(unix, feature = "live-llm-cli"))]
+    #[tokio::test]
+    async fn probe_falls_back_when_auth_status_missing_logged_in_field() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        write_stub(
+            &bin,
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "claude 1.0.0"; exit 0 ;;
+  auth)
+    if [ "$2" = "status" ]; then
+      echo '{"authMethod": "claude.ai", "subscriptionType": "max"}'
+      exit 0
+    fi
+    ;;
+  --print)
+    cat <<'__PAYLOAD__'
+{"type":"result","subtype":"success","is_error":false,"result":"OK","total_cost_usd":0.0,"usage":{"input_tokens":3,"output_tokens":4}}
+__PAYLOAD__
+    exit 0
+    ;;
+esac
+exit 99
+"#,
+        );
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
+        std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
+        let probe = Backend::probe(&cfg()).await;
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+        if let Some(v) = prev_key {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+        assert!(
+            probe.claude_auth_ok,
+            "missing loggedIn must fall through to ping (which succeeded here)"
+        );
+    }
+
+    /// `claude auth status` returns a `loggedIn` field that's a
+    /// string (`"true"`) instead of a JSON boolean. `as_bool()` is
+    /// strict and rejects this. The orchestrator must fall through to
+    /// the ping path; here the ping succeeds.
+    #[cfg(all(unix, feature = "live-llm-cli"))]
+    #[tokio::test]
+    async fn probe_falls_back_when_auth_status_logged_in_is_string() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        write_stub(
+            &bin,
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "claude 1.0.0"; exit 0 ;;
+  auth)
+    if [ "$2" = "status" ]; then
+      echo '{"loggedIn": "true", "authMethod": "claude.ai"}'
+      exit 0
+    fi
+    ;;
+  --print)
+    cat <<'__PAYLOAD__'
+{"type":"result","subtype":"success","is_error":false,"result":"OK","total_cost_usd":0.0,"usage":{"input_tokens":3,"output_tokens":4}}
+__PAYLOAD__
+    exit 0
+    ;;
+esac
+exit 99
+"#,
+        );
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
+        std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
+        let probe = Backend::probe(&cfg()).await;
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+        if let Some(v) = prev_key {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+        assert!(
+            probe.claude_auth_ok,
+            "non-bool loggedIn must fall through to ping"
+        );
+    }
+
+    /// Both tiers return unparseable garbage. `auth_ok` must be
+    /// `false` and `claude_ping_ms` must be `None` (verifies the
+    /// stale-thread-local fix — no leftover value from a previous
+    /// successful probe on the same thread).
+    #[cfg(all(unix, feature = "live-llm-cli"))]
+    #[tokio::test]
+    async fn probe_returns_false_when_both_tiers_unparseable() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev_key = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        write_stub(
+            &bin,
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo "claude 1.0.0"; exit 0 ;;
+  auth)
+    if [ "$2" = "status" ]; then
+      echo "this is not json {{{"
+      exit 0
+    fi
+    ;;
+  --print) echo "also not json"; exit 0 ;;
+esac
+exit 99
+"#,
+        );
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
+        std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
+        let probe = Backend::probe(&cfg()).await;
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+        if let Some(v) = prev_key {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+        assert!(
+            !probe.claude_auth_ok,
+            "both tiers unparseable must yield auth_ok=false"
+        );
+        assert_eq!(
+            probe.claude_ping_ms, None,
+            "ping_ms must be None when no probe tier succeeded"
+        );
     }
 }
