@@ -75,11 +75,48 @@ type ReadRateLimiter = RateLimiter<
     NoOpMiddleware<governor::clock::QuantaInstant>,
 >;
 
+/// Per-source-name interner for the read-side rate limiter, mirroring the
+/// `mcp_jobs.rs` pattern (see lines 74–107 there for the rationale).
+///
+/// `careerai-pipeline::build_sources` reconstructs `IndeedRssSource` on
+/// every cron tick. Without this cache, each tick rebuilds the limiter
+/// with a full bucket and `rate_per_minute` is effectively unenforced in
+/// daemon mode. Holding the `Arc<RateLimiter>` in a process-wide
+/// `OnceLock<Mutex<HashMap>>` keyed by source name means the bucket state
+/// survives reconstruction — the per-minute cap is honored across ticks.
+///
+/// Today there is exactly one Indeed RSS source (`SOURCE_NAME`), but the
+/// keying matches `mcp_jobs.rs` so adding multi-instance support later is
+/// a non-event.
+type InternMap = std::sync::Mutex<std::collections::HashMap<String, Option<Arc<ReadRateLimiter>>>>;
+static SOURCE_STATE: std::sync::OnceLock<InternMap> = std::sync::OnceLock::new();
+
+fn intern_rate_limiter(name: &str, rate_per_minute: u32) -> Option<Arc<ReadRateLimiter>> {
+    let map = SOURCE_STATE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    // `lock()` only fails if a previous holder panicked. The cached state
+    // is `Option<Arc<RateLimiter>>`; recovery is safe.
+    let mut guard = map
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(entry) = guard.get(name) {
+        return entry.clone();
+    }
+    let rl = NonZeroU32::new(rate_per_minute)
+        .map(|n| Arc::new(RateLimiter::direct(Quota::per_minute(n))));
+    guard.insert(name.to_owned(), rl.clone());
+    rl
+}
+
 #[derive(Debug)]
 pub struct IndeedRssSource {
     cfg: IndeedRssSourceConfig,
     base_url: String,
     http: Client,
+    /// Shared with all other `IndeedRssSource` instances constructed with
+    /// the same source name (today: always `SOURCE_NAME`). The
+    /// token-bucket state lives in the `Arc`, so a new construction on
+    /// the next cron tick via `build_sources()` does not reset the
+    /// bucket — the per-minute cap is honored across ticks.
     rate_limiter: Option<Arc<ReadRateLimiter>>,
 }
 
@@ -91,8 +128,7 @@ impl IndeedRssSource {
     /// panic visibly rather than degrade silently.
     #[must_use]
     pub fn new(cfg: IndeedRssSourceConfig) -> Self {
-        let rate_limiter = NonZeroU32::new(cfg.rate_per_minute)
-            .map(|n| Arc::new(RateLimiter::direct(Quota::per_minute(n))));
+        let rate_limiter = intern_rate_limiter(SOURCE_NAME, cfg.rate_per_minute);
         #[allow(clippy::expect_used)]
         let http = Client::builder()
             .user_agent(USER_AGENT)
@@ -422,13 +458,21 @@ fn split_title(raw: &str) -> (String, String, Option<String>) {
     }
 }
 
-/// SHA256 over `(SOURCE_NAME, url)` truncated to 16 hex chars. Used
-/// when the feed item omits `<guid>`.
+/// SHA256 over `(SOURCE_NAME, url.trim())` truncated to 16 hex chars.
+/// Used when the feed item omits `<guid>`.
+///
+/// The URL is trimmed inside this helper so callers can pass the raw
+/// `<link>` text without worrying about leading/trailing whitespace; the
+/// listing's `url` field is also stored trimmed (see `build_listing`),
+/// so trimming here keeps the dedupe key aligned with the URL the rest
+/// of the pipeline sees. Without the trim, an `<link>  https://...  </link>`
+/// item would produce a different `external_id` from the same item with
+/// no whitespace, breaking dedupe across runs.
 fn derive_external_id(url: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(SOURCE_NAME.as_bytes());
     hasher.update(b"\0");
-    hasher.update(url.as_bytes());
+    hasher.update(url.trim().as_bytes());
     let digest = hasher.finalize();
     hex::encode(&digest[..8])
 }
@@ -709,5 +753,43 @@ mod tests {
     fn snapshot_listing_shape_from_fixture() {
         let listings = parse_feed(SAMPLE_XML);
         insta::assert_yaml_snapshot!("indeed_rss_listings", listings);
+    }
+
+    #[test]
+    fn rate_limiter_is_shared_across_constructions() {
+        // Regression: `careerai-pipeline::build_sources` reconstructs
+        // `IndeedRssSource` on every cron tick. Without the interner the
+        // rate limiter would be rebuilt with a full bucket each tick and
+        // `rate_per_minute` would be unenforced in daemon mode. Two calls
+        // with the same source name must return the same limiter `Arc`
+        // (pointer equality).
+        //
+        // The interner is a process-wide `OnceLock`, shared with the
+        // production `SOURCE_NAME` key and any other test in this module
+        // that constructs an `IndeedRssSource`. Use a test-unique name so
+        // we control the cache state and can assert a non-None limiter
+        // without depending on test execution order.
+        let a = intern_rate_limiter("indeed_rss-intern-test", 30);
+        let b = intern_rate_limiter("indeed_rss-intern-test", 30);
+        let arc_a = a.as_ref().expect("limiter set for non-zero rate");
+        let arc_b = b.as_ref().expect("limiter set for non-zero rate");
+        assert!(
+            Arc::ptr_eq(arc_a, arc_b),
+            "rate_limiter Arc must be shared across IndeedRssSource constructions",
+        );
+    }
+
+    #[test]
+    fn derive_external_id_ignores_link_whitespace() {
+        // Regression: `<link>` text with leading/trailing whitespace must
+        // hash to the same external_id as the trimmed form, otherwise the
+        // listing's `url` (stored trimmed) and `external_id` would
+        // diverge across runs and dedupe would break.
+        let trimmed = derive_external_id("https://www.indeed.com/viewjob?jk=abc123");
+        let padded = derive_external_id("  https://www.indeed.com/viewjob?jk=abc123  \n");
+        assert_eq!(
+            trimmed, padded,
+            "derive_external_id must trim before hashing",
+        );
     }
 }
