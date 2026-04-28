@@ -87,11 +87,11 @@ documented public API.
 
 ---
 
-## Step 4 — Flip `submit_enabled: true` for that ONE source
+## Step 4 — Flip `submit.per_source.<source>.enabled: true` for that ONE source
 
-Per-source `submit_enabled` gates default to `false` and **are honored
-even with `--auto-submit`**. The flag is intentional: live-submit must
-be a deliberate, per-source operator decision.
+Per-source `enabled` gates default to `false` and **are honored even
+with `--auto-submit`**. The flag is intentional: live-submit must be
+a deliberate, per-source operator decision.
 
 I will **not** edit your config for you. Open `config/local.yaml` in
 your editor and add (or merge into your existing `submit:` block) the
@@ -103,8 +103,8 @@ single source you want to enable:
 submit:
   per_source:
     greenhouse:
-      submit_enabled: true
-    # leave others off — `submit_enabled: false` (the default) is correct
+      enabled: true
+    # leave others off — `enabled: false` (the default) is correct
 ```
 
 Save the file. The next `/career:apply` invocation will re-read
@@ -123,7 +123,8 @@ If you forget this step, the live call fails fast with
 
 Even with `--auto-submit`:
 
-- The per-source `submit_enabled` gate from step 4 is still required.
+- The per-source `submit.per_source.<source>.enabled` gate from
+  step 4 is still required.
 - The call goes through `governor` token-buckets. If the bucket is
   empty or you're inside a quiet-hours window, the call is blocked at
   the rate-limit boundary and is **not** retried silently. The error

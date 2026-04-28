@@ -1,15 +1,15 @@
 ---
 name: dry-run-apply
-description: "Submits applications with a hard dry-run-first gate. Refuses live submission to LinkedIn or Indeed without explicit ToS-risk acknowledgement, and without a per-source `submit_enabled` flip in `config/local.yaml`. Triggers when the user says 'submit application', 'apply to', or asks to send a tailored application."
+description: "Submits applications with a hard dry-run-first gate. Refuses live submission to LinkedIn or Indeed without explicit ToS-risk acknowledgement, and without a per-source `submit.per_source.<source>.enabled: true` flip in `config/local.yaml`. Triggers when the user says 'submit application', 'apply to', or asks to send a tailored application."
 ---
 
 # Dry-run apply
 
 Owns the submission step. **The default is dry-run.** Live submission
 requires (a) an explicit, literal confirmation phrase from the user,
-and (b) a deliberate per-source `submit_enabled: true` flip in
-`config/local.yaml` — the user does that themselves; you do not edit
-their config.
+and (b) a deliberate per-source `submit.per_source.<source>.enabled:
+true` flip in `config/local.yaml` — the user does that themselves;
+you do not edit their config.
 
 ## Trigger conditions
 
@@ -69,10 +69,10 @@ issue. Show the destination endpoint, a summary of the payload, and
 the source's submit-rate-limit budget remaining today. A plain `yes`
 is enough.
 
-#### 2b. `submit_enabled: true` for that ONE source
+#### 2b. `submit.per_source.<source>.enabled: true` for that ONE source
 
-Per-source `submit_enabled` gates default to `false` and are honored
-even when the user passes `--auto-submit`. **You do not edit
+Per-source `enabled` gates default to `false` and are honored even
+when the user passes `--auto-submit`. **You do not edit
 `config/local.yaml` yourself.** Print the YAML they should add:
 
 ```yaml
@@ -80,7 +80,7 @@ even when the user passes `--auto-submit`. **You do not edit
 submit:
   per_source:
     <source-name>:
-      submit_enabled: true
+      enabled: true
 ```
 
 Stop and wait for them to save the file. Then proceed.
@@ -90,8 +90,8 @@ Stop and wait for them to save the file. Then proceed.
 Call `careerai_apply` MCP tool with `dry_run: false`. The submitter
 still:
 
-- Re-checks the per-source `submit_enabled` config gate (the user
-  could have flipped it back; defense in depth).
+- Re-checks the per-source `submit.per_source.<source>.enabled`
+  config gate (the user could have flipped it back; defense in depth).
 - Acquires a `governor` rate-limit permit before any network call.
 - Respects quiet-hours config.
 
@@ -115,8 +115,9 @@ After a live submission:
 3. **Never edit `config/local.yaml` for the user.** Print the YAML
    they should add and wait. Editing config silently bypasses the
    deliberate per-source decision.
-4. **Never bypass `submit_enabled`.** If the user says "but I want to
-   submit anyway", point them at `config/local.yaml` and stop.
+4. **Never bypass `submit.per_source.<source>.enabled`.** If the user
+   says "but I want to submit anyway", point them at
+   `config/local.yaml` and stop.
 5. **Never retry a failed live submission silently.** Failures go
    through the normal pipeline-state path (`failed` state, audit
    event).

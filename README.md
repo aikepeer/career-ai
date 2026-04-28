@@ -103,9 +103,9 @@ careerai digest --since 24h                          # whole-pipeline rollup
 ```
 
 Live submission is gated three ways: dry-run is the default, you
-must flip `submit_enabled: true` for that one source in
-`config/local.yaml`, and LinkedIn / Indeed additionally require the
-literal `I_UNDERSTAND_TOS_RISK` confirmation. See the
+must flip `submit.per_source.<source>.enabled: true` for that one
+source in `config/local.yaml`, and LinkedIn / Indeed additionally
+require the literal `I_UNDERSTAND_TOS_RISK` confirmation. See the
 [`/career:apply`](.claude-plugin/commands/apply.md) walkthrough.
 
 ## Known gaps

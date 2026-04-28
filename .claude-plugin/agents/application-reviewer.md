@@ -27,8 +27,9 @@ profile updates, filter tuning, or strategy changes. You are **read-only**
 - Identify patterns:
   - Sources with low response rates.
   - Listings that were tailored but never submitted (stuck in
-    `rendered`) — typical cause is a missing `submit_enabled: true` flip
-    in `config/local.yaml`.
+    `rendered`) — typical cause is
+    `submit.per_source.<source>.enabled` not being set to `true` in
+    `config/local.yaml`.
   - Listings that were filtered out repeatedly — possibly a filter that's
     too aggressive.
   - Skill gaps inferred from JDs of high-match-but-rejected listings.
