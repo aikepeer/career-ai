@@ -22,6 +22,7 @@ hex.workspace = true
 tokio = { workspace = true }
 rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 governor.workspace = true
+quick-xml.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true
@@ -29,6 +30,7 @@ tempfile.workspace = true
 serde_yaml.workspace = true
 rmcp = { workspace = true, features = ["client", "server", "macros", "transport-io", "transport-child-process", "transport-async-rw", "schemars"] }
 schemars.workspace = true
+insta.workspace = true
 
 # Integration test for the MCP-jobs adapter. `harness = false` so we
 # can hijack `main()` to switch between client-test mode and

@@ -1,0 +1,20 @@
+---
+source: crates/careerai-sources/src/indeed_rss.rs
+expression: listings
+---
+- source: indeed_rss
+  external_id: abc123-stable-guid
+  title: Senior AI Engineer
+  company: Acme Robotics
+  location: Remote
+  url: "https://www.indeed.com/viewjob?jk=abc123"
+  description: Build LLM agents at scale. Rust + Python. 5+ yrs experience
+  raw_json: ~
+- source: indeed_rss
+  external_id: 1ad0848a37034f11
+  title: Robotics Software Engineer
+  company: Beta Labs
+  location: "Bengaluru, KA"
+  url: "https://www.indeed.com/viewjob?jk=def456"
+  description: "ROS2, embedded Linux, motion planning."
+  raw_json: ~
