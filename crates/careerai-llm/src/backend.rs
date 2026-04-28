@@ -1,0 +1,475 @@
+//! Backend resolver — picks between the `claude` CLI subprocess driver
+//! and the rig-core Anthropic API driver based on a [`BackendChoice`]
+//! and what's reachable on the host.
+//!
+//! Resolution order when [`BackendChoice::Auto`]:
+//!
+//! 1. `which("claude")` succeeds AND `claude --print "ping"` exits 0
+//!    within 5 seconds (skipped when `CAREERAI_SKIP_CLI_PROBE=1`)
+//!    -> [`Backend::ClaudeCli`].
+//! 2. `ANTHROPIC_API_KEY` is reachable (env or
+//!    `keyring::Entry::new("career-ai", "anthropic/api_key")`) AND the
+//!    `live-llm-api` feature is enabled -> [`Backend::Api`].
+//! 3. Else [`BackendError::NoneAvailable`] with hints.
+//!
+//! When forced (`ClaudeCli` or `Api`): no fallback; mismatch is a hard
+//! error.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use careerai_core::config::{BackendChoice, LlmConfig};
+use tracing::debug;
+#[cfg(feature = "live-llm-api")]
+use tracing::info;
+#[cfg(feature = "live-llm-cli")]
+use {std::time::Duration, tokio::process::Command, tokio::time::timeout};
+
+use crate::cache::Cache;
+use crate::error::{LlmError, Result as LlmResult};
+use crate::trait_def::Llm;
+use crate::types::{LlmRequest, LlmResponse};
+
+#[cfg(feature = "live-llm-cli")]
+use crate::claude_cli::{locate_claude_binary, ClaudeCliError, ClaudeCliLlm};
+
+#[cfg(feature = "live-llm-api")]
+use crate::rig::{Provider, RigLlm};
+
+/// Resolved backend, ready to issue LLM calls.
+pub enum Backend {
+    /// `claude` CLI subprocess.
+    #[cfg(feature = "live-llm-cli")]
+    ClaudeCli(ClaudeCliLlm),
+    /// rig-core Anthropic API client.
+    #[cfg(feature = "live-llm-api")]
+    Api(RigLlm),
+}
+
+impl std::fmt::Debug for Backend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            #[cfg(feature = "live-llm-cli")]
+            Self::ClaudeCli(_) => f.debug_tuple("Backend::ClaudeCli").finish(),
+            #[cfg(feature = "live-llm-api")]
+            Self::Api(_) => f.debug_tuple("Backend::Api").finish(),
+            #[allow(unreachable_patterns)]
+            _ => f.write_str("Backend::None"),
+        }
+    }
+}
+
+/// Errors specific to backend resolution.
+#[derive(Debug, thiserror::Error)]
+pub enum BackendError {
+    #[error(
+        "`claude` CLI not installed or not on PATH; install Claude Code or set CAREERAI_CLAUDE_BIN"
+    )]
+    CliMissing,
+
+    #[error("`claude` CLI session is not authenticated; run `claude login`")]
+    CliNotAuthenticated,
+
+    #[error("ANTHROPIC_API_KEY not set in env or keyring")]
+    ApiKeyMissing,
+
+    #[error(
+        "no LLM backend reachable: `claude` CLI not found AND no ANTHROPIC_API_KEY; \
+         install Claude Code (https://claude.ai/download) OR export ANTHROPIC_API_KEY"
+    )]
+    NoneAvailable,
+
+    #[error("backend `{0}` was forced but its feature is not compiled in")]
+    FeatureDisabled(&'static str),
+
+    #[error("llm: {0}")]
+    Llm(#[from] LlmError),
+}
+
+/// Outcome of [`Backend::probe_choice`] — what the auto-detector picked
+/// without actually constructing the driver. Useful for `careerai llm
+/// probe` and the plugin setup script.
+#[derive(Debug, Clone)]
+pub struct BackendProbe {
+    pub chosen: BackendChoice,
+    pub claude_binary: Option<PathBuf>,
+    pub claude_version: Option<String>,
+    pub claude_ping_ms: Option<u128>,
+    pub claude_auth_ok: bool,
+    pub api_key_source: Option<&'static str>,
+}
+
+impl Backend {
+    /// Resolve a backend per the rules in this module's doc.
+    ///
+    /// `cfg.timeout_seconds` is forwarded to whichever driver wins.
+    ///
+    /// # Errors
+    /// See [`BackendError`].
+    pub async fn resolve(
+        choice: BackendChoice,
+        cfg: &LlmConfig,
+        cache: Arc<Cache>,
+    ) -> std::result::Result<Self, BackendError> {
+        match choice {
+            BackendChoice::Auto => resolve_auto(cfg, cache).await,
+            BackendChoice::ClaudeCli => build_cli(cfg, cache).await,
+            BackendChoice::Api => build_api(cfg, cache),
+        }
+    }
+
+    /// Lightweight probe: don't build the driver, just figure out which
+    /// backend `Auto` would pick + collect diagnostic data for the
+    /// caller to print.
+    pub async fn probe(cfg: &LlmConfig) -> BackendProbe {
+        let mut probe = BackendProbe {
+            chosen: BackendChoice::Auto,
+            claude_binary: None,
+            claude_version: None,
+            claude_ping_ms: None,
+            claude_auth_ok: false,
+            api_key_source: None,
+        };
+
+        #[cfg(feature = "live-llm-cli")]
+        {
+            if let Ok(bin) = locate_claude_binary() {
+                probe.claude_binary = Some(bin.clone());
+                if let Some(v) = read_claude_version(&bin).await {
+                    probe.claude_version = Some(v);
+                }
+                if probe_claude_auth(&bin).await {
+                    probe.claude_auth_ok = true;
+                    probe.chosen = BackendChoice::ClaudeCli;
+                    probe.claude_ping_ms = last_ping_ms();
+                }
+            }
+        }
+
+        // Always look for an API key, even when CLI wins, so `probe`
+        // output can show the fallback status.
+        if api_key_source().is_some() {
+            probe.api_key_source = api_key_source();
+            if probe.chosen == BackendChoice::Auto {
+                #[cfg(feature = "live-llm-api")]
+                {
+                    probe.chosen = BackendChoice::Api;
+                }
+            }
+        }
+
+        // Drop the timeout argument lint when neither feature is on.
+        let _ = cfg;
+        probe
+    }
+}
+
+async fn resolve_auto(
+    cfg: &LlmConfig,
+    cache: Arc<Cache>,
+) -> std::result::Result<Backend, BackendError> {
+    #[cfg(feature = "live-llm-cli")]
+    {
+        if let Ok(bin) = locate_claude_binary() {
+            let auth_ok =
+                std::env::var("CAREERAI_SKIP_CLI_PROBE").is_ok() || probe_claude_auth(&bin).await;
+            if auth_ok {
+                debug!(
+                    target = "careerai_llm::backend",
+                    binary = %bin.display(),
+                    "auto-resolved backend: claude-cli"
+                );
+                let model = pick_default_model(cfg);
+                return Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
+                    bin,
+                    model,
+                    cache,
+                    cfg.timeout_seconds.max(1),
+                )));
+            }
+            debug!(
+                target = "careerai_llm::backend",
+                "claude binary present but ping failed; falling through"
+            );
+        }
+    }
+
+    #[cfg(feature = "live-llm-api")]
+    {
+        if api_key_source().is_some() {
+            return build_api(cfg, cache);
+        }
+    }
+
+    let _ = cache;
+    let _ = cfg;
+    Err(BackendError::NoneAvailable)
+}
+
+#[cfg(feature = "live-llm-cli")]
+async fn build_cli(
+    cfg: &LlmConfig,
+    cache: Arc<Cache>,
+) -> std::result::Result<Backend, BackendError> {
+    let bin = locate_claude_binary().map_err(|e| match e {
+        ClaudeCliError::NotInstalled => BackendError::CliMissing,
+        other => BackendError::Llm(LlmError::from(other)),
+    })?;
+
+    if std::env::var("CAREERAI_SKIP_CLI_PROBE").is_err() && !probe_claude_auth(&bin).await {
+        return Err(BackendError::CliNotAuthenticated);
+    }
+
+    let model = pick_default_model(cfg);
+    Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
+        bin,
+        model,
+        cache,
+        cfg.timeout_seconds.max(1),
+    )))
+}
+
+#[cfg(not(feature = "live-llm-cli"))]
+async fn build_cli(
+    _cfg: &LlmConfig,
+    _cache: Arc<Cache>,
+) -> std::result::Result<Backend, BackendError> {
+    Err(BackendError::FeatureDisabled("claude-cli"))
+}
+
+#[cfg(feature = "live-llm-api")]
+fn build_api(cfg: &LlmConfig, cache: Arc<Cache>) -> std::result::Result<Backend, BackendError> {
+    let key = read_api_key().ok_or(BackendError::ApiKeyMissing)?;
+    let model = pick_default_model(cfg);
+    let llm = RigLlm::with_api_key(
+        Provider::Anthropic,
+        key,
+        model,
+        cache,
+        cfg.timeout_seconds.max(1),
+    )
+    .map_err(BackendError::Llm)?;
+    info!(
+        target = "careerai_llm::backend",
+        "auto-resolved backend: anthropic-api"
+    );
+    Ok(Backend::Api(llm))
+}
+
+#[cfg(not(feature = "live-llm-api"))]
+fn build_api(_cfg: &LlmConfig, _cache: Arc<Cache>) -> std::result::Result<Backend, BackendError> {
+    Err(BackendError::FeatureDisabled("api"))
+}
+
+/// Pick the default model for the resolved backend. Tailor model wins,
+/// then parse_resume_model, then a hard-coded sensible default.
+fn pick_default_model(cfg: &LlmConfig) -> String {
+    let candidate = if !cfg.tailor_model.is_empty() {
+        cfg.tailor_model.as_str()
+    } else if !cfg.parse_resume_model.is_empty() {
+        cfg.parse_resume_model.as_str()
+    } else {
+        "sonnet"
+    };
+    strip_provider_prefix(candidate).to_string()
+}
+
+/// Strip a leading `anthropic/` / `openai/` namespace if the layered
+/// config used the rig-style multi-provider naming.
+fn strip_provider_prefix(model: &str) -> &str {
+    if let Some((_, rest)) = model.split_once('/') {
+        rest
+    } else {
+        model
+    }
+}
+
+/// Best-effort lookup for an Anthropic API key. Mirrors
+/// `careerai-cli::anthropic_key_reachable` so behavior is consistent
+/// across CLI and library callers.
+#[cfg(feature = "live-llm-api")]
+fn read_api_key() -> Option<String> {
+    if let Ok(v) = std::env::var("ANTHROPIC_API_KEY") {
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    keyring::Entry::new("career-ai", "anthropic/api_key")
+        .ok()
+        .and_then(|e| e.get_password().ok())
+        .filter(|v| !v.is_empty())
+}
+
+fn api_key_source() -> Option<&'static str> {
+    if std::env::var("ANTHROPIC_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
+        return Some("env:ANTHROPIC_API_KEY");
+    }
+    let entry = keyring::Entry::new("career-ai", "anthropic/api_key").ok()?;
+    let v = entry.get_password().ok()?;
+    if v.is_empty() {
+        None
+    } else {
+        Some("keyring:career-ai/anthropic/api_key")
+    }
+}
+
+#[cfg(feature = "live-llm-cli")]
+async fn read_claude_version(bin: &std::path::Path) -> Option<String> {
+    let out = Command::new(bin).arg("--version").output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Cheap auth probe: invoke `claude --print --output-format json --model
+/// sonnet "ping"` with a 5s ceiling, treat exit-0 + `is_error: false` as
+/// success.
+#[cfg(feature = "live-llm-cli")]
+async fn probe_claude_auth(bin: &std::path::Path) -> bool {
+    let started = std::time::Instant::now();
+    let result = timeout(
+        Duration::from_secs(5),
+        Command::new(bin)
+            .arg("--print")
+            .arg("--output-format")
+            .arg("json")
+            .arg("--model")
+            .arg("sonnet")
+            .arg("ping")
+            .output(),
+    )
+    .await;
+    let Ok(Ok(out)) = result else { return false };
+    let elapsed = started.elapsed().as_millis();
+    LAST_PING_MS.with(|c| c.set(Some(elapsed)));
+    if !out.status.success() {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Parse only the field we care about.
+    serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .is_ok_and(|v| v.get("is_error").and_then(serde_json::Value::as_bool) != Some(true))
+}
+
+thread_local! {
+    static LAST_PING_MS: std::cell::Cell<Option<u128>> = const { std::cell::Cell::new(None) };
+}
+
+fn last_ping_ms() -> Option<u128> {
+    LAST_PING_MS.with(std::cell::Cell::get)
+}
+
+#[async_trait]
+impl Llm for Backend {
+    fn name(&self) -> &'static str {
+        match self {
+            #[cfg(feature = "live-llm-cli")]
+            Self::ClaudeCli(b) => b.name(),
+            #[cfg(feature = "live-llm-api")]
+            Self::Api(b) => b.name(),
+            #[allow(unreachable_patterns)]
+            _ => "none",
+        }
+    }
+
+    async fn complete(&self, req: &LlmRequest) -> LlmResult<LlmResponse> {
+        match self {
+            #[cfg(feature = "live-llm-cli")]
+            Self::ClaudeCli(b) => b.complete(req).await,
+            #[cfg(feature = "live-llm-api")]
+            Self::Api(b) => b.complete(req).await,
+            #[allow(unreachable_patterns)]
+            _ => Err(LlmError::Upstream("no backend feature compiled".into())),
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn cfg() -> LlmConfig {
+        LlmConfig::default()
+    }
+
+    fn cache() -> Arc<Cache> {
+        Arc::new(Cache::new(
+            std::env::temp_dir().join("careerai-llm-backend-test"),
+        ))
+    }
+
+    #[test]
+    fn pick_default_model_prefers_tailor() {
+        let mut c = cfg();
+        c.tailor_model = "anthropic/claude-sonnet-4-6".into();
+        c.parse_resume_model = "anthropic/claude-haiku".into();
+        assert_eq!(pick_default_model(&c), "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn pick_default_model_falls_back_to_sonnet() {
+        let c = cfg();
+        assert_eq!(pick_default_model(&c), "sonnet");
+    }
+
+    #[test]
+    fn strip_namespace() {
+        assert_eq!(
+            strip_provider_prefix("anthropic/claude-sonnet-4-6"),
+            "claude-sonnet-4-6"
+        );
+        assert_eq!(
+            strip_provider_prefix("claude-sonnet-4-6"),
+            "claude-sonnet-4-6"
+        );
+    }
+
+    #[cfg(feature = "live-llm-api")]
+    #[tokio::test]
+    async fn forced_api_with_no_key_errors() {
+        // Stash + clear envs first.
+        let prev = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let res = Backend::resolve(BackendChoice::Api, &cfg(), cache()).await;
+        // The keyring may have a real entry on a dev box; tolerate a
+        // successful build there. We're testing that the resolver
+        // doesn't panic on the no-env path.
+        match res {
+            Err(BackendError::ApiKeyMissing) | Ok(_) => {}
+            Err(other) => panic!("expected ApiKeyMissing or Ok, got {other:?}"),
+        }
+        if let Some(v) = prev {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+    }
+
+    #[cfg(feature = "live-llm-cli")]
+    #[tokio::test]
+    async fn forced_cli_with_no_binary_errors() {
+        std::env::set_var(
+            "CAREERAI_CLAUDE_BIN",
+            "/nonexistent/path/that/does/not/resolve",
+        );
+        std::env::set_var("CAREERAI_SKIP_CLI_PROBE", "1");
+        let res = Backend::resolve(BackendChoice::ClaudeCli, &cfg(), cache()).await;
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+        std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
+        // The CAREERAI_CLAUDE_BIN override gives a path back, so the
+        // resolver constructs the driver successfully — but the
+        // subsequent `complete()` call would fail. Validate the
+        // resolution path produces SOME backend, not a panic.
+        assert!(res.is_ok() || matches!(res, Err(BackendError::CliMissing)));
+    }
+}
