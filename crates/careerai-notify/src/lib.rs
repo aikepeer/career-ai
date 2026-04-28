@@ -193,8 +193,15 @@ pub trait Notifier: Send + Sync + std::fmt::Debug {
 }
 
 /// A best-effort fan-out of `Notifier`s plus a minimum severity filter.
+///
+/// Channels are stored behind `Arc` so each `fire` call can hand a
+/// channel handle to `tokio::spawn` without cloning the underlying
+/// notifier. Spawning isolates panics: a misbehaving channel impl
+/// (e.g. arithmetic overflow inside a custom `Notifier`) returns a
+/// `JoinError::Panic` that we log + swallow rather than crashing the
+/// daemon tick.
 pub struct Pipeline {
-    channels: Vec<Box<dyn Notifier>>,
+    channels: Vec<std::sync::Arc<dyn Notifier>>,
     min_severity: Severity,
 }
 
@@ -215,29 +222,30 @@ impl Pipeline {
     /// independently; a misconfigured channel logs a warning and is
     /// skipped rather than failing the whole construction.
     pub fn from_config(cfg: &NotifyConfig) -> Result<Self, NotifyError> {
-        let mut channels: Vec<Box<dyn Notifier>> = Vec::new();
+        use std::sync::Arc;
+        let mut channels: Vec<Arc<dyn Notifier>> = Vec::new();
 
         if let Some(slack) = cfg.channels.slack.as_ref() {
             match channels::slack::SlackNotifier::from_config(slack) {
-                Ok(n) => channels.push(Box::new(n)),
+                Ok(n) => channels.push(Arc::new(n)),
                 Err(e) => tracing::warn!(error = %e, "slack channel disabled"),
             }
         }
         if let Some(telegram) = cfg.channels.telegram.as_ref() {
             match channels::telegram::TelegramNotifier::from_config(telegram) {
-                Ok(n) => channels.push(Box::new(n)),
+                Ok(n) => channels.push(Arc::new(n)),
                 Err(e) => tracing::warn!(error = %e, "telegram channel disabled"),
             }
         }
         if let Some(email) = cfg.channels.email.as_ref() {
             match channels::email::EmailNotifier::from_config(email) {
-                Ok(n) => channels.push(Box::new(n)),
+                Ok(n) => channels.push(Arc::new(n)),
                 Err(e) => tracing::warn!(error = %e, "email channel disabled"),
             }
         }
         if let Some(ntfy) = cfg.channels.ntfy.as_ref() {
             match channels::ntfy::NtfyNotifier::from_config(ntfy) {
-                Ok(n) => channels.push(Box::new(n)),
+                Ok(n) => channels.push(Arc::new(n)),
                 Err(e) => tracing::warn!(error = %e, "ntfy channel disabled"),
             }
         }
@@ -252,7 +260,10 @@ impl Pipeline {
     /// and by callers that want to wire their own channel set without
     /// going through config.
     #[must_use]
-    pub fn with_channels(channels: Vec<Box<dyn Notifier>>, min_severity: Severity) -> Self {
+    pub fn with_channels(
+        channels: Vec<std::sync::Arc<dyn Notifier>>,
+        min_severity: Severity,
+    ) -> Self {
         Self {
             channels,
             min_severity,
@@ -276,6 +287,10 @@ impl Pipeline {
     /// logged and swallowed so a broken webhook can't break the daemon.
     /// Cheap when no channels are configured (early-returns) or when
     /// `severity < min_severity` (events below the floor are dropped).
+    ///
+    /// Channels run on isolated `tokio::spawn` tasks, so a panic in a
+    /// channel impl is caught as a `JoinError::Panic` and warn-logged
+    /// rather than aborting the daemon tick.
     pub async fn fire(&self, event: NotifyEvent, severity: Severity) {
         if severity < self.min_severity {
             tracing::debug!(
@@ -292,32 +307,51 @@ impl Pipeline {
         }
 
         let title = event.title();
-        let futs = self.channels.iter().map(|chan| {
-            let evt = &event;
-            let name = chan.name();
-            let title_for_log = title.clone();
-            async move {
-                match chan.notify(evt, severity).await {
-                    Ok(()) => {
-                        tracing::debug!(
-                            channel = name,
-                            title = %title_for_log,
-                            "notify: delivered",
-                        );
+        let event = std::sync::Arc::new(event);
+        let handles: Vec<_> = self
+            .channels
+            .iter()
+            .map(|chan| {
+                let chan = std::sync::Arc::clone(chan);
+                let event = std::sync::Arc::clone(&event);
+                let title_for_log = title.clone();
+                let name = chan.name();
+                tokio::spawn(async move {
+                    match chan.notify(&event, severity).await {
+                        Ok(()) => {
+                            tracing::debug!(
+                                channel = name,
+                                title = %title_for_log,
+                                "notify: delivered",
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                channel = name,
+                                error = %e,
+                                title = %title_for_log,
+                                "notify: channel failed (best-effort, suppressed)",
+                            );
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!(
-                            channel = name,
-                            error = %e,
-                            title = %title_for_log,
-                            "notify: channel failed (best-effort, suppressed)",
-                        );
-                    }
-                }
-            }
-        });
+                })
+            })
+            .collect();
 
-        futures::future::join_all(futs).await;
+        for (idx, handle) in handles.into_iter().enumerate() {
+            // We don't have the channel name post-spawn (move semantics
+            // ate it) but the index lets the operator correlate with
+            // `channel_names()` if they need to. Panics get warn-logged
+            // here; per-channel errors were already logged inside the
+            // task above.
+            if let Err(e) = handle.await {
+                tracing::warn!(
+                    channel_index = idx,
+                    error = %e,
+                    "notify: channel task panicked (best-effort, suppressed)",
+                );
+            }
+        }
     }
 }
 
@@ -374,19 +408,19 @@ mod tests {
         let slow_ok = Arc::new(AtomicUsize::new(0));
         let pipe = Pipeline::with_channels(
             vec![
-                Box::new(CountingNotifier {
+                Arc::new(CountingNotifier {
                     name: "ok",
                     delivered: ok.clone(),
                     delay_ms: 0,
                     fail: false,
                 }),
-                Box::new(CountingNotifier {
+                Arc::new(CountingNotifier {
                     name: "broken",
                     delivered: Arc::new(AtomicUsize::new(0)),
                     delay_ms: 0,
                     fail: true,
                 }),
-                Box::new(CountingNotifier {
+                Arc::new(CountingNotifier {
                     name: "slow",
                     delivered: slow_ok.clone(),
                     delay_ms: 50,
@@ -405,7 +439,7 @@ mod tests {
     async fn fire_drops_events_below_min_severity() {
         let ok = Arc::new(AtomicUsize::new(0));
         let pipe = Pipeline::with_channels(
-            vec![Box::new(CountingNotifier {
+            vec![Arc::new(CountingNotifier {
                 name: "ok",
                 delivered: ok.clone(),
                 delay_ms: 0,
@@ -426,5 +460,45 @@ mod tests {
         // Just shouldn't panic / deadlock.
         pipe.fire(ev(), Severity::Critical).await;
         assert_eq!(pipe.channel_count(), 0);
+    }
+
+    /// A panicking channel must NOT crash the daemon tick: the spawned
+    /// task is isolated, the JoinError gets warn-logged, sibling
+    /// channels still deliver.
+    #[derive(Debug)]
+    struct PanickingNotifier;
+
+    #[async_trait]
+    impl Notifier for PanickingNotifier {
+        fn name(&self) -> &'static str {
+            "panicker"
+        }
+        async fn notify(
+            &self,
+            _event: &NotifyEvent,
+            _severity: Severity,
+        ) -> Result<(), NotifyError> {
+            panic!("synthetic panic inside notifier");
+        }
+    }
+
+    #[tokio::test]
+    async fn fire_swallows_channel_panics() {
+        let ok = Arc::new(AtomicUsize::new(0));
+        let pipe = Pipeline::with_channels(
+            vec![
+                Arc::new(PanickingNotifier),
+                Arc::new(CountingNotifier {
+                    name: "ok",
+                    delivered: ok.clone(),
+                    delay_ms: 0,
+                    fail: false,
+                }),
+            ],
+            Severity::Info,
+        );
+        // Must not propagate the panic; sibling channel still delivers.
+        pipe.fire(ev(), Severity::Critical).await;
+        assert_eq!(ok.load(Ordering::SeqCst), 1);
     }
 }
