@@ -176,10 +176,8 @@ fn merge_into_value(mut root: serde_yaml::Value, report: &SyncReport) -> serde_y
             .unwrap_or_default();
 
         let merged = merge_company_list(ats, &existing_list, report);
-        let yaml_seq: Vec<serde_yaml::Value> = merged
-            .into_iter()
-            .map(serde_yaml::Value::String)
-            .collect();
+        let yaml_seq: Vec<serde_yaml::Value> =
+            merged.into_iter().map(serde_yaml::Value::String).collect();
         ats_map.insert(companies_key, serde_yaml::Value::Sequence(yaml_seq));
     }
     root

@@ -296,18 +296,24 @@ async fn fetch_listings(
     bases: &BaseUrls,
 ) -> Result<Vec<RawListing>, SourceError> {
     match entry.ats {
-        AtsVendor::Greenhouse => GreenhouseSource::new(entry.slug.clone())
-            .with_base_url(bases.greenhouse.clone())
-            .discover()
-            .await,
-        AtsVendor::Lever => LeverSource::new(entry.slug.clone())
-            .with_base_url(bases.lever.clone())
-            .discover()
-            .await,
-        AtsVendor::Ashby => AshbySource::new(entry.slug.clone())
-            .with_base_url(bases.ashby.clone())
-            .discover()
-            .await,
+        AtsVendor::Greenhouse => {
+            GreenhouseSource::new(entry.slug.clone())
+                .with_base_url(bases.greenhouse.clone())
+                .discover()
+                .await
+        }
+        AtsVendor::Lever => {
+            LeverSource::new(entry.slug.clone())
+                .with_base_url(bases.lever.clone())
+                .discover()
+                .await
+        }
+        AtsVendor::Ashby => {
+            AshbySource::new(entry.slug.clone())
+                .with_base_url(bases.ashby.clone())
+                .discover()
+                .await
+        }
     }
 }
 
@@ -523,13 +529,15 @@ mod tests {
         // Lever: `lev-co` has matching JD → add.
         Mock::given(method("GET"))
             .and(path_regex(r"^/v0/postings/lev-co"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
-                "id": "p1",
-                "text": "Robotics Engineer",
-                "descriptionPlain": "ROS2 and embedded systems.",
-                "categories": {},
-                "hostedUrl": "https://lever.co/lev-co/p1"
-            }])))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "p1",
+                    "text": "Robotics Engineer",
+                    "descriptionPlain": "ROS2 and embedded systems.",
+                    "categories": {},
+                    "hostedUrl": "https://lever.co/lev-co/p1"
+                }])),
+            )
             .mount(&server)
             .await;
 
@@ -597,7 +605,10 @@ mod tests {
 
         // add: acme (gh), lev-co (lever), ash-co (ashby)
         let add_slugs: Vec<_> = report.add.iter().map(|h| h.slug.clone()).collect();
-        assert!(add_slugs.contains(&"acme".to_string()), "add: {add_slugs:?}");
+        assert!(
+            add_slugs.contains(&"acme".to_string()),
+            "add: {add_slugs:?}"
+        );
         assert!(
             add_slugs.contains(&"lev-co".to_string()),
             "add: {add_slugs:?}"
