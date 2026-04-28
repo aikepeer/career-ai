@@ -841,18 +841,21 @@ fn profile_import(
     let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
 
     // Auto-enable LLM extraction when ANY live backend is compiled in
-    // and a usable backend is reachable (claude CLI auth or
-    // ANTHROPIC_API_KEY). The actual backend choice (CLI vs API) is
-    // resolved deeper in `run_profile_import_with_llm`.
+    // and one is plausibly available — `claude` binary on PATH (auth
+    // NOT verified at this stage) or an Anthropic API key reachable.
+    // The actual reachability check (including `claude` auth) happens
+    // inside `run_profile_import_with_llm`; if it fails we fall back
+    // to the heuristic parser and print a hint to `claude login` or
+    // export `ANTHROPIC_API_KEY`.
     let live_compiled = cfg!(any(feature = "live-llm-cli", feature = "live-llm-api"));
     let want_llm = match use_llm {
         Some(v) => v,
-        None => live_compiled && llm_backend_reachable(),
+        None => live_compiled && llm_backend_maybe_available(),
     };
 
     let profile = if want_llm {
         // Fall back to the heuristic parser when LLM resolution fails
-        // mid-run (e.g. session expired since `llm_backend_reachable`
+        // mid-run (e.g. session expired since `llm_backend_maybe_available`
         // checked, claude CLI binary stale, network drop). The
         // heuristic parser is strictly better than a hard error here:
         // the user gets a profile they can edit, and a clear log line
@@ -981,10 +984,21 @@ fn anthropic_key_reachable() -> bool {
     false
 }
 
-/// Best-effort: is ANY live LLM backend reachable? Either the `claude`
-/// CLI binary is on PATH, or an Anthropic API key is set. Used to
-/// auto-enable `--use-llm` heuristically.
-fn llm_backend_reachable() -> bool {
+/// Cheap heuristic: would `Backend::resolve(Auto, ...)` likely succeed
+/// on this host? Returns `true` if either:
+///
+///   * the `claude` binary is on PATH (auth NOT verified — caller is
+///     expected to handle `Backend::resolve`'s failure gracefully when
+///     the session is logged out), or
+///   * an Anthropic API key is reachable (env or keyring).
+///
+/// This is intentionally NOT an auth probe (which costs ~5s on cold
+/// start). It is used by `--use-llm` auto-detection to decide whether
+/// to even ATTEMPT the LLM path. The actual reachability check
+/// happens inside `run_profile_import_with_llm`, which falls back to
+/// the heuristic parser when `Backend::resolve` errors and surfaces a
+/// hint to run `claude login` or set `ANTHROPIC_API_KEY`.
+fn llm_backend_maybe_available() -> bool {
     if which::which("claude").is_ok() {
         return true;
     }
