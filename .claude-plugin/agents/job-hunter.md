@@ -20,8 +20,8 @@ skill (`dry-run-apply`) gated by an explicit ToS-risk confirmation.
 ## Scope
 
 - Pull new listings from configured sources (Greenhouse, Lever, Ashby,
-  Remotive, We Work Remotely, RemoteOK, Wellfound/YC, LinkedIn via
-  RapidAPI).
+  Remotive, We Work Remotely, RemoteOK, Wellfound/YC, native
+  `linkedin_browser` source, plus optional community LinkedIn MCPs).
 - Cross-reference listings against the user's profile (niche: AI/ML +
   LLM apps, embedded platforms / robotics; remote-first; Delhi-NCR
   fallback).
@@ -40,11 +40,17 @@ skill (`dry-run-apply`) gated by an explicit ToS-risk confirmation.
   source.
 - **No fabrication.** If you can't find a listing, say so. Don't invent
   job IDs.
-- **LinkedIn discovery defaults to ToS-clean.** Use the
-  `linkedin-jobs` MCP server (RapidAPI-backed). Do not fall back to the
-  scraper-based `linkedin-browser` server unless the user explicitly
-  flips `disabled: false` in `.mcp.json` and acknowledges the ToS risk
-  themselves.
+- **LinkedIn discovery: native source is the supported path.** The
+  project ships a native `linkedin_browser` discovery source
+  (`sources.linkedin_browser` in `config/local.yaml`) that drives a
+  stealth Chromium session and reuses the M5 `li_at` cookie + stealth-v2.js
+  infrastructure. It defaults to `enabled: false` because it violates
+  LinkedIn User Agreement §8.2; the user opts in deliberately. When
+  asking the user to enable LinkedIn discovery, point them at this
+  config block — not at the community MCP servers in `.mcp.json`. Both
+  community MCPs (`linkedin-jobs` RapidAPI-backed; `linkedin-browser`
+  scraper) are kept disabled by default and exist only as alternative
+  surfaces for power users.
 
 ## Process
 

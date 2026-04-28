@@ -1,4 +1,5 @@
 {
+  "_comment": "Native LinkedIn discovery is the supported path for this project. Enable it via `sources.linkedin_browser.enabled: true` in `config/local.yaml` (see `crates/careerai-core/src/templates/default.yaml` for the full schema). The native path is config-driven, daemon-integrated, governor-rate-limited, and reuses the M5 stealth-v2.js + `li_at` cookie infrastructure. The two LinkedIn community MCPs below are kept disabled by default as alternative discovery surfaces for power users; flip `disabled: false` per server at your own ToS risk.",
   "mcpServers": {
     "careerai": {
       "command": "careerai-mcp",
@@ -18,7 +19,7 @@
       "env": {
         "RAPIDAPI_KEY": "${LINKEDIN_RAPIDAPI_KEY}"
       },
-      "comment": "Optional LinkedIn discovery via RapidAPI's LinkedIn Data API (ToS-clean, no scraping; free tier exists). Disabled by default because the upstream repo (Rom7699/linkedin-jobs-mcp-server, verified 2026-04-27) ships as `python main.py` with no [project.scripts] entry, so the uvx invocation above will fail until upstream is packaged or the user pins a packaged fork. To enable: clone the repo locally, run `python main.py` with RAPIDAPI_KEY set, and replace this entry with a command/args pair pointing at the local script. Tracking: PR #19 (mcp_jobs adapter) is the proper long-term path.",
+      "comment": "RapidAPI-backed LinkedIn discovery (ToS-clean, no scraping; free tier exists). Disabled by default for two reasons: (1) the upstream `Rom7699/linkedin-jobs-mcp-server` ships as `python main.py` with no `[project.scripts]` entry, so this `uvx` invocation will fail until upstream is packaged; (2) the supported discovery path for this project is the native `linkedin_browser` source (config-driven, daemon-integrated, see `sources.linkedin_browser` in `crates/careerai-core/src/templates/default.yaml`). To opt in to the native path, edit `config/local.yaml` and flip `sources.linkedin_browser.enabled: true` — no MCP needed.",
       "disabled": true
     },
     "linkedin-browser": {
@@ -30,7 +31,7 @@
       ],
       "env": {},
       "disabled": true,
-      "comment": "Opt-in: browser-based LinkedIn scraper. Violates LinkedIn User Agreement section 8.2 (no automated access). Disabled by default. Installed from the upstream Git repo via uvx (not on PyPI; pyproject pins `name = mcp-linkedin` with a matching [project.scripts] entry, so the uvx form works). Flip `disabled` to false at your own risk; rate caps and cookie-jar rotation in careerai-submit still apply."
+      "comment": "Community browser-based LinkedIn scraper (`adhikasp/mcp-linkedin`). Disabled because this project ships its own native `linkedin_browser` source that drives the same kind of stealth Chromium session, integrates with the daemon's cron, honors per-source rate caps via `governor`, and reuses the `li_at` cookie + stealth-v2.js infrastructure already audited in M5. Prefer enabling `sources.linkedin_browser.enabled: true` in `config/local.yaml` over flipping this MCP. Both paths violate LinkedIn User Agreement §8.2; the native path is just easier to operate."
     }
   }
 }
