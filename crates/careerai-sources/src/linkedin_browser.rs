@@ -24,7 +24,19 @@
 //! LinkedIn User Agreement §8.2 forbids automated access; the user
 //! opts in by flipping `sources.linkedin_browser.enabled = true`.
 //! Defaults are conservative (3 pages max, 2 calls/min, 1.5–3.5s
-//! inter-page jitter).
+//! inter-page jitter), with a hard ceiling of [`MAX_PAGES_CEILING`]
+//! enforced at construction.
+//!
+//! ## Shared `li_at` with the M5 submitter
+//!
+//! Both this adapter and `careerai_submit::linkedin` read the SAME
+//! keychain entry (`career-ai`, `linkedin/li_at`). Operationally:
+//! a CAPTCHA / security challenge tripped during discovery
+//! invalidates the cookie for the submitter on the next call, and
+//! vice-versa. There is intentionally only one `li_at` per
+//! installation (single-user pipeline). Keep the discovery cadence
+//! conservative so the write-side submitter doesn't inherit a
+//! discovery-side lockout.
 
 #![cfg(feature = "browser")]
 
@@ -71,6 +83,16 @@ const PAGE_JITTER_MS_MAX: u64 = 3_500;
 /// the cron tick.
 const DISCOVER_TIMEOUT_SECONDS: u64 = 180;
 
+/// Hard ceiling on `max_pages`. LinkedIn aggressively rate-limits
+/// (and CAPTCHA-walls) logged-in search scraping past ~10 pages
+/// even with conservative jitter. Operators who set
+/// `max_pages: 100` would trip the rate limit hard, get a CAPTCHA
+/// challenge, and invalidate the shared `li_at` cookie — which
+/// also breaks the M5 LinkedIn submitter that reads the same
+/// keychain entry. Clamp here so a config typo can't escalate
+/// into a tenant-wide LinkedIn lockout.
+pub const MAX_PAGES_CEILING: u32 = 10;
+
 type ReadRateLimiter = RateLimiter<
     NotKeyed,
     InMemoryState,
@@ -79,9 +101,14 @@ type ReadRateLimiter = RateLimiter<
 >;
 
 /// Cached `Arc<RateLimiter>` so reconstructions across cron ticks
-/// share the token bucket. Single instance: there's only one
-/// `linkedin-browser` source per process. Mirrors `mcp_jobs::SOURCE_STATE`'s
-/// rationale (build_sources runs every tick).
+/// share the token bucket. Single instance assumption: there is only
+/// one `linkedin-browser` source per process (one `li_at` cookie ⇒
+/// one logical scraper). The first-built instance wins — subsequent
+/// `LinkedinBrowserSource::new` calls with a different
+/// `rate_per_minute` will silently inherit the original bucket.
+/// Mirrors `mcp_jobs::SOURCE_STATE`'s rationale (build_sources runs
+/// every tick) but unkeyed because there's no second instance to
+/// disambiguate.
 static RATE_LIMITER: std::sync::OnceLock<std::sync::Mutex<Option<Arc<ReadRateLimiter>>>> =
     std::sync::OnceLock::new();
 
@@ -126,7 +153,26 @@ impl LinkedinBrowserSource {
             }
             known
         });
+        // Clamp pagination so a misconfig can't escalate into a
+        // CAPTCHA wall + cookie invalidation that also takes down
+        // the M5 submitter (shared `li_at`).
+        if sanitized.max_pages > MAX_PAGES_CEILING {
+            warn!(
+                target: "linkedin-browser",
+                requested = sanitized.max_pages,
+                ceiling = MAX_PAGES_CEILING,
+                "max_pages exceeds safety ceiling; clamping to avoid LinkedIn rate-limit / CAPTCHA"
+            );
+            sanitized.max_pages = MAX_PAGES_CEILING;
+        }
         let rate_limiter = get_rate_limiter(sanitized.rate_per_minute);
+        if rate_limiter.is_none() {
+            warn!(
+                target: "linkedin-browser",
+                "rate_per_minute=0 — read-side rate limiter disabled; \
+                 operator is responsible for cadence via scheduler.cadence"
+            );
+        }
         Self {
             cfg: sanitized,
             rate_limiter,
@@ -286,5 +332,25 @@ mod tests {
     fn source_name_is_linkedin_browser() {
         let src = LinkedinBrowserSource::new(LinkedinBrowserSourceConfig::default());
         assert_eq!(src.name(), "linkedin-browser");
+    }
+
+    #[test]
+    fn max_pages_clamped_to_ceiling() {
+        let cfg = LinkedinBrowserSourceConfig {
+            max_pages: 100,
+            ..LinkedinBrowserSourceConfig::default()
+        };
+        let src = LinkedinBrowserSource::new(cfg);
+        assert_eq!(src.cfg.max_pages, MAX_PAGES_CEILING);
+    }
+
+    #[test]
+    fn max_pages_at_or_below_ceiling_preserved() {
+        let cfg = LinkedinBrowserSourceConfig {
+            max_pages: 5,
+            ..LinkedinBrowserSourceConfig::default()
+        };
+        let src = LinkedinBrowserSource::new(cfg);
+        assert_eq!(src.cfg.max_pages, 5);
     }
 }

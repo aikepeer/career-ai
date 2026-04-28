@@ -191,7 +191,11 @@ pub struct LinkedinBrowserSourceConfig {
     #[serde(default)]
     pub filters: LinkedinBrowserFilters,
     /// Hard cap on pagination. Each page is ~25 cards; default 3 pages
-    /// = ~75 listings per tick.
+    /// = ~75 listings per tick. Values above
+    /// `careerai_sources::linkedin_browser::MAX_PAGES_CEILING` are
+    /// clamped at adapter construction with a warn log — LinkedIn
+    /// CAPTCHA-walls high page counts and a triggered challenge
+    /// invalidates the shared `li_at` cookie used by the M5 submitter.
     #[serde(default = "default_linkedin_max_pages")]
     pub max_pages: u32,
     /// Calls per minute soft cap on the page-load rate. `0` disables.
@@ -258,7 +262,6 @@ fn default_linkedin_rate_per_minute() -> u32 {
 fn default_linkedin_action_timeout() -> u64 {
     30
 }
-
 
 /// One MCP-server discovery source. Spawns the configured stdio
 /// process, performs an MCP `initialize` + `tools/list` handshake, and
