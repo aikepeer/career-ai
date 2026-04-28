@@ -25,6 +25,7 @@
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use careerai_core::config::IndeedRssSourceConfig;
@@ -32,6 +33,7 @@ use governor::clock::DefaultClock;
 use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
+use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use reqwest::Client;
@@ -43,6 +45,25 @@ use crate::util::html_to_text;
 
 const DEFAULT_BASE_URL: &str = "https://rss.indeed.com";
 const SOURCE_NAME: &str = "indeed_rss";
+
+/// Hard ceiling on `discover()` HTTP wall time. Indeed's edge can stall
+/// indefinitely on 5xx upstream incidents; without a timeout one bad
+/// tick will pin a scheduler job until the daemon is killed.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// User-agent header sent with every request. RemoteOK hard-rejects
+/// UA-less requests; Indeed's behavior is undocumented but its CDN is
+/// known to throttle anonymous traffic. Pinning the same UA the rest
+/// of the workspace uses keeps logs greppable and traffic identifiable.
+const USER_AGENT: &str = "careerai/0.1 (+https://github.com/justdoGIT/career-ai)";
+
+/// Indeed's `fromage` parameter accepts an integer "posted within N
+/// days" window. Empirically the upstream accepts 1..=30; values above
+/// 30 are silently treated as 30, and `0` returns nothing useful. We
+/// clamp at the adapter boundary so a typo in `local.yaml` produces a
+/// usable feed instead of an empty one.
+const FROMAGE_MIN: u32 = 1;
+const FROMAGE_MAX: u32 = 30;
 
 /// Per-instance read-side rate limiter. Same shape as `mcp_jobs.rs` —
 /// see that module's comment for why we don't reuse the submit-side
@@ -63,14 +84,25 @@ pub struct IndeedRssSource {
 }
 
 impl IndeedRssSource {
+    /// Build a source from its config block. The HTTP client carries a
+    /// fixed `HTTP_TIMEOUT` and a stable `USER_AGENT`; if those static
+    /// settings are unrepresentable, reqwest's TLS / runtime init is
+    /// broken and nothing else in the binary will work either, so we
+    /// panic visibly rather than degrade silently.
     #[must_use]
     pub fn new(cfg: IndeedRssSourceConfig) -> Self {
         let rate_limiter = NonZeroU32::new(cfg.rate_per_minute)
             .map(|n| Arc::new(RateLimiter::direct(Quota::per_minute(n))));
+        #[allow(clippy::expect_used)]
+        let http = Client::builder()
+            .user_agent(USER_AGENT)
+            .timeout(HTTP_TIMEOUT)
+            .build()
+            .expect("build reqwest client with static UA + timeout");
         Self {
             cfg,
             base_url: DEFAULT_BASE_URL.to_string(),
-            http: Client::new(),
+            http,
             rate_limiter,
         }
     }
@@ -105,7 +137,15 @@ impl Source for IndeedRssSource {
             req = req.query(&[("l", loc)]);
         }
         if let Some(days) = self.cfg.fromage {
-            req = req.query(&[("fromage", days.to_string())]);
+            let clamped = days.clamp(FROMAGE_MIN, FROMAGE_MAX);
+            if clamped != days {
+                warn!(
+                    requested = days,
+                    clamped,
+                    "indeed_rss: fromage out of range; clamped to {FROMAGE_MIN}..={FROMAGE_MAX}",
+                );
+            }
+            req = req.query(&[("fromage", clamped.to_string())]);
         }
 
         let resp = req.send().await?;
@@ -141,7 +181,13 @@ struct ItemBuilder {
 /// bad entry never aborts the whole feed.
 fn parse_feed(xml: &str) -> Vec<RawListing> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    // We deliberately keep `trim_text` OFF: `quick-xml` 0.38 emits XML
+    // entity references (`&amp;`) as their own event, splitting the
+    // surrounding text. With `trim_text(true)` the whitespace adjacent
+    // to those splits is also stripped, so "Procter & Gamble" becomes
+    // "Procter&Gamble" once we glue the fragments back together. Field
+    // values are trimmed once at item-finalization in `build_listing`.
+    reader.config_mut().trim_text(false);
 
     let mut listings = Vec::new();
     let mut buf = Vec::new();
@@ -152,74 +198,55 @@ fn parse_feed(xml: &str) -> Vec<RawListing> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
-                let name = e.name();
-                let tag = std::str::from_utf8(name.as_ref()).unwrap_or("");
-                match tag {
-                    "item" => {
-                        in_item = true;
-                        current = ItemBuilder::default();
-                    }
-                    "title" if in_item => current_field = Some("title"),
-                    "link" if in_item => current_field = Some("link"),
-                    "description" if in_item => current_field = Some("description"),
-                    "guid" if in_item => current_field = Some("guid"),
-                    "pubDate" if in_item => current_field = Some("pubDate"),
-                    _ => {}
-                }
+                handle_start(
+                    e.name().as_ref(),
+                    &mut in_item,
+                    &mut current,
+                    &mut current_field,
+                );
             }
             Ok(Event::End(e)) => {
-                let name = e.name();
-                let tag = std::str::from_utf8(name.as_ref()).unwrap_or("");
-                if tag == "item" && in_item {
-                    in_item = false;
-                    if let Some(listing) = build_listing(&current) {
-                        listings.push(listing);
-                    } else {
-                        warn!(
-                            link = %current.link,
-                            title = %current.title,
-                            "indeed_rss: skipping malformed item",
-                        );
-                    }
-                } else if matches!(tag, "title" | "link" | "description" | "guid" | "pubDate") {
-                    current_field = None;
-                }
+                handle_end(
+                    e.name().as_ref(),
+                    &mut in_item,
+                    &current,
+                    &mut current_field,
+                    &mut listings,
+                );
             }
             Ok(Event::Text(t)) => {
                 if !in_item {
                     continue;
                 }
                 let Some(field) = current_field else { continue };
-                let raw = match t.xml_content() {
-                    Ok(s) => s.into_owned(),
-                    Err(e) => {
-                        warn!(
-                            field = %field,
-                            error = %e,
-                            "indeed_rss: failed to decode text; skipping fragment",
-                        );
-                        continue;
-                    }
-                };
-                push_field(&mut current, field, &raw);
+                match t.xml_content() {
+                    Ok(s) => push_field(&mut current, field, &s),
+                    Err(e) => warn!(
+                        field = %field, error = %e,
+                        "indeed_rss: failed to decode text; skipping fragment",
+                    ),
+                }
             }
             Ok(Event::CData(t)) => {
                 if !in_item {
                     continue;
                 }
                 let Some(field) = current_field else { continue };
-                let raw = match t.xml_content() {
-                    Ok(s) => s.into_owned(),
-                    Err(e) => {
-                        warn!(
-                            field = %field,
-                            error = %e,
-                            "indeed_rss: failed to decode cdata; skipping fragment",
-                        );
-                        continue;
-                    }
-                };
-                push_field(&mut current, field, &raw);
+                match t.xml_content() {
+                    Ok(s) => push_field(&mut current, field, &s),
+                    Err(e) => warn!(
+                        field = %field, error = %e,
+                        "indeed_rss: failed to decode cdata; skipping fragment",
+                    ),
+                }
+            }
+            Ok(Event::GeneralRef(g)) => {
+                if !in_item {
+                    continue;
+                }
+                if let Some(field) = current_field {
+                    handle_entity(g.as_ref(), field, &mut current);
+                }
             }
             Ok(Event::Eof) => break,
             Err(e) => {
@@ -234,6 +261,68 @@ fn parse_feed(xml: &str) -> Vec<RawListing> {
     listings
 }
 
+fn handle_start(
+    name: &[u8],
+    in_item: &mut bool,
+    current: &mut ItemBuilder,
+    current_field: &mut Option<&'static str>,
+) {
+    let tag = std::str::from_utf8(name).unwrap_or("");
+    match tag {
+        "item" => {
+            *in_item = true;
+            *current = ItemBuilder::default();
+        }
+        "title" if *in_item => *current_field = Some("title"),
+        "link" if *in_item => *current_field = Some("link"),
+        "description" if *in_item => *current_field = Some("description"),
+        "guid" if *in_item => *current_field = Some("guid"),
+        "pubDate" if *in_item => *current_field = Some("pubDate"),
+        _ => {}
+    }
+}
+
+fn handle_end(
+    name: &[u8],
+    in_item: &mut bool,
+    current: &ItemBuilder,
+    current_field: &mut Option<&'static str>,
+    listings: &mut Vec<RawListing>,
+) {
+    let tag = std::str::from_utf8(name).unwrap_or("");
+    if tag == "item" && *in_item {
+        *in_item = false;
+        if let Some(listing) = build_listing(current) {
+            listings.push(listing);
+        } else {
+            warn!(
+                link = %current.link,
+                title = %current.title,
+                "indeed_rss: skipping malformed item",
+            );
+        }
+    } else if matches!(tag, "title" | "link" | "description" | "guid" | "pubDate") {
+        *current_field = None;
+    }
+}
+
+/// `quick-xml` 0.38 surfaces XML entity refs (`&amp;`, `&lt;`, numeric
+/// `&#65;` / `&#x41;`) as a separate event rather than splicing them
+/// into the surrounding `Event::Text`. Without this handler, every
+/// `&`-bearing title or company name (e.g. "Procter & Gamble") would
+/// silently lose the entity. Resolve and append into the active field.
+fn handle_entity(bytes: &[u8], field: &'static str, current: &mut ItemBuilder) {
+    let Ok(name) = std::str::from_utf8(bytes) else {
+        warn!(field = %field, "indeed_rss: non-utf8 entity reference; skipping");
+        return;
+    };
+    if let Some(resolved) = resolve_entity_reference(name) {
+        push_field(current, field, &resolved);
+    } else {
+        warn!(field = %field, entity = %name, "indeed_rss: unknown entity reference; skipping");
+    }
+}
+
 fn push_field(current: &mut ItemBuilder, field: &'static str, raw: &str) {
     match field {
         "title" => current.title.push_str(raw),
@@ -243,6 +332,28 @@ fn push_field(current: &mut ItemBuilder, field: &'static str, raw: &str) {
         "pubDate" => current.pub_date.push_str(raw),
         _ => {}
     }
+}
+
+/// Resolve a single XML entity reference (the bytes between `&` and `;`).
+///
+/// Handles the five XML predefined entities (`amp`, `lt`, `gt`, `apos`,
+/// `quot`) plus numeric character references (`#65` decimal,
+/// `#x41`/`#X41` hex). Unknown named entities return `None` so the caller
+/// can log and drop them rather than embedding a garbled placeholder.
+fn resolve_entity_reference(name: &str) -> Option<String> {
+    if let Some(rest) = name.strip_prefix('#') {
+        let (radix, digits) = if let Some(hex) = rest.strip_prefix(['x', 'X']) {
+            (16, hex)
+        } else {
+            (10, rest)
+        };
+        let code = u32::from_str_radix(digits, radix).ok()?;
+        let ch = char::from_u32(code)?;
+        let mut s = String::with_capacity(ch.len_utf8());
+        s.push(ch);
+        return Some(s);
+    }
+    resolve_predefined_entity(name).map(str::to_owned)
 }
 
 fn build_listing(item: &ItemBuilder) -> Option<RawListing> {
@@ -273,36 +384,41 @@ fn build_listing(item: &ItemBuilder) -> Option<RawListing> {
 ///   * `"Senior Engineer - Acme Corp"`
 ///   * `"Senior Engineer - Acme Corp - Remote"`
 ///   * `"Senior Engineer - Acme Corp - San Francisco, CA"`
+///   * `"Senior AI/ML - Robotics - Acme Corp - Remote"` (role with hyphens)
 ///   * `"Senior Engineer"` (rare; no separator)
 ///
-/// We split on `" - "`. With one separator, the right half is the
-/// company. With two, the right half is the location and the middle is
-/// the company. Anything more is folded into the company field — we'd
-/// rather over-attribute than guess.
+/// Indeed's convention is consistent: the **last** segment is the
+/// location (when present) and the **second-to-last** is the company.
+/// Anything before that is the role title. This holds even when the
+/// role name contains additional `" - "` separators (e.g. job tracks).
+/// We deliberately rejoin the role-segments so a role like "Senior
+/// AI/ML - Robotics" survives intact rather than being shoved into
+/// `company` and clobbering the real employer.
 fn split_title(raw: &str) -> (String, String, Option<String>) {
     let trimmed = raw.trim();
     let parts: Vec<&str> = trimmed.split(" - ").collect();
     match parts.as_slice() {
+        [] => (String::new(), String::new(), None),
         [title] => ((*title).trim().to_owned(), String::new(), None),
         [title, company] => (
             (*title).trim().to_owned(),
             (*company).trim().to_owned(),
             None,
         ),
-        [title, company, rest @ ..] => {
-            let location = rest.join(" - ").trim().to_owned();
+        // 3+ segments: last is location, second-to-last is company,
+        // everything before is the role (rejoined with " - ").
+        all => {
+            let n = all.len();
+            let location = all[n - 1].trim().to_owned();
+            let company = all[n - 2].trim().to_owned();
+            let title = all[..n - 2].join(" - ").trim().to_owned();
             let location = if location.is_empty() {
                 None
             } else {
                 Some(location)
             };
-            (
-                (*title).trim().to_owned(),
-                (*company).trim().to_owned(),
-                location,
-            )
+            (title, company, location)
         }
-        [] => (String::new(), String::new(), None),
     }
 }
 
@@ -348,6 +464,26 @@ mod tests {
         assert_eq!(title, "Senior Engineer");
         assert_eq!(company, "");
         assert_eq!(loc, None);
+    }
+
+    #[test]
+    fn split_title_keeps_hyphenated_role_intact() {
+        // Real-world Indeed shape: role with internal " - " (e.g. job
+        // track or seniority). The role must not be clobbered into
+        // `company`; the company is always the second-to-last segment.
+        let (title, company, loc) =
+            split_title("Senior AI/ML - Robotics - Acme Corp - San Francisco, CA");
+        assert_eq!(title, "Senior AI/ML - Robotics");
+        assert_eq!(company, "Acme Corp");
+        assert_eq!(loc.as_deref(), Some("San Francisco, CA"));
+    }
+
+    #[test]
+    fn split_title_three_parts_treats_last_as_location() {
+        let (title, company, loc) = split_title("Senior Engineer - Acme Corp - Remote");
+        assert_eq!(title, "Senior Engineer");
+        assert_eq!(company, "Acme Corp");
+        assert_eq!(loc.as_deref(), Some("Remote"));
     }
 
     #[test]
@@ -423,6 +559,100 @@ mod tests {
         let xml = r#"<?xml version="1.0"?><rss version="2.0"><channel></channel></rss>"#;
         let listings = parse_feed(xml);
         assert!(listings.is_empty());
+    }
+
+    #[test]
+    fn parse_feed_resolves_xml_entities_in_title_and_description() {
+        // Real Indeed feeds embed `&amp;` for any company with a `&` in
+        // its name. `quick-xml` 0.38 emits these as a separate
+        // `Event::GeneralRef`, not inline in `Event::Text`. Without the
+        // GeneralRef arm in `parse_feed`, "Procter & Gamble" would
+        // collapse into "ProcterGamble".
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0"><channel>
+<item>
+  <title>Engineer - Procter &amp; Gamble - Remote</title>
+  <link>https://www.indeed.com/viewjob?jk=pg</link>
+  <description>1 &lt; 2 and we use &quot;Rust&quot; &#65;-grade</description>
+  <guid>pg-1</guid>
+</item>
+</channel></rss>"#;
+        let listings = parse_feed(xml);
+        assert_eq!(listings.len(), 1);
+        assert_eq!(listings[0].company, "Procter & Gamble");
+        assert_eq!(listings[0].title, "Engineer");
+        assert_eq!(listings[0].location.as_deref(), Some("Remote"));
+        // `<` `>` `"` plus a numeric character reference all survive.
+        assert!(
+            listings[0]
+                .description
+                .contains(r#"1 < 2 and we use "Rust" A-grade"#),
+            "unexpected description: {}",
+            listings[0].description,
+        );
+    }
+
+    #[test]
+    fn parse_feed_drops_unknown_named_entity_without_aborting_item() {
+        // An unknown entity reference should be skipped (with a
+        // `warn!` log) rather than crash or produce a `&entityName;`
+        // literal in the output.
+        let xml = r#"<?xml version="1.0"?>
+<rss version="2.0"><channel>
+<item>
+  <title>Eng &nbsp; Acme</title>
+  <link>https://www.indeed.com/viewjob?jk=z</link>
+  <description>ok</description>
+  <guid>z</guid>
+</item>
+</channel></rss>"#;
+        let listings = parse_feed(xml);
+        assert_eq!(listings.len(), 1);
+        // Whatever the heuristic does with the resulting title, it must
+        // not contain a literal `&nbsp;` or `&` followed by a name.
+        assert!(
+            !listings[0].title.contains("&nbsp;") && !listings[0].title.contains('&'),
+            "unknown entity should be dropped, got: {}",
+            listings[0].title,
+        );
+    }
+
+    #[test]
+    fn resolve_entity_reference_handles_named_and_numeric() {
+        assert_eq!(resolve_entity_reference("amp").as_deref(), Some("&"));
+        assert_eq!(resolve_entity_reference("lt").as_deref(), Some("<"));
+        assert_eq!(resolve_entity_reference("apos").as_deref(), Some("'"));
+        assert_eq!(resolve_entity_reference("#65").as_deref(), Some("A"));
+        assert_eq!(resolve_entity_reference("#x41").as_deref(), Some("A"));
+        assert_eq!(resolve_entity_reference("#X41").as_deref(), Some("A"));
+        assert!(resolve_entity_reference("nope").is_none());
+        assert!(resolve_entity_reference("#xZZZ").is_none());
+        assert!(resolve_entity_reference("#999999999").is_none());
+    }
+
+    #[tokio::test]
+    async fn discover_clamps_out_of_range_fromage() {
+        // `fromage = 9999` must be clamped to 30 before hitting the
+        // upstream — and the request must still succeed. We assert via
+        // wiremock's `query_param` matcher that the clamped value is
+        // what was sent.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rss"))
+            .and(query_param("fromage", "30"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(SAMPLE_XML))
+            .mount(&server)
+            .await;
+
+        let cfg = IndeedRssSourceConfig {
+            enabled: true,
+            keywords: "x".into(),
+            location: None,
+            fromage: Some(9999),
+            rate_per_minute: 0,
+        };
+        let src = IndeedRssSource::new(cfg).with_base_url(server.uri());
+        src.discover().await.expect("clamped fromage must succeed");
     }
 
     #[tokio::test]
