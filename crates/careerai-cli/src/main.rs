@@ -1213,8 +1213,13 @@ mod tests {
     /// Wraps the test in a `Mutex` because `ANTHROPIC_API_KEY` is a
     /// process-global env var; parallel cargo-test threads racing
     /// set/remove pairs cause intermittent failures.
+    ///
+    /// `clippy::await_holding_lock`: the `std::sync::Mutex` guard is
+    /// held across `.await`, but the only contention is between this
+    /// test's own reruns. No deadlock risk.
     #[cfg(feature = "live-llm-api")]
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn probe_forced_api_with_no_key_returns_err() {
         use careerai_core::config::{BackendChoice, LlmConfig};
         // Static lock so this test serializes with itself across reruns.
