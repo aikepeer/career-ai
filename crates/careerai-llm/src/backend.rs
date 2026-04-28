@@ -119,9 +119,6 @@ impl Backend {
         }
     }
 
-    /// Lightweight probe: don't build the driver, just figure out which
-    /// backend `Auto` would pick + collect diagnostic data for the
-    /// caller to print.
     pub async fn probe(cfg: &LlmConfig) -> BackendProbe {
         let mut probe = BackendProbe {
             chosen: BackendChoice::Auto,
@@ -139,7 +136,15 @@ impl Backend {
                 if let Some(v) = read_claude_version(&bin).await {
                     probe.claude_version = Some(v);
                 }
-                if probe_claude_auth(&bin).await {
+                // Honor CAREERAI_SKIP_CLI_PROBE for parity with
+                // `resolve_auto` and `build_cli`. The module doc claims
+                // the env var is honored everywhere; this branch was
+                // the lone exception. Skipping the live ping here gives
+                // tests and offline scenarios a deterministic "binary
+                // present" result without spawning claude.
+                let auth_ok = std::env::var("CAREERAI_SKIP_CLI_PROBE").is_ok()
+                    || probe_claude_auth(&bin).await;
+                if auth_ok {
                     probe.claude_auth_ok = true;
                     probe.chosen = BackendChoice::ClaudeCli;
                     probe.claude_ping_ms = last_ping_ms();
@@ -159,8 +164,20 @@ impl Backend {
             }
         }
 
-        // Drop the timeout argument lint when neither feature is on.
-        let _ = cfg;
+        // Honor a forced backend choice in cfg.llm.backend. Without
+        // this, `careerai --llm-backend=api llm probe` ignored the
+        // override even after the global flag was plumbed in. Mirrors
+        // `Backend::resolve`'s match on `BackendChoice`.
+        match cfg.backend {
+            BackendChoice::ClaudeCli => {
+                probe.chosen = BackendChoice::ClaudeCli;
+            }
+            BackendChoice::Api => {
+                probe.chosen = BackendChoice::Api;
+            }
+            BackendChoice::Auto => { /* keep auto-resolved value */ }
+        }
+
         probe
     }
 }
@@ -398,10 +415,21 @@ impl Llm for Backend {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+// `clippy::await_holding_lock`: we hold a `std::sync::Mutex` guard
+// across `.await` in a few tests. The guard exists purely to serialize
+// env-var mutations (CAREERAI_CLAUDE_BIN, ANTHROPIC_API_KEY) across
+// parallel cargo-test threads — there's no real contention or deadlock
+// risk, and async work inside the guarded section is short.
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// Serialize tests that mutate `CAREERAI_CLAUDE_BIN` /
+    /// `CAREERAI_SKIP_CLI_PROBE` / `ANTHROPIC_API_KEY`. These vars are
+    /// process-global; without the lock, parallel cargo-test threads
+    /// race their set/remove pairs and produce intermittent failures.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn cfg() -> LlmConfig {
         LlmConfig::default()
@@ -442,6 +470,9 @@ mod tests {
     #[cfg(feature = "live-llm-api")]
     #[tokio::test]
     async fn forced_api_with_no_key_errors() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Stash + clear envs first.
         let prev = std::env::var("ANTHROPIC_API_KEY").ok();
         std::env::remove_var("ANTHROPIC_API_KEY");
@@ -461,6 +492,9 @@ mod tests {
     #[cfg(feature = "live-llm-cli")]
     #[tokio::test]
     async fn forced_cli_with_no_binary_errors() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var(
             "CAREERAI_CLAUDE_BIN",
             "/nonexistent/path/that/does/not/resolve",
@@ -469,10 +503,78 @@ mod tests {
         let res = Backend::resolve(BackendChoice::ClaudeCli, &cfg(), cache()).await;
         std::env::remove_var("CAREERAI_CLAUDE_BIN");
         std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
-        // The CAREERAI_CLAUDE_BIN override gives a path back, so the
-        // resolver constructs the driver successfully — but the
-        // subsequent `complete()` call would fail. Validate the
-        // resolution path produces SOME backend, not a panic.
-        assert!(res.is_ok() || matches!(res, Err(BackendError::CliMissing)));
+        // `locate_claude_binary` now validates the override; a missing
+        // path surfaces as the wrapped `BinaryUnusable` (mapped through
+        // `BackendError::Llm`). Either is acceptable; a `CliMissing`
+        // from the empty-PATH path is also fine on a host without a
+        // real `claude`.
+        match res {
+            Err(BackendError::CliMissing) => {}
+            Err(BackendError::Llm(LlmError::Upstream(s))) => {
+                assert!(s.to_lowercase().contains("not usable"), "got: {s}");
+            }
+            other => panic!("expected CliMissing or Llm(Upstream), got {other:?}"),
+        }
+    }
+
+    /// `Backend::probe` must honor `CAREERAI_SKIP_CLI_PROBE=1` for
+    /// parity with `resolve_auto` and `build_cli`. Without this the
+    /// module doc was a lie: tests and offline scenarios spawned the
+    /// real `claude` binary even when the env var was set.
+    #[cfg(feature = "live-llm-cli")]
+    #[tokio::test]
+    async fn probe_honors_skip_cli_probe_env() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Point at a real, executable stub that emits a non-JSON
+        // sentinel — the live ping path would fail, but with
+        // CAREERAI_SKIP_CLI_PROBE=1 the probe must skip it and report
+        // claude_auth_ok = true purely from binary presence.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, "#!/bin/sh\necho not-json\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
+        std::env::set_var("CAREERAI_SKIP_CLI_PROBE", "1");
+        let probe = Backend::probe(&cfg()).await;
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+        std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
+        assert!(
+            probe.claude_auth_ok,
+            "probe should claim auth_ok when SKIP env is set"
+        );
+        assert_eq!(probe.chosen, BackendChoice::ClaudeCli);
+    }
+
+    /// `Backend::probe` must honor `cfg.llm.backend` when forced. The
+    /// `--llm-backend=api llm probe` path was silently ignoring the
+    /// override even after the global flag was plumbed in.
+    #[cfg(feature = "live-llm-cli")]
+    #[tokio::test]
+    async fn probe_honors_forced_backend_choice() {
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, "#!/bin/sh\necho not-json\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("CAREERAI_CLAUDE_BIN", &bin);
+        std::env::set_var("CAREERAI_SKIP_CLI_PROBE", "1");
+        let mut c = cfg();
+        c.backend = BackendChoice::Api;
+        let probe = Backend::probe(&c).await;
+        std::env::remove_var("CAREERAI_CLAUDE_BIN");
+        std::env::remove_var("CAREERAI_SKIP_CLI_PROBE");
+        assert_eq!(probe.chosen, BackendChoice::Api);
     }
 }
