@@ -88,6 +88,29 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
         }
         out.push(Arc::new(McpJobsSource::new(mcp_cfg.clone())));
     }
+    // LinkedIn browser-driven discovery (PR #21). Only registered
+    // when both the `browser` feature is compiled in AND the user
+    // has opted in via `sources.linkedin_browser.enabled = true`.
+    // The runtime adapter pulls in chromiumoxide + the M5
+    // BrowserSession, so the cfg-gate keeps the default `cargo
+    // build` lean for hosts without Chromium.
+    #[cfg(feature = "browser")]
+    {
+        if cfg.sources.linkedin_browser.enabled {
+            out.push(Arc::new(careerai_sources::LinkedinBrowserSource::new(
+                cfg.sources.linkedin_browser.clone(),
+            )));
+        }
+    }
+    #[cfg(not(feature = "browser"))]
+    {
+        if cfg.sources.linkedin_browser.enabled {
+            tracing::warn!(
+                "linkedin_browser source is enabled in config but `browser` feature is OFF; \
+                 rebuild with `cargo build --features browser` to activate it"
+            );
+        }
+    }
     out
 }
 

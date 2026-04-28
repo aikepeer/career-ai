@@ -33,6 +33,12 @@ rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 governor.workspace = true
 quick-xml.workspace = true
 chromiumoxide = { workspace = true, optional = true }
+rand = { version = "0.9", optional = true }
+# `scraper` is always-on so the offline parser tests + the
+# pure-function parser path don't need feature gating. The crate is
+# small (depends on `html5ever` + `selectors`) and the parser is
+# also useful for other future HTML sources.
+scraper = { workspace = true }
 
 [features]
 default = []
@@ -41,7 +47,7 @@ default = []
 # `chromiumoxide` for the CDP element-handle API used to scrape
 # search-result cards. CI default is off; the workspace `--features
 # browser` build (driven from `careerai-cli`) opts in.
-browser = ["dep:careerai-submit", "dep:chromiumoxide"]
+browser = ["dep:careerai-submit", "dep:chromiumoxide", "dep:rand"]
 
 [dev-dependencies]
 wiremock.workspace = true
@@ -50,7 +56,6 @@ serde_yaml.workspace = true
 rmcp = { workspace = true, features = ["client", "server", "macros", "transport-io", "transport-child-process", "transport-async-rw", "schemars"] }
 schemars.workspace = true
 insta.workspace = true
-scraper.workspace = true
 
 # Integration test for the MCP-jobs adapter. `harness = false` so we
 # can hijack `main()` to switch between client-test mode and

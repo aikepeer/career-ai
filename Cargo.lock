@@ -524,8 +524,13 @@ dependencies = [
  "chrono",
  "governor",
  "hex",
+<<<<<<< HEAD
  "insta",
  "quick-xml 0.38.4",
+||||||| parent of f11aae7 (feat(sources): native linkedin browser discovery adapter)
+=======
+ "rand 0.9.4",
+>>>>>>> f11aae7 (feat(sources): native linkedin browser discovery adapter)
  "regex",
  "reqwest",
  "rmcp",
