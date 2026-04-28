@@ -1,0 +1,347 @@
+# Seed list for `careerai sources sync`.
+#
+# Each entry is a known-public ATS slug for a company that plausibly
+# matches at least one career-ai domain (`ai_ml`, `robotics_embedded`).
+# `sources sync` probes the ATS, parses titles + JD content, scores
+# them against the user's `domains:` keywords, and produces an add /
+# keep / remove diff against the user's `config/local.yaml`.
+#
+# Schema (per entry):
+#   slug:        ATS slug (matches the URL on the public board API)
+#   ats:         greenhouse | lever | ashby
+#   domain_hint: optional list of domain names (matches `domains[].name`
+#                in CoreConfig). Currently informational — every company
+#                is probed against every configured domain. Future use:
+#                tighten initial probe (e.g. skip robotics_embedded for
+#                a slug hinted ai_ml only).
+#
+# Curation methodology:
+#   1. Started from the user's brief (Anthropic, OpenAI, Cohere, Scale,
+#      Databricks, Boston Dynamics, Figure, 1X, Skydio, Anduril, etc.)
+#      plus a list of well-known AI/ML and robotics/embedded companies
+#      that publish public ATS boards.
+#   2. Verified each slug with a `curl -sI -m 5` HEAD request against
+#      the corresponding public endpoint. Slugs returning HTTP 200 are
+#      kept; HTTP 404 entries are dropped or commented as `# unverified`
+#      so the user is not hit with probe failures on first sync.
+#   3. Endpoints used to verify:
+#      - Greenhouse: https://boards-api.greenhouse.io/v1/boards/<slug>/jobs
+#      - Lever:      https://api.lever.co/v0/postings/<slug>?mode=json
+#      - Ashby:      https://api.ashbyhq.com/posting-api/job-board/<slug>
+#   4. Out-of-scope: scraping the entire ATS catalog. Quality > quantity.
+#      Each verified hit was sampled to confirm the company actually
+#      ships AI/ML or robotics/embedded roles (not just any role on a
+#      generic ATS).
+#
+# Verified 2026-04-28. Re-run `careerai sources sync` periodically to
+# re-probe; companies that stop posting matching JDs will land in the
+# `remove` partition.
+
+# --- Greenhouse: AI/ML platforms + frontier labs ----------------------
+- slug: anthropic
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: togetherai
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: hebbia
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: imbue
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: scaleai
+  ats: greenhouse
+  domain_hint: [ai_ml, robotics_embedded]
+- slug: xai
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: instabase
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: snorkelai
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: magic
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: lightningai
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: sambanovasystems
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: fal
+  ats: greenhouse
+  domain_hint: [ai_ml]
+
+# --- Greenhouse: data + dev infra (often AI/ML adjacent) --------------
+- slug: databricks
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: cloudflare
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: gitlab
+  ats: greenhouse
+  domain_hint: []
+- slug: discord
+  ats: greenhouse
+  domain_hint: []
+- slug: figma
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: stripe
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: airtable
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: airbnb
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: pinterest
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: dropbox
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: reddit
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: twitch
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: mongodb
+  ats: greenhouse
+  domain_hint: []
+- slug: fivetran
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: tailscale
+  ats: greenhouse
+  domain_hint: []
+- slug: gusto
+  ats: greenhouse
+  domain_hint: []
+- slug: intercom
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: asana
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: duolingo
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: squarespace
+  ats: greenhouse
+  domain_hint: []
+- slug: instawork
+  ats: greenhouse
+  domain_hint: []
+- slug: samsara
+  ats: greenhouse
+  domain_hint: [robotics_embedded, ai_ml]
+
+# --- Greenhouse: fintech + health (broad) -----------------------------
+- slug: coinbase
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: chime
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: brex
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: affirm
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: robinhood
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: sofi
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: upstart
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: carta
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: instacart
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: faire
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: seatgeek
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: speechify
+  ats: greenhouse
+  domain_hint: [ai_ml]
+
+# --- Greenhouse: robotics / embedded / AVs / hardware -----------------
+- slug: waymo
+  ats: greenhouse
+  domain_hint: [robotics_embedded, ai_ml]
+- slug: lyft
+  ats: greenhouse
+  domain_hint: [robotics_embedded, ai_ml]
+- slug: nuro
+  ats: greenhouse
+  domain_hint: [robotics_embedded, ai_ml]
+- slug: chargepoint
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: zwift
+  ats: greenhouse
+  domain_hint: []
+- slug: archer
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: apptronik
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: agilityrobotics
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: carbon
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: formlabs
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: formic
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: diligent
+  ats: greenhouse
+  domain_hint: [robotics_embedded]
+- slug: celonis
+  ats: greenhouse
+  domain_hint: [ai_ml]
+- slug: abnormalsecurity
+  ats: greenhouse
+  domain_hint: [ai_ml]
+
+# --- Lever: focused list (most AI cos. moved off Lever in 2024-2026) --
+- slug: netflix
+  ats: lever
+  domain_hint: [ai_ml]
+- slug: mistral
+  ats: lever
+  domain_hint: [ai_ml]
+- slug: plaid
+  ats: lever
+  domain_hint: [ai_ml]
+- slug: attentive
+  ats: lever
+  domain_hint: [ai_ml]
+- slug: metabase
+  ats: lever
+  domain_hint: []
+- slug: unify
+  ats: lever
+  domain_hint: [ai_ml]
+
+# --- Ashby: AI/ML + dev tools (Ashby has steady AI uptake) ------------
+- slug: anthropic
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: openai
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: perplexity
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: cursor
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: linear
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: ramp
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: notion
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: supabase
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: vercel
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: mercury
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: retool
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: posthog
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: warp
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: mintlify
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: modal
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: abridge
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: baseten
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: stytch
+  ats: ashby
+  domain_hint: []
+- slug: liquid
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: liquid-ai
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: contextual
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: zed
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: llamaindex
+  ats: ashby
+  domain_hint: [ai_ml]
+- slug: langchain
+  ats: ashby
+  domain_hint: [ai_ml]
+
+# --- Ashby: robotics / embedded ---------------------------------------
+- slug: skydio
+  ats: ashby
+  domain_hint: [robotics_embedded, ai_ml]
+- slug: osmo
+  ats: ashby
+  domain_hint: [robotics_embedded, ai_ml]
+- slug: reflectionai
+  ats: ashby
+  domain_hint: [ai_ml, robotics_embedded]
+
+# --- Slugs explored but not exposed via public ATS APIs as of 2026-04 --
+# Kept here so users / future maintainers know they were considered. If
+# any of these flip a public board on, move them above and drop the
+# `# unverified` line. Re-running `careerai sources sync` will surface
+# probe_failures only for entries listed in the active list.
+#
+# unverified greenhouse: openai cohere scale perplexity perplexityai modal
+#                        replicate pinecone mistralai characterai runwayml
+#                        harvey ideogram elevenlabs krea suno recraft adept
+#                        bostondynamics figure 1x anduril shieldai saronic
+#                        applieduniversum applied-intuition zoox cruise
+#                        boston-dynamics-1
+# unverified lever:      datadog ramp asana modallabs huggingface voltaiccap
+#                        glean neuralink scaleai
+# unverified ashby:      anysphere

@@ -144,6 +144,8 @@ sources:
       - "anthropic"
   lever:
     companies: []
+  ashby:
+    companies: []
   remotive:
     enabled: true
     category: "software-dev"

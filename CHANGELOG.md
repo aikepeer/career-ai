@@ -6,6 +6,28 @@ versions don't promise semver yet.
 
 ## [Unreleased]
 
+### Added
+
+- `careerai sources sync` (`feat/sources-sync`) — auto-discovers
+  Greenhouse / Lever / Ashby companies whose currently-open jobs
+  match the user's `domains:` keywords. Probes a curated seed list
+  of ~80 known-public ATS slugs (embedded in
+  `crates/careerai-sources/src/templates/seed_companies.yaml`,
+  verified 2026-04-28), scores each board against
+  `cfg.domains[].keywords_any` (case-insensitive substring across
+  title + description), and prints a three-way diff
+  (`+ add` / `keep` / `- consider removing`). Default is preview;
+  `--apply` writes the merged lists into `config/local.yaml` while
+  preserving every other user key (round-trip via `serde_yaml::Value`).
+  Manual slugs the user added by hand are never silently dropped.
+  Concurrency: up to 8 in-flight probes, 10s per-company timeout,
+  HTTP errors soft-fail and surface as `probe_failures`. CLI-only in
+  this release; daemon integration is deferred to a later PR.
+- New `careerai-sources::AshbySource` adapter for the Ashby public
+  posting API (`/posting-api/job-board/<slug>`). Same shape as
+  `GreenhouseSource` / `LeverSource`. Wired into `SourcesConfig` as
+  `sources.ashby.companies` and `pipeline::build_sources`.
+
 ### Security
 
 - **`careerai-llm::ClaudeCliLlm` no longer leaks profile content to

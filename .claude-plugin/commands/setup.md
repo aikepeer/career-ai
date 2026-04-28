@@ -43,6 +43,21 @@ filesystem paths to their resume and LinkedIn data export.
    `LinkedInMissingColumn` or schema-drift warnings prominently —
    those indicate LinkedIn changed its export format and need a
    code-side fix rather than a user fix.
+
+   **Auto-populate company lists (recommended).** Out of the box
+   `sources.greenhouse.companies` ships with only `anthropic`, and
+   `sources.lever.companies` / `sources.ashby.companies` are empty.
+   Suggest:
+   ```
+   careerai sources sync           # preview the diff
+   careerai sources sync --apply   # merge into config/local.yaml
+   ```
+   The seeded list (~80 known-public Greenhouse / Lever / Ashby
+   slugs) is filtered against the user's `domains:` keywords, so
+   only companies that actually post matching jobs land in the
+   config. The merge preserves all other user keys; manual
+   additions stay put. Re-run periodically to drop companies whose
+   matching listings closed.
 5. **Probe MCP-source servers (optional).** If the user has configured
    any `kind: mcp` entries under `sources.mcp` in `config/default.yaml`
    or `config/local.yaml`, run `careerai mcp probe` and surface the
