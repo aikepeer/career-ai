@@ -1,0 +1,28 @@
+[package]
+name = "careerai-notify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Best-effort multi-channel notification pipeline (Slack, Telegram, email, ntfy) for career-ai"
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+futures.workspace = true
+reqwest.workspace = true
+keyring.workspace = true
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock.workspace = true
+tracing-test = "0.2"
+
+[lints]
+workspace = true
