@@ -1288,16 +1288,25 @@ mod tests {
             probe_forced_resolve(&llm_cfg),
             probe_forced_resolve(&llm_cfg),
         );
+        // Both calls must complete without panicking. We accept any
+        // recognized BackendError variant (the CI box may not have a
+        // claude binary, an auth'd session, or an API key), but a
+        // panic would signal a real bug — most likely a tempdir
+        // collision regression.
         for r in [r1, r2] {
-            match r {
-                Ok(()) => {}
-                Err(careerai_llm::BackendError::CliMissing)
-                | Err(careerai_llm::BackendError::CliNotAuthenticated)
-                | Err(careerai_llm::BackendError::ApiKeyMissing)
-                | Err(careerai_llm::BackendError::NoneAvailable)
-                | Err(careerai_llm::BackendError::FeatureDisabled(_))
-                | Err(careerai_llm::BackendError::Llm(_)) => {}
-            }
+            assert!(
+                matches!(
+                    r,
+                    Ok(())
+                        | Err(careerai_llm::BackendError::CliMissing
+                            | careerai_llm::BackendError::CliNotAuthenticated
+                            | careerai_llm::BackendError::ApiKeyMissing
+                            | careerai_llm::BackendError::NoneAvailable
+                            | careerai_llm::BackendError::FeatureDisabled(_)
+                            | careerai_llm::BackendError::Llm(_))
+                ),
+                "unexpected probe outcome: {r:?}"
+            );
         }
     }
 }
