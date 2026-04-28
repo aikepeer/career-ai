@@ -28,6 +28,7 @@ chrono.workspace = true
 clap.workspace = true
 keyring.workspace = true
 rpassword = "7"
+tempfile = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -45,8 +46,8 @@ default = ["live-llm-cli"]
 # subprocess backend so a vanilla `cargo install careerai-cli` works for
 # Claude Code subscribers without an API key. Add `--features
 # live-llm-api` to also pull in rig-core for the Anthropic API path.
-live-llm-cli = ["careerai-pipeline/live-llm-cli", "careerai-llm/live-llm-cli"]
-live-llm-api = ["careerai-pipeline/live-llm-api", "careerai-llm/live-llm-api"]
+live-llm-cli = ["careerai-pipeline/live-llm-cli", "careerai-llm/live-llm-cli", "dep:tempfile"]
+live-llm-api = ["careerai-pipeline/live-llm-api", "careerai-llm/live-llm-api", "dep:tempfile"]
 # Back-compat umbrella alias.
 live-llm = ["live-llm-cli", "live-llm-api"]
 # Enables the LinkedIn browser submitter path in careerai-submit.
