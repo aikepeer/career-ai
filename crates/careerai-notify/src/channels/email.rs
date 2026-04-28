@@ -20,7 +20,9 @@ use crate::{
 
 const KEYRING_SERVICE: &str = "career-ai";
 
-#[derive(Debug, Clone)]
+/// Parsed SMTP config. NOTE: hand-rolled `Debug` below — derived Debug
+/// would print `smtp_password` verbatim. Same for `EmailNotifier`.
+#[derive(Clone)]
 struct ParsedConfig {
     smtp_host: String,
     smtp_port: u16,
@@ -32,9 +34,36 @@ struct ParsedConfig {
     starttls_disabled: bool,
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for ParsedConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParsedConfig")
+            .field("smtp_host", &self.smtp_host)
+            .field("smtp_port", &self.smtp_port)
+            .field("smtp_username", &self.smtp_username)
+            .field("smtp_password", &"<redacted>")
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .field("starttls_disabled", &self.starttls_disabled)
+            .finish()
+    }
+}
+
 pub struct EmailNotifier {
     parsed: ParsedConfig,
+    /// Cached transport — building one is non-trivial (TLS context,
+    /// resolver) and a daemon may fire many notifications. Reuse keeps
+    /// connection state warm and avoids per-call setup.
+    transport: AsyncSmtpTransport<Tokio1Executor>,
+}
+
+impl std::fmt::Debug for EmailNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Delegate to ParsedConfig::Debug, which redacts the password.
+        // The transport itself does not implement Debug.
+        f.debug_struct("EmailNotifier")
+            .field("parsed", &self.parsed)
+            .finish()
+    }
 }
 
 impl EmailNotifier {
@@ -75,17 +104,17 @@ impl EmailNotifier {
                 })?);
         }
 
-        Ok(Self {
-            parsed: ParsedConfig {
-                smtp_host: cfg.smtp_host.clone(),
-                smtp_port: cfg.smtp_port,
-                smtp_username: cfg.smtp_username.clone(),
-                smtp_password: pass,
-                from,
-                to: to_list,
-                starttls_disabled: cfg.starttls_disabled,
-            },
-        })
+        let parsed = ParsedConfig {
+            smtp_host: cfg.smtp_host.clone(),
+            smtp_port: cfg.smtp_port,
+            smtp_username: cfg.smtp_username.clone(),
+            smtp_password: pass,
+            from,
+            to: to_list,
+            starttls_disabled: cfg.starttls_disabled,
+        };
+        let transport = build_transport(&parsed)?;
+        Ok(Self { parsed, transport })
     }
 
     /// Compose the `Message` for `event` at `severity`. Pure function;
@@ -106,24 +135,22 @@ impl EmailNotifier {
             .expect("lettre Message::body cannot fail for plain string body")
     }
 
-    fn build_transport(&self) -> Result<AsyncSmtpTransport<Tokio1Executor>, NotifyError> {
-        let creds = Credentials::new(
-            self.parsed.smtp_username.clone(),
-            self.parsed.smtp_password.clone(),
-        );
-        let builder = if self.parsed.starttls_disabled {
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.parsed.smtp_host)
-                .port(self.parsed.smtp_port)
-        } else {
-            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.parsed.smtp_host)
-                .map_err(|e| NotifyError::Config(format!("email: starttls relay: {e}")))?
-                .port(self.parsed.smtp_port)
-        };
-        Ok(builder
-            .credentials(creds)
-            .timeout(Some(HTTP_TIMEOUT))
-            .build())
-    }
+}
+
+fn build_transport(parsed: &ParsedConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, NotifyError> {
+    let creds = Credentials::new(parsed.smtp_username.clone(), parsed.smtp_password.clone());
+    let builder = if parsed.starttls_disabled {
+        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&parsed.smtp_host)
+            .port(parsed.smtp_port)
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&parsed.smtp_host)
+            .map_err(|e| NotifyError::Config(format!("email: starttls relay: {e}")))?
+            .port(parsed.smtp_port)
+    };
+    Ok(builder
+        .credentials(creds)
+        .timeout(Some(HTTP_TIMEOUT))
+        .build())
 }
 
 #[async_trait]
@@ -134,8 +161,7 @@ impl Notifier for EmailNotifier {
 
     async fn notify(&self, event: &NotifyEvent, severity: Severity) -> Result<(), NotifyError> {
         let message = self.build_message(event, severity);
-        let transport = self.build_transport()?;
-        transport
+        self.transport
             .send(message)
             .await
             .map_err(|e| NotifyError::Channel {
@@ -178,9 +204,14 @@ mod tests {
         }
     }
 
+    fn notifier_for(parsed: ParsedConfig) -> EmailNotifier {
+        let transport = build_transport(&parsed).expect("test transport build");
+        EmailNotifier { parsed, transport }
+    }
+
     #[test]
     fn build_message_has_severity_tag_in_subject() {
-        let n = EmailNotifier { parsed: cfg() };
+        let n = notifier_for(cfg());
         let msg = n.build_message(&ev(), Severity::Critical);
         let raw = String::from_utf8(msg.formatted()).unwrap();
         assert!(
@@ -191,6 +222,23 @@ mod tests {
         assert!(
             !raw.contains("ULTRA-SECRET-PASSWORD"),
             "password leaked into formatted message: {raw}"
+        );
+    }
+
+    #[test]
+    fn debug_output_redacts_smtp_password() {
+        // Pin the invariant: the SMTP password must never appear in
+        // `{:?}` output. A future `#[derive(Debug)]` regression on
+        // `ParsedConfig` or `EmailNotifier` would flip this test red.
+        let n = notifier_for(cfg());
+        let dbg = format!("{n:?}");
+        assert!(
+            !dbg.contains("ULTRA-SECRET-PASSWORD"),
+            "smtp password leaked into Debug output: {dbg}"
+        );
+        assert!(
+            dbg.contains("<redacted>"),
+            "expected redaction marker in Debug output: {dbg}"
         );
     }
 

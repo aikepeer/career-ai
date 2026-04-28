@@ -18,7 +18,6 @@ const KEYRING_SERVICE: &str = "career-ai";
 /// Telegram cap is 4096; we leave headroom for HTML tags.
 const MAX_MESSAGE_LEN: usize = 3500;
 
-#[derive(Debug)]
 pub struct TelegramNotifier {
     /// API base URL (`https://api.telegram.org` in prod). Stored
     /// without the bot token suffix so wiremock tests can override it.
@@ -27,6 +26,17 @@ pub struct TelegramNotifier {
     bot_token: String,
     chat_id: String,
     client: Client,
+}
+
+impl std::fmt::Debug for TelegramNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Bot token is a bearer credential — never echo it via Debug.
+        f.debug_struct("TelegramNotifier")
+            .field("base_url", &self.base_url)
+            .field("bot_token", &"<redacted>")
+            .field("chat_id", &self.chat_id)
+            .finish()
+    }
 }
 
 impl TelegramNotifier {
@@ -142,18 +152,29 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Drop any `bot<token>` segment from a string before logging.
+/// Drop any `bot<token>` segment from a string before logging. A
+/// Telegram bot token has the shape `<digits>:<alnum/_-/+>` — match
+/// only when the substring after `bot` looks like a token to avoid
+/// mangling unrelated words (`robot`, `sandbox`, etc.).
 fn scrub_token(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last = 0;
     for (idx, _) in s.match_indices("bot") {
+        let after = &s[idx + 3..];
+        // A token starts with at least one digit before the colon.
+        let looks_like_token = after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && after.contains(':');
+        if !looks_like_token {
+            continue;
+        }
         out.push_str(&s[last..idx]);
         out.push_str("bot<redacted>");
-        // Skip past `bot` and the token (assume token ends at the next
-        // `/` or whitespace).
-        let after = &s[idx + 3..];
+        // Token ends at the next `/`, whitespace, or quote.
         let stop = after
-            .find(|c: char| c == '/' || c.is_whitespace())
+            .find(|c: char| c == '/' || c.is_whitespace() || c == '"' || c == '\'')
             .unwrap_or(after.len());
         last = idx + 3 + stop;
     }
@@ -173,6 +194,35 @@ mod tests {
             provider: "linkedin".into(),
             action: "discover".into(),
         }
+    }
+
+    #[test]
+    fn debug_output_redacts_bot_token() {
+        let n = TelegramNotifier {
+            base_url: "https://api.telegram.org".into(),
+            bot_token: "1111:SUPERSECRETTGBOTKEY".into(),
+            chat_id: "12345".into(),
+            client: Client::builder().timeout(HTTP_TIMEOUT).build().unwrap(),
+        };
+        let dbg = format!("{n:?}");
+        assert!(
+            !dbg.contains("SUPERSECRETTGBOTKEY"),
+            "bot token leaked into Debug output: {dbg}"
+        );
+        assert!(dbg.contains("<redacted>"), "missing redaction marker: {dbg}");
+    }
+
+    #[test]
+    fn scrub_token_ignores_words_that_just_start_with_bot() {
+        // The earlier implementation matched any "bot" substring, which
+        // mangled e.g. "robot.txt". Pin the regression: only match real
+        // tokens (digits-then-colon).
+        let s = "robot scrubbed sandbox bot12345:ABCDE/sendMessage and bot999:ZZ done";
+        let out = scrub_token(s);
+        assert!(out.contains("robot"), "innocent word mangled: {out}");
+        assert!(out.contains("sandbox"), "innocent word mangled: {out}");
+        assert!(!out.contains("12345:ABCDE"), "leaked: {out}");
+        assert!(!out.contains("999:ZZ"), "leaked: {out}");
     }
 
     #[test]

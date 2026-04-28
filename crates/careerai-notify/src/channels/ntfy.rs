@@ -16,11 +16,20 @@ use crate::{
 
 const DEFAULT_SERVER: &str = "https://ntfy.sh";
 
-#[derive(Debug)]
 pub struct NtfyNotifier {
     server: String,
     topic: String,
     client: Client,
+}
+
+impl std::fmt::Debug for NtfyNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Topic is shared-secret-ish (anyone who knows it can read).
+        f.debug_struct("NtfyNotifier")
+            .field("server", &self.server)
+            .field("topic", &"<redacted>")
+            .finish()
+    }
 }
 
 impl NtfyNotifier {
@@ -100,7 +109,10 @@ impl Notifier for NtfyNotifier {
             .await
             .map_err(|e| NotifyError::Channel {
                 channel: "ntfy",
-                reason: e.to_string(),
+                // The ntfy URL contains the (shared-secret) topic;
+                // strip URL-shaped tokens defensively in case reqwest
+                // ever embeds the URL in its error display.
+                reason: scrub_url(&e.to_string()),
             })?;
         if !resp.status().is_success() {
             return Err(NotifyError::Channel {
@@ -110,6 +122,21 @@ impl Notifier for NtfyNotifier {
         }
         Ok(())
     }
+}
+
+/// Drop URL-shaped tokens before they hit the log. ntfy URLs include
+/// the topic, which is a shared secret.
+fn scrub_url(s: &str) -> String {
+    s.split_whitespace()
+        .map(|tok| {
+            if tok.starts_with("http://") || tok.starts_with("https://") {
+                "<redacted-url>"
+            } else {
+                tok
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// HTTP headers reject control characters and non-ASCII bytes. Strip
@@ -138,6 +165,29 @@ mod tests {
             provider: "linkedin".into(),
             hours_left: 12,
         }
+    }
+
+    #[test]
+    fn debug_output_redacts_topic() {
+        let n = NtfyNotifier {
+            server: "https://ntfy.sh".into(),
+            topic: "secret-topic-xyz".into(),
+            client: Client::builder().timeout(HTTP_TIMEOUT).build().unwrap(),
+        };
+        let dbg = format!("{n:?}");
+        assert!(
+            !dbg.contains("secret-topic-xyz"),
+            "ntfy topic leaked into Debug output: {dbg}"
+        );
+        assert!(dbg.contains("<redacted>"), "missing redaction marker: {dbg}");
+    }
+
+    #[test]
+    fn scrub_url_drops_url_tokens() {
+        let s = "POST https://ntfy.example/secret-topic failed: timeout";
+        let out = scrub_url(s);
+        assert!(!out.contains("secret-topic"), "leaked topic: {out}");
+        assert!(out.contains("<redacted-url>"));
     }
 
     #[test]

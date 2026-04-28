@@ -13,11 +13,20 @@ use crate::{
     HTTP_TIMEOUT,
 };
 
-#[derive(Debug)]
 pub struct SlackNotifier {
     webhook_url: String,
     channel: Option<String>,
     client: Client,
+}
+
+impl std::fmt::Debug for SlackNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Webhook URL is a bearer credential — never echo it via Debug.
+        f.debug_struct("SlackNotifier")
+            .field("webhook_url", &"<redacted>")
+            .field("channel", &self.channel)
+            .finish()
+    }
 }
 
 impl SlackNotifier {
@@ -135,10 +144,21 @@ impl Notifier for SlackNotifier {
 }
 
 /// Belt-and-suspenders: if reqwest ever embeds the webhook URL in an
-/// error string, drop the URL token. Cheap, defensive.
+/// error string, drop any URL-shaped token. Cheap, defensive — covers
+/// real Slack hooks (`hooks.slack.com`) AND test/self-hosted relays
+/// (any `http://`/`https://` token).
 fn scrub(s: &str) -> String {
     s.split_whitespace()
-        .filter(|tok| !tok.contains("hooks.slack.com"))
+        .map(|tok| {
+            if tok.contains("hooks.slack.com")
+                || tok.starts_with("http://")
+                || tok.starts_with("https://")
+            {
+                "<redacted-url>"
+            } else {
+                tok
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -157,6 +177,32 @@ mod tests {
             company: "Acme".into(),
             score: 0.92,
         }
+    }
+
+    #[test]
+    fn debug_output_redacts_webhook_url() {
+        // Pin the invariant: the webhook URL must never appear in
+        // `{:?}` output. A future `#[derive(Debug)]` regression would
+        // flip this test red.
+        let n = SlackNotifier {
+            webhook_url: "https://hooks.slack.com/services/T/B/SUPER-SECRET-TOKEN".into(),
+            channel: None,
+            client: Client::builder().timeout(HTTP_TIMEOUT).build().unwrap(),
+        };
+        let dbg = format!("{n:?}");
+        assert!(
+            !dbg.contains("SUPER-SECRET-TOKEN"),
+            "webhook leaked into Debug output: {dbg}"
+        );
+        assert!(dbg.contains("<redacted>"), "missing redaction marker: {dbg}");
+    }
+
+    #[test]
+    fn scrub_drops_arbitrary_url_tokens() {
+        let s = "request to http://127.0.0.1:1234/services/T/B/SUPER-SECRET-TOKEN failed: connection reset";
+        let out = scrub(s);
+        assert!(!out.contains("SUPER-SECRET-TOKEN"), "leaked: {out}");
+        assert!(out.contains("<redacted-url>"));
     }
 
     #[test]
