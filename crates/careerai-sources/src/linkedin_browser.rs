@@ -46,7 +46,9 @@ use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
 use crate::base::{RawListing, Source, SourceError};
-use crate::linkedin_browser_parser::{build_search_url, parse_search_html, KNOWN_EXPERIENCE_LEVELS};
+use crate::linkedin_browser_parser::{
+    build_search_url, parse_search_html, KNOWN_EXPERIENCE_LEVELS,
+};
 
 const COOKIE_DOMAIN: &str = ".linkedin.com";
 const COOKIE_NAME: &str = "li_at";
@@ -85,7 +87,9 @@ static RATE_LIMITER: std::sync::OnceLock<std::sync::Mutex<Option<Arc<ReadRateLim
 
 fn get_rate_limiter(rate_per_minute: u32) -> Option<Arc<ReadRateLimiter>> {
     let cell = RATE_LIMITER.get_or_init(|| std::sync::Mutex::new(None));
-    let mut guard = cell.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = cell
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if guard.is_some() {
         return guard.clone();
     }

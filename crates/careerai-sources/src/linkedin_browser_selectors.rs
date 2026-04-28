@@ -41,7 +41,8 @@ pub const JOB_CARD: &str =
 
 /// Listing title anchor. The `href` is the apply URL; the text is the
 /// job title.
-pub const CARD_TITLE_ANCHOR: &str = "a.base-card__full-link, a.job-card-list__title, h3 a, a.job-card-container__link";
+pub const CARD_TITLE_ANCHOR: &str =
+    "a.base-card__full-link, a.job-card-list__title, h3 a, a.job-card-container__link";
 
 /// Company name. LinkedIn flips between `<h4>` and `<span>` based on
 /// the result-card variant.

@@ -53,7 +53,11 @@ fn every_listing_has_required_fields() {
             !l.external_id.is_empty(),
             "external_id empty on listing: {l:?}"
         );
-        assert!(!l.title.is_empty(), "title empty on listing id={}", l.external_id);
+        assert!(
+            !l.title.is_empty(),
+            "title empty on listing id={}",
+            l.external_id
+        );
         assert!(
             l.url.starts_with("https://www.linkedin.com/jobs/view/"),
             "url should be absolute LinkedIn job-view URL, got {:?} on id={}",
@@ -114,10 +118,7 @@ fn malformed_card_with_no_anchor_is_skipped() {
     assert!(
         listings.iter().all(|l| l.external_id != "1000000006"),
         "card with no anchor must be skipped; got: {:?}",
-        listings
-            .iter()
-            .map(|l| &l.external_id)
-            .collect::<Vec<_>>()
+        listings.iter().map(|l| &l.external_id).collect::<Vec<_>>()
     );
 }
 
