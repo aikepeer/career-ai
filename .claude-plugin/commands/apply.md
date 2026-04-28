@@ -7,8 +7,10 @@ argument-hint: "<app-id> [--auto-submit]"
 
 Submits a single application that is already in state `rendered` or
 `prepared`. **Defaults to dry-run.** A dry-run never issues a network
-write — it walks the apply flow up to the final click, captures a
-screenshot, logs a `would_submit` event, and exits.
+write — it calls `Submitter::prepare()` to build a `would_submit`
+envelope, logs the event, and exits. Browser-driven submitters
+(LinkedIn / Naukri) are **not** launched under dry-run today, so no
+screenshot is produced from this path.
 
 This page is a step-by-step walkthrough. Follow the steps in order;
 do not skip ahead to `--auto-submit` without doing the dry-run review
@@ -33,11 +35,14 @@ This is always safe. The submitter:
 
 - Resolves the listing's source (greenhouse, lever, ashby, linkedin,
   naukri, indeed, ...).
-- Walks the apply flow up to the final submit click.
-- For browser-driven submitters (LinkedIn, Naukri): captures a
-  screenshot of the populated form.
-- Logs a `would_submit` event with the prepared payload (resume DOCX
-  path, cover-letter excerpt, custom-question answers).
+- Calls `Submitter::prepare()` to build a `would_submit` envelope
+  (resume DOCX path, cover-letter excerpt, custom-question answers,
+  endpoint / DOM target). The dry-run path stops here — it does
+  **not** call `Submitter::submit()`, so browser-driven submitters
+  (LinkedIn / Naukri) do not launch a session and do not capture a
+  screenshot. Screenshots are only produced on the live path (and
+  the LinkedIn assist/review flow).
+- Logs the `would_submit` event.
 - Exits without sending anything.
 
 ---
@@ -50,7 +55,7 @@ record. For each source, expect to see:
 | Source kind | What to verify |
 |---|---|
 | ATS HTTP (greenhouse / lever / ashby / ...) | Endpoint URL, request body keys (resume, cover_letter, profile fields, custom answers), per-source rate-limit budget remaining today. |
-| Browser (linkedin, naukri) | Screenshot path under `data/screenshots/<app-id>.png`. Open it; confirm the form is populated correctly and no required field is empty. |
+| Browser (linkedin, naukri) | The `would_submit` payload only — DOM target URL, resume path, cover-letter excerpt. Dry-run does not launch a browser session today, so no screenshot is captured here. |
 | Email (when wired) | Recipient address, subject, body excerpt, attachment paths. |
 
 Drill into the audit row if anything looks off:
@@ -110,8 +115,9 @@ submit:
 Save the file. The next `/career:apply` invocation will re-read
 config; no daemon restart needed.
 
-If you forget this step, the live call fails fast with
-`SubmitError::SourceDisabled("<source>")` and **does not retry**.
+If you forget this step, the live submit is treated as
+`SubmitOutcome::Skipped { reason: "source disabled" }`, transitions
+the application/listing to `skipped`, and **does not retry**.
 
 ---
 
@@ -144,8 +150,8 @@ A live submission ends in one of these terminal states:
 | State | Meaning | Next step |
 |---|---|---|
 | `submitted` | The submitter accepted the request and you got a non-error response. | Wait for response tracking (M7); for now, watch your inbox. |
-| `failed` | The submitter raised an error after the network call. | `careerai inspect <app-id>` to read the error variant. |
-| `skipped` | The submitter chose not to submit (e.g., rate limit, quiet hours, source disabled). | The audit log explains which gate fired. |
+| `failed` | The submitter raised an error. Today this includes rate-limit and quiet-hours blocks, since `run_live` treats `SubmitError::SourceDisabled` from those gates as a failure. | `careerai inspect <app-id>` to read the error variant; back off and retry once a token is available or the quiet-hours window closes. |
+| `skipped` | Per-source `submit.per_source.<source>.enabled` is `false`, or the source has no submitter wired (feed-only / `--features browser` not built in). The submit layer returns `SubmitOutcome::Skipped` before any network call. | The audit log names the reason. Flip the gate or rebuild with the right feature; no retry happens automatically. |
 | `responded` | A response landed (M7, planned). | Not yet wired — see the README "Known gaps" section. |
 
 To see what you've submitted recently and at what cadence (the CLI
@@ -176,11 +182,16 @@ Calls the `careerai_apply` MCP tool with:
 
 - `SubmitError::BadState` — application is not in `rendered` or
   `prepared`. Run `/career:tailor <listing-id>` first.
-- `SubmitError::SourceDisabled("<source>")` — `submit_enabled` is
-  `false` (the default) for that source in `config/local.yaml`. See
-  step 4.
-- Rate-limit / quiet-hours block — back off; retry once a token is
-  available. The daemon will retry on its next tick if enabled.
+- `SubmitOutcome::Skipped { reason: "source disabled" }` —
+  `submit.per_source.<source>.enabled` is `false` (the default) for
+  that source in `config/local.yaml`. Application/listing land in
+  `skipped`. See step 4.
+- `SubmitError::SourceDisabled(...)` — runtime policy block:
+  rate-limit denied, quiet-hours window, missing credentials, or a
+  browser submitter aborting at its pre-submit gate (e.g. LinkedIn's
+  `allow_submit_click=false`). `run_live` currently treats this as a
+  failure, so the application transitions to `failed`. Back off and
+  retry once the gate clears.
 - Login / session expired (cookie sources) — refresh via
   `careerai cookies refresh <provider>` (`linkedin` and `naukri` are
   the supported providers) and re-run from step 1.

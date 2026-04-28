@@ -26,9 +26,11 @@ Activate when the user:
 
 Call `careerai_apply` MCP tool with `dry_run: true`. This:
 
-- Walks the apply flow up to the final submit click.
-- For browser-driven submitters, captures a screenshot of the
-  populated form at `data/screenshots/<app-id>.png`.
+- Calls each `Submitter::prepare()` to build the `would_submit`
+  envelope. The browser session is **not** launched — dry-run today
+  does not produce a screenshot for browser-driven submitters
+  (LinkedIn / Naukri). Screenshots only land on the live path (and
+  the LinkedIn assist/review flow).
 - Logs a `would_submit` event with the prepared payload (resume DOCX
   path, cover-letter excerpt, custom-question answers).
 - **Never issues a network write.**
@@ -37,7 +39,6 @@ Show the user:
 
 - The submitter that would have fired (greenhouse / lever / linkedin /
   naukri / ...).
-- The screenshot path (browser sources only).
 - A summary of the `would_submit` payload — endpoint or DOM target,
   resume path, cover-letter excerpt.
 
@@ -127,21 +128,29 @@ After a live submission:
 
 ## Failure modes + recovery
 
-The variants below come from `crates/careerai-submit/src/error.rs::SubmitError`:
+Outcomes / errors come from
+`crates/careerai-submit/src/base.rs::SubmitOutcome` and
+`crates/careerai-submit/src/error.rs::SubmitError`:
 
-- **`SubmitError::SourceDisabled("<source>")`** — `submit_enabled` is
-  `false` for that source in `config/local.yaml`. Tell the user to
-  flip it (per the YAML in step 2b). Don't edit the file. Note: this
-  error variant also surfaces when rate-limit or quiet-hours gating
-  fires — the message text distinguishes the cases.
+- **`SubmitOutcome::Skipped { reason: "source disabled" }`** —
+  `submit.per_source.<source>.enabled` is `false` (the default) for
+  that source in `config/local.yaml`. The application + listing
+  transition to `skipped`; there is no retry. Tell the user to flip
+  the gate (per the YAML in step 2b). Don't edit the file.
+- **`SubmitError::SourceDisabled(...)`** — used for *runtime* policy
+  blocks (rate-limit denied, quiet-hours window, missing credentials,
+  or a browser submitter like LinkedIn that intentionally aborts at
+  the pre-submit gate such as `allow_submit_click`). Use the message
+  text to distinguish the cases; if it is user-configurable, tell the
+  user what they need to change.
 - **`SubmitError::BadState { state }`** — application is not in
   `rendered` / `prepared` / `drafted`. Run the `tailor-resume` skill
   first; the error names the actual state.
 - **`SubmitError::NotImplemented(...)`** — submitter exists in the
   registry but its click/network flow has not been built. Distinct
-  from `SourceDisabled` so the audit log can tell "operator turned
-  this off" from "engineer hasn't shipped this yet". Tell the user
-  the source is on the roadmap.
+  from `SourceDisabled` so the audit log can tell "engineer hasn't
+  shipped this yet" from "operator turned this off / a runtime gate
+  fired". Tell the user the source is on the roadmap.
 - **`SubmitError::HttpStatus { status, body_tail }`** — the ATS
   rejected the submission. Surface the status + tail to the user; the
   audit row has the full response.
