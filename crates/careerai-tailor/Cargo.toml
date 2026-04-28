@@ -29,5 +29,14 @@ sqlx = { workspace = true }
 tempfile.workspace = true
 insta.workspace = true
 
+[features]
+# End-to-end smoke for the claude CLI backend (PR #21, merged
+# 2026-04-28). Run via:
+#   cargo test -p careerai-tailor --features tailor-claude-cli-smoke
+# Pulls in the CLI driver transitively through `careerai-llm`. The
+# test file `tests/claude_cli_smoke_it.rs` is gated on the same
+# feature so plain `cargo test -p careerai-tailor` stays minimal.
+tailor-claude-cli-smoke = ["careerai-llm/live-llm-cli"]
+
 [lints]
 workspace = true
