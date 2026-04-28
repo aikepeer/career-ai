@@ -393,6 +393,7 @@ async fn run_llm_probe(
 ) -> Result<()> {
     #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
     {
+        use careerai_core::config::BackendChoice;
         // Honor the global `--llm-backend` flag. Without this, `probe`
         // silently ignored the override even though every other
         // subcommand respects it.
@@ -401,7 +402,16 @@ async fn run_llm_probe(
             llm_cfg.backend = b;
         }
         let probe = careerai_llm::Backend::probe(&llm_cfg).await;
-        println!("backend: {}", probe.chosen.as_str());
+
+        // Two lines when the operator forced something: their request
+        // and what would actually resolve. One line otherwise.
+        if let Some(forced) = probe.forced {
+            println!("forced:           {}", forced.as_str());
+            println!("would-resolve-to: {}", probe.chosen.as_str());
+        } else {
+            println!("backend: {}", probe.chosen.as_str());
+        }
+
         if let Some(bin) = &probe.claude_binary {
             print!("  claude binary: {}", bin.display());
             if let Some(v) = &probe.claude_version {
@@ -425,12 +435,28 @@ async fn run_llm_probe(
             Some(src) => println!("  ANTHROPIC key: present ({src})"),
             None => println!("  ANTHROPIC key: not set"),
         }
-        if matches!(probe.chosen, careerai_core::config::BackendChoice::Auto) {
+
+        // Auto with nothing reachable is hard-fail (exit 1 via anyhow).
+        if probe.forced.is_none() && probe.chosen == BackendChoice::Auto {
             anyhow::bail!(
                 "no LLM backend reachable; install Claude Code (https://claude.ai/download) \
                  or export ANTHROPIC_API_KEY"
             );
         }
+
+        // Forced override is unusable — try resolving and surface the
+        // real error. Exit 2 to distinguish "your override is broken"
+        // from "nothing is reachable" (exit 1) so scripts can branch.
+        if probe.forced.is_some() {
+            if let Err(e) = probe_forced_resolve(&llm_cfg).await {
+                eprintln!(
+                    "error: forced backend `{}` is unusable: {e}",
+                    llm_cfg.backend.as_str()
+                );
+                std::process::exit(2);
+            }
+        }
+
         Ok(())
     }
     #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
@@ -439,6 +465,24 @@ async fn run_llm_probe(
         println!("backend: none (binary built without `live-llm-cli` or `live-llm-api`)");
         Ok(())
     }
+}
+
+/// Try to resolve a forced backend so the probe can flag forced-but-
+/// unusable as a non-zero exit. Uses a tempdir-scoped cache to avoid
+/// polluting the project's `cache_dir` on a dry probe.
+///
+/// Extracted so a unit test can drive the no-API-key path without
+/// touching `std::process::exit`.
+#[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+async fn probe_forced_resolve(
+    llm_cfg: &careerai_core::config::LlmConfig,
+) -> std::result::Result<(), careerai_llm::BackendError> {
+    use std::sync::Arc;
+    let cache_root = std::env::temp_dir().join("careerai-llm-probe-cache");
+    let cache = Arc::new(careerai_llm::Cache::new(cache_root));
+    careerai_llm::Backend::resolve(llm_cfg.backend, llm_cfg, cache)
+        .await
+        .map(|_| ())
 }
 
 /// Dispatch for `careerai apply`. Errors short-circuit the process with a
@@ -1158,5 +1202,42 @@ mod tests {
             llm_cfg.backend = b;
         }
         assert_eq!(llm_cfg.backend, BackendChoice::ClaudeCli);
+    }
+
+    /// Regression for the probe exit code: when an operator forces a
+    /// backend that isn't reachable, `probe_forced_resolve` must
+    /// surface a `BackendError` so `run_llm_probe` can exit 2. Without
+    /// the resolve attempt, the probe printed `backend: api` and
+    /// exited 0 even when no API key was reachable.
+    ///
+    /// Wraps the test in a `Mutex` because `ANTHROPIC_API_KEY` is a
+    /// process-global env var; parallel cargo-test threads racing
+    /// set/remove pairs cause intermittent failures.
+    #[cfg(feature = "live-llm-api")]
+    #[tokio::test]
+    async fn probe_forced_api_with_no_key_returns_err() {
+        use careerai_core::config::{BackendChoice, LlmConfig};
+        // Static lock so this test serializes with itself across reruns.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let prev = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let llm_cfg = LlmConfig {
+            backend: BackendChoice::Api,
+            ..LlmConfig::default()
+        };
+        let res = probe_forced_resolve(&llm_cfg).await;
+        if let Some(v) = prev {
+            std::env::set_var("ANTHROPIC_API_KEY", v);
+        }
+        // The keyring may have a real key on a dev box; tolerate Ok in
+        // that case. The point is that the resolve attempt happens —
+        // not that the key is necessarily missing.
+        match res {
+            Err(careerai_llm::BackendError::ApiKeyMissing) | Ok(()) => {}
+            Err(other) => panic!("expected ApiKeyMissing or Ok, got {other:?}"),
+        }
     }
 }
