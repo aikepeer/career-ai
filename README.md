@@ -98,7 +98,7 @@ careerai shortlist show --limit 20                   # pick a listing-id
 careerai tailor <listing-id>                         # constrained-diff resume + cover letter
 careerai render <application-id>                     # DOCX + PDF via pandoc
 careerai apply <application-id>                      # DRY-RUN; see /career:apply walkthrough
-careerai applied --since 1d                          # confirm row + cadence
+careerai applied --limit 20                          # confirm recent rows + cadence
 careerai digest --since 24h                          # whole-pipeline rollup
 ```
 

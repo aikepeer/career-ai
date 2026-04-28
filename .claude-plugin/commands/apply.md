@@ -17,7 +17,7 @@ first.
 ## Arguments
 
 - `<app-id>` (required): UUID of the application to submit. Get one
-  from `/career:status` or `careerai applied --since 7d`.
+  from `/career:status` or `careerai applied --limit 20`.
 - `--auto-submit` (optional): force live submission. Only valid after
   steps 1–4 below.
 
@@ -147,10 +147,12 @@ A live submission ends in one of these terminal states:
 | `skipped` | The submitter chose not to submit (e.g., rate limit, quiet hours, source disabled). | The audit log explains which gate fired. |
 | `responded` | A response landed (M7, planned). | Not yet wired — see the README "Known gaps" section. |
 
-To see what you've submitted in the last day and at what cadence:
+To see what you've submitted recently and at what cadence (the CLI
+does not currently support a `--since` window — use `--limit` and/or
+`--source`):
 
 ```
-careerai applied --since 1d
+careerai applied --limit 20
 ```
 
 To roll up the whole pipeline (counts by state, per-source breakdown,

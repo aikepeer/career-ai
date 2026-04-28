@@ -20,9 +20,10 @@ profile updates, filter tuning, or strategy changes. You are **read-only**
 - Inspect individual applications via `careerai_inspect` to drill into
   outcomes, JD context, and the tailored output that was sent.
   Equivalent CLI: `careerai inspect <app-id>`.
-- Cross-reference against `careerai applied --since <window>` when the
-  user wants the per-source cadence view rather than the per-state
-  aggregate.
+- Cross-reference against `careerai applied` (with `--source` and/or
+  `--limit`) when the user wants the per-source cadence view rather
+  than the per-state aggregate. The CLI does not currently support a
+  `--since` window — surface the digest's window separately.
 - Identify patterns:
   - Sources with low response rates.
   - Listings that were tailored but never submitted (stuck in

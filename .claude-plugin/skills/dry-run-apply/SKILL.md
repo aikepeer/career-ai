@@ -102,7 +102,7 @@ Surface the response: status code, follow-up state (`submitted`,
 
 After a live submission:
 
-- Run `careerai applied --since 1d` to confirm the row is recorded.
+- Run `careerai applied --limit 20` to confirm the row is recorded.
 - Run `careerai digest --since 24h` if the user wants the whole-pipeline
   view (counts by state, per-source breakdown, cookie expiry).
 
