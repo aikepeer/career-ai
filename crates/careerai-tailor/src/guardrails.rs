@@ -279,39 +279,37 @@ pub(crate) fn forbid_invented_entities_with(
         }
     }
 
+    // SAFETY: every substantive token in a span must clear the
+    // intersection set. The earlier loop short-circuited on the first
+    // match, which let an invented noun ride along inside a span where
+    // any neighboring token happened to be whitelisted (e.g. the
+    // sentence-start verb "Architected" let "Google Ads" slip through
+    // even though neither is in the profile). Validate each token
+    // independently and surface the first invented token by name.
     for m in proper_noun_regex().find_iter(new_text) {
         let span = m.as_str();
-        let mut intersects = false;
-        let mut any_substantive = false;
         for raw in span.split_whitespace() {
             let lower = raw.to_lowercase();
             if lower.len() < 3 {
+                // Punctuation / acronyms < 3 chars don't carry signal.
                 continue;
             }
-            any_substantive = true;
             let stripped = strip_for_match(&lower);
-            if sets.employer_tokens.contains(&stripped)
+            let cleared = sets.employer_tokens.contains(&stripped)
                 || sets.project_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&lower)
                 || sets.profile_proper_nouns.contains(&stripped)
                 || original_proper_nouns.contains(&stripped)
-                || COMMON_ENGLISH_CAPS.contains(&stripped.as_str())
-            {
-                intersects = true;
-                break;
+                || COMMON_ENGLISH_CAPS.contains(&stripped.as_str());
+            if !cleared {
+                return Err(TailorError::InventedContent {
+                    path: path.to_string(),
+                    offending_token: raw.to_string(),
+                    original_bullet: original_bullet.to_string(),
+                    reason: "invented proper noun",
+                });
             }
-        }
-        if !any_substantive {
-            continue;
-        }
-        if !intersects {
-            return Err(TailorError::InventedContent {
-                path: path.to_string(),
-                offending_token: span.to_string(),
-                original_bullet: original_bullet.to_string(),
-                reason: "invented proper noun",
-            });
         }
     }
 
@@ -506,6 +504,7 @@ const COMMON_ENGLISH_CAPS: &[&str] = &[
     "halved",
     "tracked",
     "received",
+    "stabilized",
 ];
 
 #[cfg(test)]
@@ -774,6 +773,35 @@ mod tests {
                 panic!("guardrail rejected sentence-start adverb in {new_text:?}: {e:?}")
             });
         }
+    }
+
+    /// SAFETY REGRESSION test: the proper-noun check must not let an
+    /// invented noun ride along inside a span where ONE token happens
+    /// to be whitelisted. Earlier the loop short-circuited on the first
+    /// match (e.g. `Architected` in COMMON_ENGLISH_CAPS) and returned
+    /// success for the whole span, letting `Google` and `Ads` slip
+    /// through unchecked. Each token must clear the intersection set
+    /// independently.
+    #[test]
+    fn rejects_invented_token_riding_along_in_whitelisted_span() {
+        let p = fixture();
+        // "Architected" is whitelisted as a sentence-start verb; "Google"
+        // is NOT in the profile (employer is "Acme Robotics"). The full
+        // span "Architected Google Ads" must therefore reject because
+        // "Google" is invented.
+        let err = forbid_invented_entities(
+            "Architected Google Ads platform.",
+            "Architected the platform end-to-end.",
+            &p,
+            "x",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, TailorError::InventedContent { reason, offending_token, .. }
+                if *reason == "invented proper noun"
+                && (offending_token.contains("Google") || offending_token.contains("Ads"))),
+            "expected invented-noun rejection naming Google/Ads; got {err:?}"
+        );
     }
 
     /// Pinning the negative case: a proper noun that is in NEITHER the
