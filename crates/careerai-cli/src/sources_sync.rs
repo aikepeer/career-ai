@@ -47,33 +47,40 @@ pub async fn run(cwd: &Path, apply: bool) -> Result<()> {
 
 /// Atomically write `contents` to `dest`. Strategy:
 /// 1. Ensure the parent directory exists.
-/// 2. Write to a sibling `<dest>.tmp.<pid>` tempfile.
-/// 3. `rename` the tempfile over `dest` — atomic on the same filesystem.
+/// 2. Write to a sibling tempfile (created in the same directory so
+///    `persist` is a same-filesystem rename).
+/// 3. `tempfile::NamedTempFile::persist` swaps the tempfile over
+///    `dest`. On Unix this is `rename(2)` (POSIX-atomic); on Windows
+///    it uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING)` so the
+///    "destination exists" case doesn't fail like bare
+///    `std::fs::rename` does.
 ///
 /// A SIGKILL or power loss between steps 2 and 3 leaves the original
-/// `dest` intact (and an orphaned tempfile that the next run
-/// overwrites). The default `std::fs::write` truncates `dest` first
-/// and is NOT safe under those conditions.
+/// `dest` intact (and an orphaned tempfile that the OS may sweep). The
+/// default `std::fs::write` truncates `dest` first and is NOT safe
+/// under those conditions.
 fn write_atomic(dest: &Path, contents: &str) -> Result<()> {
+    use std::io::Write as _;
+
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create parent {}", parent.display()))?;
     }
-    let tmp_name = format!(
-        "{}.tmp.{}",
-        dest.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("local.yaml"),
-        std::process::id(),
-    );
-    let tmp_path = dest
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(tmp_name);
-    std::fs::write(&tmp_path, contents)
-        .with_context(|| format!("write tempfile {}", tmp_path.display()))?;
-    std::fs::rename(&tmp_path, dest)
-        .with_context(|| format!("rename {} -> {}", tmp_path.display(), dest.display()))?;
+    let parent = dest.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("create tempfile in {}", parent.display()))?;
+    tmp.write_all(contents.as_bytes())
+        .with_context(|| format!("write tempfile for {}", dest.display()))?;
+    tmp.flush()
+        .with_context(|| format!("flush tempfile for {}", dest.display()))?;
+    tmp.persist(dest).map_err(|e| {
+        anyhow::anyhow!(
+            "persist {} -> {}: {}",
+            e.file.path().display(),
+            dest.display(),
+            e.error
+        )
+    })?;
     Ok(())
 }
 
@@ -404,9 +411,11 @@ sources:
             .is_some());
     }
 
-    /// `write_atomic` swaps the file via tempfile + rename, leaves no
-    /// `.tmp.<pid>` lingering on success, and produces the requested
-    /// content. Existing-content destination is overwritten cleanly.
+    /// `write_atomic` swaps the file via tempfile + persist, leaves no
+    /// orphans on success, and produces the requested content.
+    /// Existing-content destination is overwritten cleanly — this is
+    /// the case that bare `std::fs::rename` failed on Windows, hence
+    /// the switch to `tempfile::NamedTempFile::persist`.
     #[test]
     fn write_atomic_replaces_existing_file_and_cleans_up_tempfile() {
         let tmp = TempDir::new().unwrap();
@@ -416,19 +425,36 @@ sources:
         write_atomic(&dest, "new content").unwrap();
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new content");
 
-        let leftover: Vec<_> = std::fs::read_dir(tmp.path())
+        // After persist, the destination file must be the only entry
+        // in the tempdir — both the tmp prefix variants and any
+        // half-written sibling files should be gone.
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
             .unwrap()
-            .filter_map(|e| {
-                let n = e.ok()?.file_name();
-                let s = n.to_str()?.to_string();
-                if s.contains(".tmp.") {
-                    Some(s)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|e| e.ok().map(|x| x.file_name().to_string_lossy().to_string()))
             .collect();
-        assert!(leftover.is_empty(), "stray tempfile(s): {leftover:?}");
+        assert_eq!(
+            entries,
+            vec!["local.yaml".to_string()],
+            "expected only local.yaml in tempdir, found: {entries:?}"
+        );
+    }
+
+    /// Repeated overwrites of the same destination must not error and
+    /// must leave no tempfile orphans. Mirrors the operator pattern of
+    /// running `careerai sources sync --apply` daily.
+    #[test]
+    fn write_atomic_repeated_overwrites_succeed() {
+        let tmp = TempDir::new().unwrap();
+        let dest = tmp.path().join("local.yaml");
+        for content in ["v1", "v2", "v3", "v4"] {
+            write_atomic(&dest, content).unwrap();
+            assert_eq!(std::fs::read_to_string(&dest).unwrap(), content);
+        }
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|x| x.file_name().to_string_lossy().to_string()))
+            .collect();
+        assert_eq!(entries, vec!["local.yaml".to_string()]);
     }
 
     /// `write_atomic` creates the parent directory when missing —
