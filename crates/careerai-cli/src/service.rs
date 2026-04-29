@@ -34,6 +34,15 @@ CPUQuota=80%
 WantedBy=default.target
 ";
 
+/// Render the unit-file body with the resolved binary + cwd. Pure;
+/// public so integration tests can assert on the output without
+/// touching `~/.config/systemd`.
+pub fn render_unit(bin: &std::path::Path, cwd: &std::path::Path) -> String {
+    UNIT_TEMPLATE
+        .replace("{CAREERAI_BIN}", &bin.display().to_string())
+        .replace("{CAREERAI_CWD}", &cwd.display().to_string())
+}
+
 pub fn run_install(force: bool) -> Result<()> {
     require_linux("install")?;
     let unit_path = unit_path()?;
@@ -43,9 +52,7 @@ pub fn run_install(force: bool) -> Result<()> {
     // service in the manager's default cwd and the CLI's
     // current_dir()-based config/data resolution reads the wrong tree.
     let cwd = std::env::current_dir().context("resolve current_dir")?;
-    let body = UNIT_TEMPLATE
-        .replace("{CAREERAI_BIN}", &bin.display().to_string())
-        .replace("{CAREERAI_CWD}", &cwd.display().to_string());
+    let body = render_unit(&bin, &cwd);
 
     if let Some(parent) = unit_path.parent() {
         std::fs::create_dir_all(parent)
@@ -240,4 +247,75 @@ fn print_post_install(unit_path: &std::path::Path) {
     println!();
     println!("Check status:");
     println!("    careerai service status");
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn render_unit_substitutes_bin_and_cwd() {
+        let body = render_unit(
+            Path::new("/opt/careerai/bin/careerai"),
+            Path::new("/home/kk/career-ai-data"),
+        );
+        assert!(
+            body.contains("ExecStart=/opt/careerai/bin/careerai daemon"),
+            "missing ExecStart: {body}"
+        );
+        assert!(
+            body.contains("WorkingDirectory=/home/kk/career-ai-data"),
+            "missing WorkingDirectory: {body}"
+        );
+        assert!(
+            body.contains("Restart=on-failure"),
+            "missing Restart: {body}"
+        );
+        assert!(body.contains("MemoryMax=2G"), "missing MemoryMax: {body}");
+        assert!(body.contains("CPUQuota=80%"), "missing CPUQuota: {body}");
+        assert!(
+            body.contains("EnvironmentFile=-%h/.config/careerai/env"),
+            "missing EnvironmentFile: {body}"
+        );
+        assert!(
+            body.contains("[Install]\nWantedBy=default.target"),
+            "missing Install section: {body}"
+        );
+        // No leftover placeholders.
+        assert!(
+            !body.contains("{CAREERAI_BIN}") && !body.contains("{CAREERAI_CWD}"),
+            "unsubstituted placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn unit_path_uses_xdg_config_home_when_set() {
+        let prev = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CONFIG_HOME", "/tmp/test-xdg");
+        let path = unit_path().expect("resolve");
+        assert_eq!(
+            path,
+            Path::new("/tmp/test-xdg/systemd/user/careerai.service")
+        );
+        match prev {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
+
+    #[test]
+    fn write_atomic_round_trip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let target = tmp.path().join("careerai.service");
+        let body = "[Unit]\nDescription=test\n";
+        write_atomic(&target, body).expect("write_atomic");
+        let read_back = std::fs::read_to_string(&target).expect("read");
+        assert_eq!(read_back, body);
+        // Re-writing must not error and must replace cleanly.
+        write_atomic(&target, "[Unit]\nDescription=updated\n").expect("rewrite");
+        let updated = std::fs::read_to_string(&target).expect("read updated");
+        assert_eq!(updated, "[Unit]\nDescription=updated\n");
+    }
 }
