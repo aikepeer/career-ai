@@ -34,12 +34,18 @@ pub async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 async fn render_index(state: &AppState) -> crate::error::Result<String> {
-    let snap = data::snapshot(&state.pool).await?;
+    // Probe the DB and the daemon-health concurrently — both are
+    // independent and the daemon probe has its own 1.5s timeout, so
+    // this caps total render latency at max(snapshot_ms, ~10ms).
+    let (snap_res, daemon_health) =
+        tokio::join!(data::snapshot(&state.pool), crate::daemon_health::probe());
+    let snap = snap_res?;
     let next_steps = next_steps::compute(&snap);
     let view = IndexView {
         kpi: snap.kpi,
         columns: snap.columns,
         next_steps,
+        daemon_health,
     };
     let mut ctx = tera::Context::new();
     ctx.insert("view", &view);

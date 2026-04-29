@@ -79,4 +79,5 @@ pub struct IndexView {
     pub kpi: KpiStrip,
     pub columns: Vec<FunnelColumn>,
     pub next_steps: Vec<NextStep>,
+    pub daemon_health: crate::daemon_health::DaemonHealth,
 }

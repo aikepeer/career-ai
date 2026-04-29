@@ -44,6 +44,33 @@ header {
   padding: 18px 28px;
   border-bottom: 1px solid var(--border);
 }
+.header-right {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+.pill-active {
+  background: rgba(140, 212, 126, 0.12);
+  border-color: var(--accent-ok);
+  color: var(--accent-ok);
+}
+.pill-inactive {
+  background: rgba(255, 138, 101, 0.12);
+  border-color: var(--accent-warn);
+  color: var(--accent-warn);
+}
+.pill-unknown {
+  color: var(--text-faint);
+}
 .brand {
   font-family: var(--mono);
   font-size: 16px;

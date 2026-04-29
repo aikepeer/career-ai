@@ -10,7 +10,12 @@
 <body>
 <header>
   <div class="brand">career-ai</div>
-  <div class="meta">read-only · auto-refresh {{ refresh_seconds }}s</div>
+  <div class="header-right">
+    <span class="pill pill-{{ view.daemon_health }}">
+      daemon: {{ view.daemon_health }}
+    </span>
+    <span class="meta">read-only · refresh {{ refresh_seconds }}s</span>
+  </div>
 </header>
 
 <section class="kpi-strip" role="kpi-strip">

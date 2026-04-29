@@ -4,6 +4,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use tera::Tera;
 
+pub mod daemon_health;
 pub mod data;
 pub mod error;
 pub mod handlers;
