@@ -29,6 +29,7 @@ use careerai_match::{
     classify, flatten_profile, rank_all, score_histogram, split_at_threshold, Decision,
     FilterRules, JaccardScorer,
 };
+use careerai_notify::{NotifyEvent, Pipeline as NotifyPipeline, Severity};
 use careerai_profile::Profile;
 use careerai_render::render_application;
 use careerai_sources::{
@@ -246,6 +247,9 @@ pub struct DigestReport {
     pub cookie_warnings: Vec<String>,
 }
 
+#[allow(clippy::too_many_lines)] // orchestrator function; splitting it
+                                  // would just shuffle the same logic
+                                  // across helpers without clarifying it.
 pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<MatchReport> {
     let pool = open_pool(root).await?;
     let profile = load_profile(root)?;
@@ -316,6 +320,19 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
     let threshold = cfg.matching.score_threshold;
     let (keep, drop) = split_at_threshold(ranked, threshold);
 
+    // Build the notify pipeline once per match run, not per listing.
+    // `from_config` returning Err (e.g. malformed channel config) is
+    // logged and treated as "no channels" so a config bug never kills
+    // a match run; high-score notifications are best-effort.
+    let notify = match NotifyPipeline::from_config(&cfg.notify) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            warn!(error = %e, "notify pipeline init failed; skipping high-score alerts");
+            None
+        }
+    };
+    let notify_threshold = cfg.matching.notify_threshold;
+
     for scored in &keep {
         let db_row = post_filter
             .iter()
@@ -332,6 +349,24 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
             Some(&format!("score={:.3}", scored.score)),
         )
         .await?;
+
+        // Fire HighScoreMatch when score crosses the configured
+        // notify threshold. We only get here for listings that are
+        // currently in `discovered` state (match_all only walks
+        // discovered rows), so this naturally won't double-fire on
+        // re-runs — once a listing is shortlisted, it's no longer
+        // a candidate for re-scoring without manual rollback.
+        if let Some(pipe) = &notify {
+            fire_high_score_if_above(
+                pipe,
+                &db_row.id,
+                &scored.listing.title,
+                &scored.listing.company,
+                scored.score,
+                notify_threshold,
+            )
+            .await;
+        }
     }
 
     for scored in &drop {
@@ -358,6 +393,109 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         also_filtered: drop.len(),
         histogram: [(0.0, 0); 10],
     })
+}
+
+/// Fire a `HighScoreMatch` notification when `score >= threshold`.
+/// Pulled out so the threshold check is unit-testable against a
+/// mock channel without standing up a full DB + match run.
+/// Returns whether an event was fired.
+async fn fire_high_score_if_above(
+    pipe: &NotifyPipeline,
+    listing_id: &str,
+    title: &str,
+    company: &str,
+    score: f32,
+    threshold: f32,
+) -> bool {
+    if score < threshold {
+        return false;
+    }
+    pipe.fire(
+        NotifyEvent::HighScoreMatch {
+            listing_id: listing_id.to_string(),
+            title: title.to_string(),
+            company: company.to_string(),
+            score,
+        },
+        Severity::Warning,
+    )
+    .await;
+    true
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod high_score_notify_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use careerai_notify::Notifier;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Default)]
+    struct CapturingNotifier {
+        captured: Mutex<Vec<NotifyEvent>>,
+    }
+
+    #[async_trait]
+    impl Notifier for CapturingNotifier {
+        fn name(&self) -> &'static str {
+            "capturing"
+        }
+        async fn notify(
+            &self,
+            event: &NotifyEvent,
+            _severity: Severity,
+        ) -> std::result::Result<(), careerai_notify::NotifyError> {
+            self.captured.lock().expect("lock").push(event.clone());
+            Ok(())
+        }
+    }
+
+    fn pipeline_with_capture() -> (NotifyPipeline, Arc<CapturingNotifier>) {
+        let cap = Arc::new(CapturingNotifier::default());
+        let pipe = NotifyPipeline::with_channels(vec![cap.clone()], Severity::Info);
+        (pipe, cap)
+    }
+
+    #[tokio::test]
+    async fn score_above_threshold_fires_event() {
+        let (pipe, cap) = pipeline_with_capture();
+        let fired =
+            fire_high_score_if_above(&pipe, "lst-1", "ML Engineer", "Acme", 0.95, 0.85).await;
+        assert!(fired);
+        let captured = cap.captured.lock().expect("lock");
+        assert_eq!(captured.len(), 1);
+        match &captured[0] {
+            NotifyEvent::HighScoreMatch {
+                listing_id,
+                title,
+                company,
+                score,
+            } => {
+                assert_eq!(listing_id, "lst-1");
+                assert_eq!(title, "ML Engineer");
+                assert_eq!(company, "Acme");
+                assert!((score - 0.95).abs() < 1e-6);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn score_at_threshold_fires_event() {
+        let (pipe, cap) = pipeline_with_capture();
+        let fired = fire_high_score_if_above(&pipe, "lst-2", "T", "C", 0.85, 0.85).await;
+        assert!(fired);
+        assert_eq!(cap.captured.lock().expect("lock").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn score_below_threshold_does_not_fire() {
+        let (pipe, cap) = pipeline_with_capture();
+        let fired = fire_high_score_if_above(&pipe, "lst-3", "T", "C", 0.84, 0.85).await;
+        assert!(!fired);
+        assert!(cap.captured.lock().expect("lock").is_empty());
+    }
 }
 
 /// Per-source match wrapper used by the scheduler's cron tick.

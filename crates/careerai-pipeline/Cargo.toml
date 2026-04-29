@@ -17,6 +17,7 @@ careerai-llm = { path = "../careerai-llm" }
 careerai-tailor = { path = "../careerai-tailor" }
 careerai-render = { path = "../careerai-render" }
 careerai-submit = { path = "../careerai-submit" }
+careerai-notify = { path = "../careerai-notify" }
 anyhow.workspace = true
 chrono.workspace = true
 serde_json.workspace = true
@@ -38,6 +39,7 @@ live-llm = ["live-llm-cli", "live-llm-api"]
 browser = ["careerai-submit/browser", "careerai-sources/browser"]
 
 [dev-dependencies]
+async-trait.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true }
