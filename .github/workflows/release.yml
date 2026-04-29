@@ -70,6 +70,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build release binaries
+        # `shell: bash` is required so the bash `\` line-continuation
+        # below works on the Windows runner (which defaults to
+        # PowerShell, where `\` is a literal arg and breaks parsing).
+        # Other steps in this file already set `shell: bash` for the
+        # same reason.
+        shell: bash
         run: |
           cargo build --release --target ${{ matrix.target }} \
             -p careerai-cli -p careerai-mcp
