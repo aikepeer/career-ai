@@ -1,0 +1,30 @@
+[package]
+name = "careerai-dashboard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Read-only HTTP dashboard for the career-ai pipeline (KPI strip, kanban funnel, next-steps punch list)"
+
+[dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-db = { path = "../careerai-db" }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+chrono.workspace = true
+sqlx.workspace = true
+tera = { workspace = true }
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>career-ai</title>
+{% if refresh_seconds and refresh_seconds > 0 %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
+<style>{{ css | safe }}</style>
+</head>
+<body>
+<header>
+  <div class="brand">career-ai</div>
+  <div class="meta">read-only · auto-refresh {{ refresh_seconds }}s</div>
+</header>
+
+<section class="kpi-strip" role="kpi-strip">
+  <div class="kpi">
+    <div class="kpi-num">{{ view.kpi.today_discovered }}</div>
+    <div class="kpi-label">discovered today</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-num">{{ view.kpi.shortlisted_active }}</div>
+    <div class="kpi-label">shortlisted</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-num">{{ view.kpi.applied_lifetime }}</div>
+    <div class="kpi-label">applied (lifetime)</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-num">
+      {% if view.kpi.response_rate_pct %}{{ view.kpi.response_rate_pct | round(method="floor") }}%{% else %}—{% endif %}
+    </div>
+    <div class="kpi-label">response rate</div>
+  </div>
+</section>
+
+<section class="funnel" role="funnel">
+  {% for col in view.columns %}
+  <div class="col">
+    <div class="col-head">
+      <span class="col-label">{{ col.label }}</span>
+      <span class="col-count">{{ col.count }}</span>
+    </div>
+    <div class="col-body">
+      {% for card in col.top %}
+      <article class="card">
+        {% if card.url %}<a href="{{ card.url }}" target="_blank" rel="noopener" class="card-title">{{ card.title }}</a>
+        {% else %}<div class="card-title">{{ card.title }}</div>{% endif %}
+        <div class="card-meta">
+          <span>{{ card.company }}</span>
+          {% if card.score %}<span class="score">{{ card.score | round(method="floor", precision=3) }}</span>{% endif %}
+        </div>
+      </article>
+      {% endfor %}
+      {% if col.count > col.top | length %}
+      <div class="card-overflow">+{{ col.count - col.top | length }} more</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="next-steps" role="next-steps">
+  <h2>Next steps</h2>
+  {% if view.next_steps | length == 0 %}
+  <p class="empty">All caught up.</p>
+  {% else %}
+  <ul>
+    {% for step in view.next_steps %}
+    <li class="step urgency-{{ step.urgency }}">{{ step.label }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<footer>
+  <span>career-ai · {{ build_version }}</span>
+</footer>
+</body>
+</html>

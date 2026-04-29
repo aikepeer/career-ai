@@ -7,7 +7,9 @@
 mod cookies;
 mod digest;
 mod review;
+mod service;
 mod sources_sync;
+mod status;
 
 use careerai_pipeline as pipeline;
 
@@ -152,6 +154,47 @@ enum Command {
         #[command(subcommand)]
         command: SourcesCommand,
     },
+    /// Show the pipeline dashboard. `serve` starts an HTTP server on
+    /// 127.0.0.1; `show` is reserved for future CLI summary output.
+    Status {
+        #[command(subcommand)]
+        command: StatusCommand,
+    },
+    /// Manage the systemd user service that autostarts `careerai daemon`.
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum StatusCommand {
+    /// Start the read-only dashboard HTTP server. Defaults to
+    /// 127.0.0.1:8787 with a 60s meta-refresh.
+    Serve {
+        /// Port to bind. Overrides `dashboard.port` in config.
+        #[arg(long)]
+        port: Option<u16>,
+        /// Bind address. Hidden — defaults to 127.0.0.1. Setting any
+        /// other value triggers a stderr warning since the surface has
+        /// no auth.
+        #[arg(long, hide = true)]
+        bind: Option<std::net::IpAddr>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ServiceCommand {
+    /// Install the systemd user unit file for `careerai daemon`.
+    Install {
+        /// Overwrite an existing unit file if its content differs.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Show systemctl --user status for the careerai service.
+    Status,
+    /// Disable, stop, and remove the systemd user unit file.
+    Uninstall,
 }
 
 #[derive(Debug, Subcommand)]
@@ -380,6 +423,17 @@ async fn main() -> Result<()> {
                 .await
                 .context("scheduler shutdown")?;
         }
+        Command::Status { command } => match command {
+            StatusCommand::Serve { port, bind } => {
+                let cfg = load_cfg(&cwd)?;
+                status::run_serve(&cwd, &cfg, port, bind).await?;
+            }
+        },
+        Command::Service { command } => match command {
+            ServiceCommand::Install { force } => service::run_install(force)?,
+            ServiceCommand::Status => service::run_status()?,
+            ServiceCommand::Uninstall => service::run_uninstall()?,
+        },
     }
     Ok(())
 }
