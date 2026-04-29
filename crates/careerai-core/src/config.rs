@@ -405,7 +405,11 @@ pub struct MatchConfig {
 }
 
 fn default_match_notify_threshold() -> f32 {
-    0.85
+    // Calibrated for the v1 `JaccardScorer` which produces scores in
+    // ~[0.0, 0.05] on realistic profile/JD pairs. Bump together with
+    // the score_threshold default in `templates/default.yaml` when an
+    // embedding-based scorer lands.
+    0.05
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
