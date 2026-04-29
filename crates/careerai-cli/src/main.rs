@@ -289,7 +289,7 @@ async fn main() -> Result<()> {
                     );
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "tailor failed");
+                    tracing::error!(error = %format_args!("{e:#}"), "tailor failed");
                     std::process::exit(map_tailor_error_to_exit_code(&e));
                 }
             }
@@ -304,7 +304,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "render failed");
+                    tracing::error!(error = %format_args!("{e:#}"), "render failed");
                     std::process::exit(map_render_error_to_exit_code(&e));
                 }
             }
@@ -592,7 +592,7 @@ async fn run_apply(
                 print_apply_line(&outcome, auto_submit);
             }
             Err(e) => {
-                tracing::error!(error = %e, "apply failed");
+                tracing::error!(error = %format_args!("{e:#}"), "apply failed");
                 std::process::exit(map_apply_error_to_exit_code(&e));
             }
         },
@@ -610,7 +610,7 @@ async fn run_apply(
                     }
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, "apply --all failed");
+                    tracing::error!(error = %format_args!("{e:#}"), "apply --all failed");
                     std::process::exit(map_apply_error_to_exit_code(&e));
                 }
             }
@@ -712,7 +712,7 @@ async fn run_inspect(cwd: &Path, application_id: &str) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            tracing::error!(error = %e, "inspect failed");
+            tracing::error!(error = %format_args!("{e:#}"), "inspect failed");
             std::process::exit(map_apply_error_to_exit_code(&e));
         }
     }
@@ -955,7 +955,7 @@ fn profile_import(
             Err(e) => {
                 tracing::warn!(
                     target = "profile",
-                    error = %e,
+                    error = %format_args!("{e:#}"),
                     "LLM extraction failed; falling back to heuristic parser \
                      (run `claude login` or set ANTHROPIC_API_KEY to re-enable LLM)"
                 );
@@ -1259,6 +1259,47 @@ mod tests {
     fn detect_stale_skills_handles_missing_skills_block() {
         let yaml = "personal:\n  name: Alice\nsummary: hi\n";
         assert!(!detect_stale_skills_schema(yaml));
+    }
+
+    /// Regression: when the CLI logs a top-level error, it must include
+    /// the full anyhow chain so the operator can see WHY a command
+    /// failed (e.g. `tailor failed: tailor_for_listing: bullet not
+    /// covered: projects[0].bullets[0]`), not just the outermost
+    /// context label. The bug a real user just hit: `careerai tailor`
+    /// printed `error=tailor_for_listing` and dropped a chain three
+    /// frames deep. Use anyhow's alternate-Display (`{e:#}`) to print
+    /// the chain joined by `: `.
+    #[test]
+    fn anyhow_chain_format_includes_inner_causes() {
+        // Build a 3-deep chain similar to what tailor_for_listing -> Llm
+        // -> ClaudeCli currently produces.
+        let inner: anyhow::Result<()> = Err(anyhow::anyhow!("validator: bullet not covered"));
+        let mid = inner.map_err(|e| e.context("schema::parse_and_validate"));
+        let outer: anyhow::Result<()> = mid.map_err(|e| e.context("tailor_for_listing"));
+        let err = outer.unwrap_err();
+
+        // The format we pick must surface every layer.
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("tailor_for_listing"),
+            "missing outer in chain: {chain:?}"
+        );
+        assert!(
+            chain.contains("schema::parse_and_validate"),
+            "missing mid in chain: {chain:?}"
+        );
+        assert!(
+            chain.contains("bullet not covered"),
+            "missing inner in chain: {chain:?}"
+        );
+        // The plain Display formatter (what `%e` uses in tracing) only
+        // emits the outermost layer — that's the bug we're guarding
+        // against.
+        let outermost_only = format!("{err}");
+        assert_eq!(
+            outermost_only, "tailor_for_listing",
+            "plain Display still drops the chain — confirm our fix uses {{:#}} or ?e"
+        );
     }
 
     /// Regression: `--source greenhouse,lever,ashby` should parse as
