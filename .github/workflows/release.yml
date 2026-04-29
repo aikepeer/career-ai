@@ -48,10 +48,13 @@ jobs:
             target: aarch64-apple-darwin
             archive: tar.gz
             binaries: careerai careerai-mcp
-          - os: macos-13
-            target: x86_64-apple-darwin
-            archive: tar.gz
-            binaries: careerai careerai-mcp
+          # Intel macOS (`macos-13`) is intentionally not in the matrix.
+          # The free GitHub Actions `macos-13` runner queue routinely
+          # backs up for 1–6 h, blocking publish indefinitely. Apple
+          # Silicon (`aarch64-apple-darwin`) covers every 2020+ Mac;
+          # Intel users can `cargo install --git
+          # https://github.com/justdoGIT/career-ai careerai-cli
+          # careerai-mcp` against the v0.1.1-mcp tag instead.
           - os: windows-latest
             target: x86_64-pc-windows-gnu
             archive: zip
