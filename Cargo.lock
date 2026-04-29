@@ -520,10 +520,12 @@ name = "careerai-pipeline"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "careerai-core",
  "careerai-db",
  "careerai-llm",
  "careerai-match",
+ "careerai-notify",
  "careerai-profile",
  "careerai-render",
  "careerai-sources",
