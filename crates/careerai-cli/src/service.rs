@@ -20,6 +20,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart={CAREERAI_BIN} daemon
+WorkingDirectory={CAREERAI_CWD}
 Restart=on-failure
 RestartSec=10s
 # Optional env file (no error if missing); use this to keep secrets out
@@ -37,7 +38,14 @@ pub fn run_install(force: bool) -> Result<()> {
     require_linux("install")?;
     let unit_path = unit_path()?;
     let bin = current_bin()?;
-    let body = UNIT_TEMPLATE.replace("{CAREERAI_BIN}", &bin.display().to_string());
+    // Pin the daemon's WorkingDirectory to the project root the user is
+    // installing from. Without this, `systemd --user` starts the
+    // service in the manager's default cwd and the CLI's
+    // current_dir()-based config/data resolution reads the wrong tree.
+    let cwd = std::env::current_dir().context("resolve current_dir")?;
+    let body = UNIT_TEMPLATE
+        .replace("{CAREERAI_BIN}", &bin.display().to_string())
+        .replace("{CAREERAI_CWD}", &cwd.display().to_string());
 
     if let Some(parent) = unit_path.parent() {
         std::fs::create_dir_all(parent)

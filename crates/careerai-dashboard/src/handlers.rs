@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use axum::{
@@ -19,7 +20,7 @@ pub async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             let mut chain = format!("{err}");
             let mut src = std::error::Error::source(&err);
             while let Some(s) = src {
-                chain.push_str(&format!(" :: {s}"));
+                let _ = write!(chain, " :: {s}");
                 src = s.source();
             }
             tracing::error!(error = %chain, "dashboard index render failed");

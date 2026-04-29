@@ -8,6 +8,10 @@ pub struct KpiStrip {
     pub shortlisted_active: u64,
     pub applied_lifetime: u64,
     pub response_rate_pct: Option<f32>,
+    /// Pre-formatted label for the template — "—" when no applications
+    /// have been submitted, otherwise the rounded percentage like "0%"
+    /// or "12%". Avoids Tera's truthy-on-zero / null-vs-defined quirks.
+    pub response_rate_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

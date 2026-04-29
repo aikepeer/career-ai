@@ -41,7 +41,10 @@ pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
 }
 
 async fn kpi_strip(pool: &SqlitePool) -> Result<KpiStrip> {
-    let today_discovered = count_today_state(pool, ListingState::Discovered).await?;
+    // Counts every listing created today regardless of current state, so
+    // automation that quickly advances rows past `discovered` doesn't
+    // hide them from the daily-throughput KPI.
+    let today_discovered = count_today_any_state(pool).await?;
     let shortlisted_active = count_state(pool, ListingState::Shortlisted).await?;
     let submitted = count_state(pool, ListingState::Submitted).await?;
     let responded = count_state(pool, ListingState::Responded).await?;
@@ -52,11 +55,14 @@ async fn kpi_strip(pool: &SqlitePool) -> Result<KpiStrip> {
         let r = responded as f64 / applied_lifetime as f64 * 100.0;
         Some(r as f32)
     };
+    let response_rate_label =
+        response_rate_pct.map_or_else(|| "—".to_string(), |p| format!("{}%", p.floor() as i64));
     Ok(KpiStrip {
         today_discovered,
         shortlisted_active,
         applied_lifetime,
         response_rate_pct,
+        response_rate_label,
     })
 }
 
@@ -104,10 +110,9 @@ async fn count_state(pool: &SqlitePool, state: ListingState) -> Result<u64> {
     Ok(u64::try_from(n.max(0)).unwrap_or(0))
 }
 
-async fn count_today_state(pool: &SqlitePool, state: ListingState) -> Result<u64> {
+async fn count_today_any_state(pool: &SqlitePool) -> Result<u64> {
     let start_of_day = today_start();
-    let row = sqlx::query("SELECT COUNT(*) AS n FROM listings WHERE state = ? AND created_at >= ?")
-        .bind(state.as_str())
+    let row = sqlx::query("SELECT COUNT(*) AS n FROM listings WHERE created_at >= ?")
         .bind(start_of_day)
         .fetch_one(pool)
         .await

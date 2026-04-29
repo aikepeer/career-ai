@@ -27,9 +27,7 @@
     <div class="kpi-label">applied (lifetime)</div>
   </div>
   <div class="kpi">
-    <div class="kpi-num">
-      {% if view.kpi.response_rate_pct %}{{ view.kpi.response_rate_pct | round(method="floor") }}%{% else %}—{% endif %}
-    </div>
+    <div class="kpi-num">{{ view.kpi.response_rate_label }}</div>
     <div class="kpi-label">response rate</div>
   </div>
 </section>

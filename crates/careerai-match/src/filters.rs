@@ -162,6 +162,7 @@ mod tests {
             sources: careerai_core::config::SourcesConfig::default(),
             render: careerai_core::config::RenderConfig::default(),
             notify: careerai_notify::NotifyConfig::default(),
+            dashboard: careerai_core::config::DashboardConfig::default(),
         }
     }
 

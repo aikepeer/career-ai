@@ -39,7 +39,14 @@ pub fn compute(snap: &PipelineSnapshot) -> Vec<NextStep> {
                     source: source.clone(),
                     age_hours: *hours,
                 },
-                label: format!("Source `{source}` not run in {hours}h"),
+                // The signal is "no new listings in the DB from this
+                // source in N hours", which only loosely correlates
+                // with the discover job actually running. A source
+                // that runs successfully but yields only duplicates
+                // would still trigger this; we phrase the label so an
+                // operator reads it that way and looks for the right
+                // root cause.
+                label: format!("Source `{source}` produced no new listings in {hours}h"),
                 urgency: Urgency::Warn,
             });
         }
@@ -97,6 +104,7 @@ mod tests {
                 shortlisted_active: 0,
                 applied_lifetime: 0,
                 response_rate_pct: None,
+                response_rate_label: "—".to_string(),
             },
             columns: vec![],
             state_counts: StateCounts::default(),
