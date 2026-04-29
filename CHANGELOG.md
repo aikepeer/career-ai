@@ -4,6 +4,92 @@ All notable changes to career-ai. The format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); pre-1.0
 versions don't promise semver yet.
 
+## [0.1.1-mcp] — 2026-04-29
+
+First end-to-end-verified release. Replaces the never-published
+`v0.1.0-mcp` tag (which pointed at a commit that pre-dated 9 critical
+bug fixes). The full pipeline — discover → match → tailor → render →
+apply (dry-run) → daemon — runs cleanly against a populated user
+profile and live job listings.
+
+### Fixed
+
+- `careerai-mcp --version` / `--help` no longer hang. The binary now
+  uses a `clap::Parser` so flags exit cleanly instead of launching the
+  stdio MCP server. (#31)
+- `careerai sources sync` no longer marks probe-timed-out slugs for
+  removal. Soft-failed slugs (timeout / 5xx / parse error) are
+  surfaced under `probe failures` and explicitly skipped in the
+  remove-suggestion partition. Previously a flaky network would
+  silently nominate `anthropic` and `stripe` for deletion. (#32)
+- `careerai discover --source greenhouse,lever,ashby` now splits on
+  commas via clap's `value_delimiter`. The repeated form
+  `--source greenhouse --source lever` keeps working. Previously the
+  comma string was treated as one filter and silently no-op'd. (#33)
+- `match.score_threshold` and `match.notify_threshold` defaults
+  re-calibrated for the shipping `JaccardScorer` (token Jaccard
+  produces scores in ~[0, 0.05]; the previous 0.62 / 0.85 thresholds
+  were calibrated for a future BGE-cosine scorer that doesn't ship).
+  Defaults are now 0.035 / 0.05. The `embedding_model` field stays in
+  the yaml as a forward-compat marker; calibration comment block
+  warns to bump together with any embedding-scorer swap. (#34)
+- `tailor` prompt template now teaches the LLM the
+  `projects[<i>].bullets[<j>]` path shape alongside experience paths.
+  The validator (`diff::validate` rule 1) requires every profile
+  bullet — experience AND projects — to be covered; the prompt only
+  documenting experience caused every tailor cycle on a profile with
+  any project bullets to fail with `bullet not covered`. (#35)
+- CLI error logging now prints the full anyhow chain
+  (`{e:#}` via `format_args!`) instead of the outermost context
+  label only. Five `tracing::error!` callsites + one `tracing::warn!`
+  switched. Surfaces root causes like
+  `tailor failed: tailor_for_listing: schema::parse_and_validate:
+  invented proper noun: <token>` instead of just
+  `error=tailor_for_listing`. (#36)
+- Tailor guardrail now accepts proper nouns from the **original
+  bullet** (the carve-out the function's docstring promised but only
+  honored for numbers). Reuse of project / system codenames like
+  `Symbot6` from a source bullet no longer triggers
+  "invented proper noun". (#37)
+- `COMMON_ENGLISH_CAPS` extended with ~50 standard resume-action
+  verbs (`Architected`, `Engineered`, `Optimized`, `Migrated`, ...)
+  so sentence-start verbs picked from the wider resume thesaurus
+  clear the proper-noun guardrail. (#38)
+- Tailor guardrail now scrapes proper-noun tokens from the **full
+  flattened profile prose** (experience + project bullets, summary)
+  in addition to the structured employer / project-name / skill
+  fields. Terms like `Linux`, `Wayland`, `X11`, `ROS`, `Docker` —
+  legitimately the user's own because they typed them into bullets —
+  no longer false-reject as "invented". (#39)
+- `COMMON_ENGLISH_CAPS` further extended with common
+  determiners / pronouns and ~25 temporal / qualifier adverbs
+  (`Currently`, `Previously`, `Successfully`, `However`,
+  `Specifically`, `Initially`, `Eventually`, ...). Resume bullets
+  and summaries that open with these no longer false-reject. (#40)
+
+### Notes
+
+- The `embedding_model: BAAI/bge-small-en-v1.5` config field is
+  reserved for a future scorer; the v1 scorer is plain `JaccardScorer`.
+  Match quality is therefore deliberately naïve in this release —
+  shortlisting is correct on the calibrated threshold but ranking
+  semantics are token-overlap, not semantic similarity. Tracking the
+  embedding-scorer swap separately.
+- Tech acronyms (`API`, `JSON`, `GPU`, ...) still trigger the
+  proper-noun guardrail unless the profile lists them as skills.
+  Tracking a curated tech-acronym whitelist (or sentence-boundary
+  detection) as a follow-up if it surfaces in real use.
+- `llm.timeout_seconds` in `default.yaml` raised to 300 (from 120) to
+  accommodate the live `claude` CLI subprocess on cold start with
+  ~8K-token completions.
+
+### Removed
+
+- The unpublished `v0.1.0-mcp` tag (deleted local + remote). It
+  pointed at the merge commit of #30, predating every bug fix above.
+  Two stuck release-workflow runs that targeted that commit were
+  cancelled.
+
 ## [Unreleased]
 
 ### Added
