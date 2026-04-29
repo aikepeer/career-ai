@@ -237,6 +237,25 @@ pub(crate) fn forbid_invented_entities_with(
     }
 
     // --- Proper nouns ---
+    // Pre-extract proper-noun tokens from the original bullet so a
+    // reword may legitimately reuse codenames / system names that
+    // aren't in the profile's employer / project / skill token sets.
+    // The doc-comment on this function explicitly promises this
+    // carve-out ("...or, narrowly, in the original bullet"). Earlier
+    // implementations honored it for numbers but silently dropped it
+    // for proper nouns, rejecting every reword that echoed a system
+    // / project codename from the source bullet.
+    let mut original_proper_nouns: HashSet<String> = HashSet::new();
+    for m in proper_noun_regex().find_iter(original_bullet) {
+        for raw in m.as_str().split_whitespace() {
+            let lower = raw.to_lowercase();
+            if lower.len() < 3 {
+                continue;
+            }
+            original_proper_nouns.insert(strip_for_match(&lower));
+        }
+    }
+
     for m in proper_noun_regex().find_iter(new_text) {
         let span = m.as_str();
         let mut intersects = false;
@@ -252,6 +271,7 @@ pub(crate) fn forbid_invented_entities_with(
                 || sets.project_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&lower)
+                || original_proper_nouns.contains(&stripped)
                 || COMMON_ENGLISH_CAPS.contains(&stripped.as_str())
             {
                 intersects = true;
@@ -415,6 +435,49 @@ mod tests {
     fn rejects_invented_location_proper_noun() {
         let p = fixture();
         let err = forbid_invented_entities("worked in Paris", "", &p, "x").unwrap_err();
+        assert!(
+            matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
+            "got {err:?}"
+        );
+    }
+
+    /// Regression: a reword that reuses a proper noun from the **original
+    /// bullet** must be accepted, even if that proper noun isn't in the
+    /// profile's employer / project / skill token sets. The function's
+    /// docstring explicitly promises this carve-out: "may not invent ...
+    /// proper nouns that don't appear in the profile (or, narrowly, in
+    /// the original bullet)". Before the fix only numbers honored that
+    /// carve-out; proper nouns silently violated it. Real-world impact:
+    /// every reword bullet that referenced a project / system codename
+    /// (e.g. `Symbot6`, `OpenAMP`) failed validation despite the LLM
+    /// faithfully echoing the term from the source bullet.
+    #[test]
+    fn accepts_proper_noun_from_original_bullet() {
+        let p = fixture();
+        // Symbot6 is not an employer/project/skill in the profile, but
+        // it IS in the original bullet, so this reword is legitimate.
+        forbid_invented_entities(
+            "Owned the Symbot6 platform from boot to telemetry.",
+            "Architected the Symbot6 platform on Linux.",
+            &p,
+            "x",
+        )
+        .unwrap();
+    }
+
+    /// Pinning the negative case: a proper noun that is in NEITHER the
+    /// profile NOR the original bullet must still be rejected — the
+    /// original-bullet whitelist must not over-broaden the carve-out.
+    #[test]
+    fn still_rejects_proper_noun_absent_from_both_profile_and_original() {
+        let p = fixture();
+        let err = forbid_invented_entities(
+            "Owned the Symbot7 platform end-to-end.", // 7, not 6
+            "Architected the Symbot6 platform on Linux.",
+            &p,
+            "x",
+        )
+        .unwrap_err();
         assert!(
             matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
             "got {err:?}"
