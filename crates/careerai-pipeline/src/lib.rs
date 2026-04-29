@@ -247,9 +247,9 @@ pub struct DigestReport {
     pub cookie_warnings: Vec<String>,
 }
 
-#[allow(clippy::too_many_lines)] // orchestrator function; splitting it
-                                  // would just shuffle the same logic
-                                  // across helpers without clarifying it.
+// Orchestrator function; splitting it would just shuffle the same
+// logic across helpers without clarifying it.
+#[allow(clippy::too_many_lines)]
 pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<MatchReport> {
     let pool = open_pool(root).await?;
     let profile = load_profile(root)?;
