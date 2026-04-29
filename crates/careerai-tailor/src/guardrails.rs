@@ -52,6 +52,15 @@ pub(crate) struct ProfileTokenSets {
     employer_tokens: HashSet<String>,
     project_tokens: HashSet<String>,
     skill_tokens: HashSet<String>,
+    /// Proper-noun tokens scraped from the full flattened profile text
+    /// (summary + experience bullets + project bullets + ...). This
+    /// captures system/library/protocol names that legitimately appear
+    /// in the user's prose but are not modeled as structured employers,
+    /// project names, or skills — `Linux`, `Wayland`, `X11`, `Docker`,
+    /// `ROS`, etc. Without this, every reword that reused such a noun
+    /// was rejected as "invented proper noun" even when the term was
+    /// clearly the user's own.
+    profile_proper_nouns: HashSet<String>,
     year_tokens: HashSet<String>,
     number_tokens: HashSet<String>,
 }
@@ -117,10 +126,24 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         }
     }
 
+    // Profile-wide proper-noun harvest. Same regex as the new-text
+    // scan; we strip-and-lowercase to match the intersection format.
+    let mut profile_proper_nouns: HashSet<String> = HashSet::new();
+    for m in proper_noun_regex().find_iter(&flat) {
+        for raw in m.as_str().split_whitespace() {
+            let lower = raw.to_lowercase();
+            if lower.len() < 3 {
+                continue;
+            }
+            profile_proper_nouns.insert(strip_for_match(&lower));
+        }
+    }
+
     ProfileTokenSets {
         employer_tokens,
         project_tokens,
         skill_tokens,
+        profile_proper_nouns,
         year_tokens,
         number_tokens,
     }
@@ -271,6 +294,7 @@ pub(crate) fn forbid_invented_entities_with(
                 || sets.project_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&lower)
+                || sets.profile_proper_nouns.contains(&stripped)
                 || original_proper_nouns.contains(&stripped)
                 || COMMON_ENGLISH_CAPS.contains(&stripped.as_str())
             {
@@ -599,6 +623,67 @@ mod tests {
                 panic!("guardrail rejected resume-action verb in {new_text:?}: {e:?}")
             });
         }
+    }
+
+    /// Regression: proper nouns appearing in profile bullet bodies
+    /// (e.g. `Linux`, `Wayland`, `X11`, `ROS`) must clear the guardrail
+    /// even though they're not employers, project names, or skills.
+    /// `build_token_sets` previously only pulled from the structured
+    /// fields (companies / project.name / skills), so a perfectly
+    /// legitimate reword that referenced `Linux` from a bullet was
+    /// rejected as "invented proper noun".
+    #[test]
+    fn accepts_proper_noun_from_profile_bullet_body() {
+        // Build a profile whose bullet mentions "Wayland" but where
+        // Wayland is NOT an employer, project name, or skill. The
+        // reword must be allowed to reuse "Wayland" because it was
+        // already in the user's profile prose.
+        let p = Profile {
+            personal: Personal {
+                name: "Test".into(),
+                email: "t@example.com".into(),
+                ..Default::default()
+            },
+            summary: "Embedded engineer.".into(),
+            skills: Skills {
+                languages: vec!["C".into()],
+                frameworks: vec![],
+                tools: vec![],
+            },
+            experience: vec![Experience {
+                title: "Engineer".into(),
+                company: "Acme".into(),
+                location: String::new(),
+                start: "2020".into(),
+                end: "2023".into(),
+                bullets: vec![
+                    "Ported display servers from X11 to Wayland on embedded boards.".into(),
+                ],
+            }],
+            education: vec![],
+            projects: vec![],
+        };
+
+        // Reword reuses "Wayland" — present in the bullet body, NOT a
+        // company/project/skill. Must be accepted.
+        forbid_invented_entities(
+            "Migrated the Wayland compositor for the new platform.",
+            "Ported display servers from X11 to Wayland on embedded boards.",
+            &p,
+            "x",
+        )
+        .unwrap();
+
+        // And a different bullet's reword (with empty original) should
+        // ALSO accept "Wayland" because it appears in the profile prose,
+        // not just this specific bullet.
+        forbid_invented_entities(
+            "Stabilized Wayland compositor performance.",
+            "different bullet original here",
+            &p,
+            "x",
+        )
+        .unwrap();
     }
 
     /// Pinning the negative case: a proper noun that is in NEITHER the
