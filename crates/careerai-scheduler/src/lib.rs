@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use careerai_core::config::CoreConfig;
+#[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
@@ -259,29 +260,43 @@ impl Scheduler {
     pub async fn run_until_shutdown(mut self) -> Result<(), SchedulerError> {
         let span = info_span!("scheduler");
         async move {
-            // H2: install both signal handlers BEFORE starting the scheduler.
-            // `tokio::signal::ctrl_c` registers lazily on first poll, and the
-            // unix `signal()` call itself does the syscall, so any signal
-            // delivered between `start()` returning and the first `select!`
-            // poll could otherwise fall through to the default disposition
-            // (terminate without drain). Registering both here closes that
-            // window — the kernel queues SIGINT/SIGTERM into our handlers as
-            // soon as `signal()` returns.
-            let mut sigint = signal(SignalKind::interrupt())?;
-            let mut sigterm = signal(SignalKind::terminate())?;
+            // H2: install signal handlers BEFORE starting the scheduler.
+            // `tokio::signal::ctrl_c` registers lazily on first poll, and on
+            // Unix the `signal()` syscall itself happens at construction —
+            // any signal delivered between `start()` returning and the first
+            // `select!` poll could otherwise fall through to the default
+            // disposition (terminate without drain). Registering both here
+            // closes that window: the kernel queues SIGINT/SIGTERM into our
+            // handlers as soon as `signal()` returns.
+            //
+            // On Windows there is no `tokio::signal::unix`; the daemon
+            // shuts down on Ctrl-C only (operator-driven). systemd-style
+            // SIGTERM doesn't apply on Windows.
+            #[cfg(unix)]
+            {
+                let mut sigint = signal(SignalKind::interrupt())?;
+                let mut sigterm = signal(SignalKind::terminate())?;
 
-            self.start().await?;
+                self.start().await?;
 
-            // SIGTERM (e.g. systemd stop) and SIGINT (Ctrl-C) both initiate
-            // graceful shutdown. Race them with `tokio::select!` so whichever
-            // arrives first wins.
-            tokio::select! {
-                _ = sigint.recv() => {
-                    info!("received SIGINT, shutting down");
+                // SIGTERM (e.g. systemd stop) and SIGINT (Ctrl-C) both
+                // initiate graceful shutdown. Race them with
+                // `tokio::select!` so whichever arrives first wins.
+                tokio::select! {
+                    _ = sigint.recv() => {
+                        info!("received SIGINT, shutting down");
+                    }
+                    _ = sigterm.recv() => {
+                        info!("received SIGTERM, shutting down");
+                    }
                 }
-                _ = sigterm.recv() => {
-                    info!("received SIGTERM, shutting down");
-                }
+            }
+            #[cfg(not(unix))]
+            {
+                self.start().await?;
+
+                tokio::signal::ctrl_c().await?;
+                info!("received Ctrl-C, shutting down");
             }
 
             let drain = tokio::time::timeout(SHUTDOWN_DRAIN, self.inner.shutdown()).await;
