@@ -10,17 +10,23 @@ this schema:
     { "path": "experience[<i>].bullets[<j>]", "op": "keep" },
     { "path": "experience[<i>].bullets[<j>]", "op": "reword", "new_text": "..." },
     { "path": "experience[<i>].bullets[<j>]", "op": "drop" },
-    { "path": "experience[<i>].bullets[<j>]", "op": "move_before", "target_path": "experience[<i>].bullets[<k>]" }
+    { "path": "experience[<i>].bullets[<j>]", "op": "move_before", "target_path": "experience[<i>].bullets[<k>]" },
+    { "path": "projects[<i>].bullets[<j>]", "op": "keep" },
+    { "path": "projects[<i>].bullets[<j>]", "op": "reword", "new_text": "..." },
+    { "path": "projects[<i>].bullets[<j>]", "op": "drop" },
+    { "path": "projects[<i>].bullets[<j>]", "op": "move_before", "target_path": "projects[<i>].bullets[<k>]" }
   ],
   "cover_letter": "..."
 }
 
-Every bullet in the profile must appear in exactly one op. You may only
-reword (not invent). Numbers, employer names, and dates in rewritten
-bullets must appear in the original bullet or elsewhere in the profile.
-Rewritten bullets must be <= 280 characters. At least one bullet must
-remain in every experience entry after all drops are applied. Cover
-letter: <= 350 words, three short paragraphs.
+Every bullet in the profile must appear in exactly one op — that
+includes BOTH `experience[].bullets[]` AND `projects[].bullets[]`. You
+may only reword (not invent). Numbers, employer names, and dates in
+rewritten bullets must appear in the original bullet or elsewhere in
+the profile. Rewritten bullets must be <= 280 characters. At least one
+bullet must remain in every experience entry after all drops are
+applied (projects entries may end empty — they will be skipped on
+render). Cover letter: <= 350 words, three short paragraphs.
 
 <<<PROFILE_BLOCK>>>
 Master profile (stable across requests; treat as cached context):

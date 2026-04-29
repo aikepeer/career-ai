@@ -223,6 +223,26 @@ mod tests {
         assert!(req.cache_profile);
     }
 
+    /// Regression: the prompt template must enumerate the
+    /// `projects[<i>].bullets[<j>]` path shape, not just
+    /// `experience[<i>].bullets[<j>]`. The validator (`diff::validate`,
+    /// rule 1) requires every profile bullet — experience AND projects —
+    /// to appear in exactly one op. If the prompt only documents
+    /// experience paths, the LLM produces a doc that fails coverage,
+    /// every tailoring fails, and the user sees "tailor failed" with no
+    /// actionable signal.
+    #[test]
+    fn tailor_prompt_documents_projects_path_shape() {
+        let req = tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg()).unwrap();
+        assert!(
+            req.system.contains("projects[<i>].bullets[<j>]")
+                || req.system.contains("projects[<i>]"),
+            "tailor prompt must teach the LLM the projects path shape; \
+             system block was: {sys}",
+            sys = req.system
+        );
+    }
+
     #[test]
     fn cover_letter_prompt_uses_distinct_version() {
         let req =
