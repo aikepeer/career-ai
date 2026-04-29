@@ -55,8 +55,10 @@ enum Command {
     },
     /// Pull new listings from configured sources.
     Discover {
-        /// Restrict to one or more sources (repeatable).
-        #[arg(long = "source")]
+        /// Restrict to one or more sources. Accepts comma-separated
+        /// (`--source greenhouse,lever`) or repeated
+        /// (`--source greenhouse --source lever`) forms.
+        #[arg(long = "source", value_delimiter = ',')]
         sources: Vec<String>,
     },
     /// Run filters + embedding match against shortlisted listings.
@@ -1257,6 +1259,56 @@ mod tests {
     fn detect_stale_skills_handles_missing_skills_block() {
         let yaml = "personal:\n  name: Alice\nsummary: hi\n";
         assert!(!detect_stale_skills_schema(yaml));
+    }
+
+    /// Regression: `--source greenhouse,lever,ashby` should parse as
+    /// three filter entries, not one 19-char source name. Clap's
+    /// `Vec<String>` only splits on commas when `value_delimiter`
+    /// is set explicitly. The earlier behavior silently no-op'd
+    /// `careerai discover` because the joined "greenhouse,lever,..."
+    /// matched no `Source::name()`, and the user saw "no sources
+    /// enabled" with zero help text pointing at the cause.
+    #[test]
+    fn discover_source_arg_splits_on_commas() {
+        let cli =
+            Cli::try_parse_from(["careerai", "discover", "--source", "greenhouse,lever,ashby"])
+                .expect("parse");
+        match cli.command {
+            Command::Discover { sources } => {
+                assert_eq!(
+                    sources,
+                    vec![
+                        "greenhouse".to_string(),
+                        "lever".to_string(),
+                        "ashby".to_string()
+                    ],
+                    "expected three filter entries; got: {sources:?}"
+                );
+            }
+            other => panic!("expected Discover; got {other:?}"),
+        }
+    }
+
+    /// `--source greenhouse --source lever` (the repeated form) must
+    /// keep working alongside the comma form, matching clap's
+    /// documented behavior when `value_delimiter` is set.
+    #[test]
+    fn discover_source_arg_accepts_repeated_form() {
+        let cli = Cli::try_parse_from([
+            "careerai",
+            "discover",
+            "--source",
+            "greenhouse",
+            "--source",
+            "lever",
+        ])
+        .expect("parse");
+        match cli.command {
+            Command::Discover { sources } => {
+                assert_eq!(sources, vec!["greenhouse".to_string(), "lever".to_string()]);
+            }
+            other => panic!("expected Discover; got {other:?}"),
+        }
     }
 
     #[test]
