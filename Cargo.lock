@@ -299,7 +299,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "careerai-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "careerai-notify",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-db"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "careerai-core",
  "chrono",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-llm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "backon",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-match"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "careerai-core",
  "careerai-notify",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "careerai-core",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-notify"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-pipeline"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "careerai-core",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-profile"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "csv",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-render"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "careerai-core",
  "careerai-profile",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-scheduler"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "careerai-core",
  "careerai-pipeline",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-sources"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "careerai-core",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-submit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "careerai-tailor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "careerai-core",
