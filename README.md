@@ -220,6 +220,49 @@ Prebuilt binaries for Linux / macOS / Windows are published to
 [GitHub Releases](https://github.com/justdoGIT/career-ai/releases) once
 tagged.
 
+## Dashboard
+
+`careerai status serve` starts a read-only HTTP dashboard on
+`http://127.0.0.1:8787` (loopback only). One page: a KPI strip
+(today's discovered, shortlisted active, applied lifetime, response
+rate), a kanban funnel across the pipeline states with the top 3
+listings per column (titles are clickable JD links), and a "next
+steps" punch list (action / warn / info ordering). Auto-refreshes
+every 60 seconds.
+
+```bash
+careerai status serve              # http://127.0.0.1:8787
+careerai status serve --port 9000  # alt port
+```
+
+The dashboard is a separate process from the daemon — start it on
+demand, Ctrl-C to stop. There is no auth (single-user, loopback only).
+
+## Run as a service
+
+Make `careerai daemon` autostart on boot and survive logout via
+systemd-user:
+
+```bash
+cd ~/career-ai-data       # or wherever your project root is
+careerai service install  # writes ~/.config/systemd/user/careerai.service
+                          # and prompts for `loginctl enable-linger`
+
+systemctl --user enable --now careerai
+careerai service status   # confirm
+
+# tail logs
+journalctl --user -u careerai -f
+```
+
+The unit ships with `Restart=on-failure`, `MemoryMax=2G`, `CPUQuota=80%`,
+and `EnvironmentFile=-%h/.config/careerai/env` so you can keep secrets
+(API keys, `CAREERAI_ROOT`) out of the unit file. Linux-only;
+see [docs/SERVICE.md](./docs/SERVICE.md) for the full walkthrough,
+troubleshooting, and macOS / Windows notes.
+
+`careerai service uninstall` removes the unit file and disables it.
+
 ## Notifications
 
 career-ai pings you outside the CLI when something needs human
