@@ -334,7 +334,7 @@ pub(crate) fn forbid_invented_entities_with(
 ///    false-rejects rewords whose lead verb wasn't in the original
 ///    seed list of seven.
 const COMMON_ENGLISH_CAPS: &[&str] = &[
-    // --- connectors / pronouns ---
+    // --- connectors / pronouns / determiners ---
     "the",
     "and",
     "for",
@@ -353,6 +353,70 @@ const COMMON_ENGLISH_CAPS: &[&str] = &[
     "using",
     "through",
     "also",
+    "their",
+    "these",
+    "those",
+    "such",
+    "each",
+    "every",
+    "some",
+    "any",
+    "both",
+    "either",
+    "neither",
+    "many",
+    "most",
+    "several",
+    "few",
+    // --- temporal / sequence adverbs (common at sentence start) ---
+    "currently",
+    "previously",
+    "recently",
+    "today",
+    "yesterday",
+    "now",
+    "then",
+    "later",
+    "earlier",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "initially",
+    "finally",
+    "lastly",
+    "eventually",
+    "subsequently",
+    "simultaneously",
+    "since",
+    "until",
+    "before",
+    // --- frequency / qualifier adverbs ---
+    "successfully",
+    "additionally",
+    "furthermore",
+    "moreover",
+    "however",
+    "therefore",
+    "thus",
+    "hence",
+    "specifically",
+    "particularly",
+    "generally",
+    "typically",
+    "usually",
+    "frequently",
+    "occasionally",
+    "always",
+    "often",
+    "sometimes",
+    "rarely",
+    "never",
+    "consistently",
+    "deeply",
+    "directly",
+    "primarily",
     // --- resume-action verbs ---
     "built",
     "led",
@@ -684,6 +748,32 @@ mod tests {
             "x",
         )
         .unwrap();
+    }
+
+    /// Regression: common temporal / qualifier adverbs at sentence
+    /// start (`Currently`, `Recently`, `Successfully`, `However`, ...)
+    /// are not proper nouns. Resume bullets and summaries open with
+    /// these all the time. Without coverage, validate() rejects the
+    /// whole tailor cycle as "invented proper noun".
+    #[test]
+    fn accepts_common_sentence_start_adverbs() {
+        let p = fixture();
+        for new_text in [
+            "Currently architecting the next-gen platform.",
+            "Previously shipped the legacy stack.",
+            "Recently optimized cold-start latency.",
+            "Successfully delivered five major releases.",
+            "Additionally drove cross-team alignment.",
+            "However the team pivoted late.",
+            "Therefore reduced scope to ship on time.",
+            "Specifically tuned the boot sequence.",
+            "Initially established the testing framework.",
+            "Eventually owned the deployment pipeline.",
+        ] {
+            forbid_invented_entities(new_text, "noop bullet text", &p, "x").unwrap_or_else(|e| {
+                panic!("guardrail rejected sentence-start adverb in {new_text:?}: {e:?}")
+            });
+        }
     }
 
     /// Pinning the negative case: a proper noun that is in NEITHER the
