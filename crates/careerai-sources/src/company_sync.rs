@@ -222,13 +222,21 @@ pub async fn sync_with_base_urls(
             // Surface a "consider removing" only when the slug is in
             // the seed (we probed it) and missed every domain. Slugs
             // outside the seed are out-of-scope — leave them alone.
+            // A probe failure (timeout, 5xx, parse error) is "no
+            // signal" rather than "confirmed zero matches" —
+            // recommending removal in that case would silently drop
+            // user-configured companies on a flaky network.
             let in_seed = seed
                 .iter()
                 .any(|e| e.ats == ats && e.slug.eq_ignore_ascii_case(slug));
             let matched_now = all_hit_slugs
                 .iter()
                 .any(|(a, s)| *a == ats && s.eq_ignore_ascii_case(slug));
-            if in_seed && !matched_now {
+            let probe_failed = report
+                .probe_failures
+                .iter()
+                .any(|(s, _)| s.eq_ignore_ascii_case(slug));
+            if in_seed && !matched_now && !probe_failed {
                 report.remove.push((ats, slug.clone()));
             }
         }
@@ -691,6 +699,58 @@ mod tests {
         assert_eq!(report.add[0].slug, "good");
         assert_eq!(report.probe_failures.len(), 1);
         assert_eq!(report.probe_failures[0].0, "bad");
+    }
+
+    // Regression: a slug that is configured AND in the seed list AND
+    // probe-failed (timeout, 5xx, parse error, etc.) must NOT be
+    // surfaced as "consider removing". A failed probe is "we have no
+    // signal", not "we confirmed zero matches" — recommending removal
+    // would silently drop user-configured companies on a flaky
+    // network. See PR feedback on `careerai sources sync` output that
+    // marked anthropic/stripe for removal after a 10s timeout.
+    #[tokio::test]
+    async fn probe_failure_does_not_propose_removal_of_configured_slug() {
+        let server = MockServer::start().await;
+        // 500 → ProbeOutcome::Failure on the only configured slug.
+        Mock::given(method("GET"))
+            .and(path_regex(r"^/v1/boards/flaky/jobs"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let mut cfg = cfg_with_domains(vec![ai_ml_domain()]);
+        cfg.sources.greenhouse.companies = vec!["flaky".into()];
+
+        let seed = vec![SeedEntry {
+            slug: "flaky".into(),
+            ats: AtsVendor::Greenhouse,
+            domain_hint: vec![],
+        }];
+        let bases = BaseUrls {
+            greenhouse: server.uri(),
+            lever: server.uri(),
+            ashby: server.uri(),
+        };
+        let report = sync_with_base_urls(&cfg, &seed, &bases).await.unwrap();
+
+        // The probe must be recorded as a failure.
+        let failure_slugs: Vec<_> = report
+            .probe_failures
+            .iter()
+            .map(|(s, _)| s.clone())
+            .collect();
+        assert!(
+            failure_slugs.contains(&"flaky".to_string()),
+            "expected probe failure for `flaky`; got: {failure_slugs:?}"
+        );
+
+        // And it must NOT be in the remove list — we have no evidence
+        // it has zero matches, only that we couldn't reach it.
+        let remove_slugs: Vec<_> = report.remove.iter().map(|(_, s)| s.clone()).collect();
+        assert!(
+            !remove_slugs.contains(&"flaky".to_string()),
+            "probe-failed slug should not be marked for removal; got: {remove_slugs:?}"
+        );
     }
 
     #[test]
