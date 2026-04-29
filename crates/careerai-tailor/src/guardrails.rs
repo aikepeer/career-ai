@@ -295,9 +295,22 @@ pub(crate) fn forbid_invented_entities_with(
 }
 
 /// Words commonly capitalized at sentence start in English prose. Kept
-/// intentionally short; anything else has to match the profile's
-/// employer/project/skill tokens.
+/// curated rather than open-ended; anything outside this list (and the
+/// profile's employer / project / skill token sets, and the original
+/// bullet's proper-noun set) is treated as a candidate invented proper
+/// noun. The list bundles two categories:
+///
+/// 1. Sentence connectors / pronouns (`The`, `And`, `That`, ...). Almost
+///    every English bullet that doesn't lead with a verb leads with one
+///    of these.
+/// 2. Common resume-action verbs (`Built`, `Architected`, `Engineered`,
+///    `Optimized`, `Migrated`, ...). The LLM legitimately picks from
+///    the standard resume-verb thesaurus, and these get sentence-start
+///    capitalization automatically. Without them the guardrail
+///    false-rejects rewords whose lead verb wasn't in the original
+///    seed list of seven.
 const COMMON_ENGLISH_CAPS: &[&str] = &[
+    // --- connectors / pronouns ---
     "the",
     "and",
     "for",
@@ -316,6 +329,7 @@ const COMMON_ENGLISH_CAPS: &[&str] = &[
     "using",
     "through",
     "also",
+    // --- resume-action verbs ---
     "built",
     "led",
     "shipped",
@@ -324,6 +338,86 @@ const COMMON_ENGLISH_CAPS: &[&str] = &[
     "implemented",
     "owned",
     "delivered",
+    "architected",
+    "engineered",
+    "developed",
+    "deployed",
+    "optimized",
+    "migrated",
+    "refactored",
+    "scaled",
+    "automated",
+    "integrated",
+    "established",
+    "achieved",
+    "reduced",
+    "increased",
+    "coordinated",
+    "mentored",
+    "spearheaded",
+    "defined",
+    "authored",
+    "modernized",
+    "hardened",
+    "instrumented",
+    "profiled",
+    "tuned",
+    "accelerated",
+    "parallelized",
+    "decoupled",
+    "simplified",
+    "managed",
+    "executed",
+    "transformed",
+    "validated",
+    "prototyped",
+    "championed",
+    "partnered",
+    "collaborated",
+    "contributed",
+    "supported",
+    "enabled",
+    "drafted",
+    "presented",
+    "analyzed",
+    "investigated",
+    "diagnosed",
+    "resolved",
+    "rewrote",
+    "rolled",
+    "rolled-out",
+    "rolled-back",
+    "promoted",
+    "expanded",
+    "consolidated",
+    "documented",
+    "tested",
+    "benchmarked",
+    "monitored",
+    "enforced",
+    "secured",
+    "audited",
+    "ported",
+    "packaged",
+    "released",
+    "configured",
+    "ramped",
+    "kicked",
+    "saved",
+    "trimmed",
+    "fixed",
+    "patched",
+    "added",
+    "removed",
+    "replaced",
+    "introduced",
+    "improved",
+    "raised",
+    "doubled",
+    "tripled",
+    "halved",
+    "tracked",
+    "received",
 ];
 
 #[cfg(test)]
@@ -463,6 +557,48 @@ mod tests {
             "x",
         )
         .unwrap();
+    }
+
+    /// Regression: common resume-action verbs at sentence start
+    /// (`Architected`, `Engineered`, `Optimized`, `Migrated`, ...) are
+    /// not proper nouns — they're capitalized only because the bullet
+    /// starts there. A profile guardrail that flags them as "invented
+    /// proper noun" silently rejects every reword whose lead verb the
+    /// LLM picked from the resume-action thesaurus rather than the
+    /// short pre-existing whitelist (`Built`, `Led`, `Shipped`, etc.).
+    #[test]
+    fn accepts_common_resume_action_verbs_at_sentence_start() {
+        let p = fixture();
+        // Each of these starts a typical resume bullet. None reference
+        // a profile employer/project/skill, none appear in the trivial
+        // original bullet — so they MUST clear the guardrail purely on
+        // the sentence-start carve-out.
+        for new_text in [
+            "Architected the system end-to-end.",
+            "Engineered low-latency pipelines.",
+            "Optimized boot time across targets.",
+            "Migrated services to a new platform.",
+            "Developed core middleware.",
+            "Refactored the storage layer.",
+            "Scaled the cluster horizontally.",
+            "Automated the release process.",
+            "Integrated the legacy stack.",
+            "Established service-level objectives.",
+            "Achieved deterministic throughput.",
+            "Reduced cold-start latency.",
+            "Increased fleet uptime.",
+            "Coordinated cross-team launches.",
+            "Mentored a team of engineers.",
+            "Spearheaded the redesign effort.",
+            "Defined the service contract.",
+            "Authored the kernel module.",
+            "Modernized the build system.",
+            "Hardened the boot sequence.",
+        ] {
+            forbid_invented_entities(new_text, "noop bullet text", &p, "x").unwrap_or_else(|e| {
+                panic!("guardrail rejected resume-action verb in {new_text:?}: {e:?}")
+            });
+        }
     }
 
     /// Pinning the negative case: a proper noun that is in NEITHER the
