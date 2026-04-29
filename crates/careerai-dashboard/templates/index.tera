@@ -52,8 +52,9 @@
         </div>
       </article>
       {% endfor %}
-      {% if col.count > col.top | length %}
-      <div class="card-overflow">+{{ col.count - col.top | length }} more</div>
+      {% set shown = col.top | length %}
+      {% if col.count > shown %}
+      <div class="card-overflow">+{{ col.count - shown }} more</div>
       {% endif %}
     </div>
   </div>

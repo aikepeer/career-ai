@@ -15,7 +15,14 @@ pub async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match render_index(&state).await {
         Ok(body) => (StatusCode::OK, Html(body)).into_response(),
         Err(err) => {
-            tracing::error!(error = %format_args!("{err:#}"), "dashboard index render failed");
+            // chain the error so Tera template errors surface their inner cause
+            let mut chain = format!("{err}");
+            let mut src = std::error::Error::source(&err);
+            while let Some(s) = src {
+                chain.push_str(&format!(" :: {s}"));
+                src = s.source();
+            }
+            tracing::error!(error = %chain, "dashboard index render failed");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Html(fallback_error_page()),

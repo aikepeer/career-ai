@@ -17,7 +17,7 @@ pub async fn run_serve(
     let bind = bind_override.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
     let refresh_seconds = cfg.dashboard.refresh_seconds.unwrap_or(60);
 
-    let db_path = cwd.join("data/careerai.db");
+    let db_path = cwd.join("data").join("careerai.sqlite");
     let pool = pool_from_path(&db_path)
         .await
         .with_context(|| format!("open db at {}", db_path.display()))?;

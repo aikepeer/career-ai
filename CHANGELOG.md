@@ -4,6 +4,34 @@ All notable changes to career-ai. The format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); pre-1.0
 versions don't promise semver yet.
 
+## [Unreleased]
+
+### Added
+
+- **`careerai status serve`** — read-only HTTP dashboard at
+  `http://127.0.0.1:8787` (port configurable via `--port` or
+  `dashboard.port` in config). Single page: KPI strip (today's
+  discovered, shortlisted active, applied lifetime, response rate),
+  kanban funnel across pipeline states with the top 3 cards per
+  column, and a deterministic "next steps" punch list (action >
+  warn > info ordering: ready-to-tailor / ready-to-render /
+  ready-to-apply / source-stale / cookie-expiring / profile-stale).
+  Every card title is a clickable JD link. Loopback-only by default;
+  `--bind` is hidden and any non-loopback bind logs a loud no-auth
+  warning. Auto-refresh every 60s via meta-refresh, no JS, no CDN.
+- **`careerai service install/status/uninstall`** — manages a systemd
+  user unit at `~/.config/systemd/user/careerai.service`. `install`
+  writes the unit atomically, runs `systemctl --user daemon-reload`,
+  then prompts for `loginctl enable-linger $USER` so the daemon
+  survives logout. The unit ships with `Restart=on-failure`,
+  `MemoryMax=2G`, `CPUQuota=80%`, and an optional
+  `EnvironmentFile=-%h/.config/careerai/env` to keep secrets out of
+  the unit. The install does NOT auto-enable the service —
+  operators run `systemctl --user enable --now careerai` themselves.
+  Linux-only; macOS/Windows exit with an actionable message.
+- New `careerai-dashboard` crate (axum + tera) with 7 unit + 1
+  integration test, all under the 300-LOC-per-file cap.
+
 ## [0.1.1-mcp] — 2026-04-29
 
 First end-to-end-verified release. Replaces the never-published
