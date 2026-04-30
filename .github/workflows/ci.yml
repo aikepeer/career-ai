@@ -41,6 +41,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets --locked
 
+  windows-check:
+    # Cross-target type-check from a Linux runner via the
+    # `x86_64-pc-windows-gnu` Rust target + `mingw-w64`. Catches
+    # Windows-incompat code (cfg-gating slips, std::fs::rename
+    # surprises, tokio::signal::unix in headless code) at PR time
+    # rather than at release time. Sub-minute incremental thanks
+    # to the shared rust-cache.
+    name: windows-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mingw-w64
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      # `cargo check` (not `cargo build`) — type-check catches the
+      # cfg/feature slips. Running the linker on Windows artifacts
+      # from a Linux host is slower and not informative here.
+      # `--workspace --all-targets` includes tests, which is where the
+      # tokio::signal::unix slip from PR #44 originally hid.
+      - run: cargo check --workspace --all-targets --target x86_64-pc-windows-gnu --locked
+
   audit:
     name: cargo-audit
     runs-on: ubuntu-latest
