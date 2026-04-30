@@ -79,3 +79,17 @@ jobs:
       # the compiled graph. No upstream fix exists; safe to ignore until
       # sqlx prunes the unused dep.
       - run: cargo audit --ignore RUSTSEC-2023-0071
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-deny
+      # Runs the four standard deny.toml checks: advisories, licenses,
+      # bans (duplicates / wildcards), and sources. Policy is in
+      # deny.toml at repo root. RUSTSEC-2023-0071 is ignored there to
+      # match cargo-audit.
+      - run: cargo deny check
