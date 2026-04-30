@@ -60,7 +60,8 @@ clippy + fmt` clean before merge.
   `guardrails/{tokens.rs,common_caps.rs,validator.rs}`. ✓
 - [x] **`crates/careerai-llm/src/claude_cli.rs`** (976→35 LOC) →
   `claude_cli/{driver.rs,error.rs,binary_locator.rs}`. ✓
-- [ ] **`crates/careerai-sources/src/indeed_rss.rs`** (795 LOC).
+- [x] **`crates/careerai-sources/src/indeed_rss.rs`** (795→31 LOC) →
+  `indeed_rss/{source.rs,parser.rs,tests.rs}`. ✓
 - [ ] **`crates/careerai-sources/src/company_sync.rs`** (777 LOC) →
   `company_sync/{seed.rs,probe.rs,partition.rs}`.
 - [ ] **`crates/careerai-sources/src/mcp_jobs.rs`** (705 LOC).
