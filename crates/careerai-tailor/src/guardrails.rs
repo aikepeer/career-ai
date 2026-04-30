@@ -60,7 +60,7 @@ pub(crate) struct ProfileTokenSets {
     /// `ROS`, etc. Without this, every reword that reused such a noun
     /// was rejected as "invented proper noun" even when the term was
     /// clearly the user's own.
-    profile_proper_nouns: HashSet<String>,
+    summary_proper_nouns: HashSet<String>,
     year_tokens: HashSet<String>,
     number_tokens: HashSet<String>,
 }
@@ -126,16 +126,57 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         }
     }
 
-    // Profile-wide proper-noun harvest. Same regex as the new-text
-    // scan; we strip-and-lowercase to match the intersection format.
-    let mut profile_proper_nouns: HashSet<String> = HashSet::new();
-    for m in proper_noun_regex().find_iter(&flat) {
+    // Proper-noun harvest from the summary + structured identifier
+    // fields (company names, project names, education institutions).
+    //
+    // This deliberately does NOT include experience bullet bodies or
+    // project description bullets. Previously the harvest scanned the
+    // FULL flattened profile, which let a tailored bullet for employer
+    // A reuse a proper noun mentioned only in employer B's bullet — a
+    // "cross-bullet token leak" that would write "...accelerated
+    // Honeywell's deployment of Claude..." for an Anthropic-role bullet
+    // because Honeywell appeared anywhere in the profile.
+    //
+    // We still need to scan structured identifier fields with the
+    // proper-noun regex (rather than relying on `employer_tokens`
+    // alone) because `split_words_lowercase` drops punctuation and
+    // short fragments — `AT&T` becomes nothing in `employer_tokens`
+    // since `at`/`t` are both shorter than 3 chars. The proper-noun
+    // regex keeps `&`, `+`, `#`, `.` as connectors so `AT&T` survives.
+    //
+    // The other allowlists cover the rest:
+    //  * `skill_tokens`    — every skill / language / framework / tool
+    //  * `original_proper_nouns` (per-bullet, computed at check-time)
+    //  * `COMMON_ENGLISH_CAPS` — the curated whitelist
+    let mut allowed_text = String::new();
+    allowed_text.push_str(&profile.summary);
+    allowed_text.push(' ');
+    for exp in &profile.experience {
+        allowed_text.push_str(&exp.company);
+        allowed_text.push(' ');
+        allowed_text.push_str(&exp.title);
+        allowed_text.push(' ');
+        allowed_text.push_str(&exp.location);
+        allowed_text.push(' ');
+    }
+    for ed in &profile.education {
+        allowed_text.push_str(&ed.institution);
+        allowed_text.push(' ');
+        allowed_text.push_str(&ed.degree);
+        allowed_text.push(' ');
+    }
+    for p in &profile.projects {
+        allowed_text.push_str(&p.name);
+        allowed_text.push(' ');
+    }
+    let mut summary_proper_nouns: HashSet<String> = HashSet::new();
+    for m in proper_noun_regex().find_iter(&allowed_text) {
         for raw in m.as_str().split_whitespace() {
             let lower = raw.to_lowercase();
             if lower.len() < 3 {
                 continue;
             }
-            profile_proper_nouns.insert(strip_for_match(&lower));
+            summary_proper_nouns.insert(strip_for_match(&lower));
         }
     }
 
@@ -143,7 +184,7 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         employer_tokens,
         project_tokens,
         skill_tokens,
-        profile_proper_nouns,
+        summary_proper_nouns,
         year_tokens,
         number_tokens,
     }
@@ -299,7 +340,7 @@ pub(crate) fn forbid_invented_entities_with(
                 || sets.project_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&lower)
-                || sets.profile_proper_nouns.contains(&stripped)
+                || sets.summary_proper_nouns.contains(&stripped)
                 || original_proper_nouns.contains(&stripped)
                 || COMMON_ENGLISH_CAPS.contains(&stripped.as_str());
             if !cleared {
@@ -688,19 +729,14 @@ mod tests {
         }
     }
 
-    /// Regression: proper nouns appearing in profile bullet bodies
-    /// (e.g. `Linux`, `Wayland`, `X11`, `ROS`) must clear the guardrail
-    /// even though they're not employers, project names, or skills.
-    /// `build_token_sets` previously only pulled from the structured
-    /// fields (companies / project.name / skills), so a perfectly
-    /// legitimate reword that referenced `Linux` from a bullet was
-    /// rejected as "invented proper noun".
+    /// Same-bullet rewords that re-use proper nouns from the original
+    /// bullet body (e.g. `Linux`, `Wayland`, `X11`, `ROS`) must still
+    /// clear the guardrail. The per-bullet `original_proper_nouns`
+    /// allowlist covers this — a legitimate "Migrated the Wayland
+    /// compositor" reword pulled from a "...X11 to Wayland..."
+    /// original is accepted.
     #[test]
-    fn accepts_proper_noun_from_profile_bullet_body() {
-        // Build a profile whose bullet mentions "Wayland" but where
-        // Wayland is NOT an employer, project name, or skill. The
-        // reword must be allowed to reuse "Wayland" because it was
-        // already in the user's profile prose.
+    fn accepts_proper_noun_from_same_bullet_original() {
         let p = Profile {
             personal: Personal {
                 name: "Test".into(),
@@ -727,8 +763,8 @@ mod tests {
             projects: vec![],
         };
 
-        // Reword reuses "Wayland" — present in the bullet body, NOT a
-        // company/project/skill. Must be accepted.
+        // Same-bullet reword: original mentions "Wayland", reword
+        // reuses it. Must be accepted via `original_proper_nouns`.
         forbid_invented_entities(
             "Migrated the Wayland compositor for the new platform.",
             "Ported display servers from X11 to Wayland on embedded boards.",
@@ -736,13 +772,144 @@ mod tests {
             "x",
         )
         .unwrap();
+    }
 
-        // And a different bullet's reword (with empty original) should
-        // ALSO accept "Wayland" because it appears in the profile prose,
-        // not just this specific bullet.
-        forbid_invented_entities(
+    /// Cross-bullet token leak is rejected. A proper noun that appears
+    /// only in a *different* experience entry's bullet (not in this
+    /// bullet's original, not in summary, not in skills/employers)
+    /// must NOT be reusable by the tailoring LLM. This is the
+    /// regression Codex flagged after v0.1.1-mcp: the previous
+    /// implementation harvested proper nouns from the entire flat
+    /// profile, which let an Anthropic-role tailoring leak in
+    /// "Honeywell" from an unrelated 2018 role.
+    #[test]
+    fn rejects_proper_noun_only_in_other_bullet() {
+        let p = Profile {
+            personal: Personal {
+                name: "Test".into(),
+                email: "t@example.com".into(),
+                ..Default::default()
+            },
+            summary: "Embedded engineer.".into(),
+            skills: Skills {
+                languages: vec!["C".into()],
+                frameworks: vec![],
+                tools: vec![],
+            },
+            experience: vec![Experience {
+                title: "Engineer".into(),
+                company: "Acme".into(),
+                location: String::new(),
+                start: "2020".into(),
+                end: "2023".into(),
+                bullets: vec![
+                    "Ported display servers from X11 to Wayland on embedded boards.".into(),
+                ],
+            }],
+            education: vec![],
+            projects: vec![],
+        };
+
+        // Different-bullet reword: original is unrelated text, reword
+        // tries to reuse "Wayland" (which only appears in another
+        // bullet). Must be rejected.
+        let err = forbid_invented_entities(
             "Stabilized Wayland compositor performance.",
             "different bullet original here",
+            &p,
+            "x",
+        )
+        .expect_err("expected rejection of cross-bullet proper noun");
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("wayland") || msg.to_lowercase().contains("invented"),
+            "expected error to mention the leaked token; got: {msg}"
+        );
+    }
+
+    /// Proper nouns in the profile *summary* are still reusable
+    /// anywhere — the summary is high-level vocabulary the candidate
+    /// self-positions with, so cross-bullet sharing is appropriate.
+    #[test]
+    fn accepts_proper_noun_from_summary() {
+        let p = Profile {
+            personal: Personal {
+                name: "Test".into(),
+                email: "t@example.com".into(),
+                ..Default::default()
+            },
+            summary: "Embedded engineer focused on Wayland and Mesa stacks.".into(),
+            skills: Skills {
+                languages: vec!["C".into()],
+                frameworks: vec![],
+                tools: vec![],
+            },
+            experience: vec![Experience {
+                title: "Engineer".into(),
+                company: "Acme".into(),
+                location: String::new(),
+                start: "2020".into(),
+                end: "2023".into(),
+                bullets: vec!["Built display servers.".into()],
+            }],
+            education: vec![],
+            projects: vec![],
+        };
+
+        // Reword pulls "Wayland" from the summary even though the
+        // bullet original doesn't mention it. Accepted via
+        // `summary_proper_nouns`.
+        forbid_invented_entities(
+            "Stabilized Wayland compositor performance.",
+            "Built display servers.",
+            &p,
+            "x",
+        )
+        .unwrap();
+    }
+
+    /// Regression for Codex P1 on PR #53: punctuated employer names
+    /// like `AT&T` must clear the guardrail. `employer_tokens` is
+    /// built via `split_words_lowercase`, which drops fragments
+    /// shorter than 3 chars — so `AT&T` splits into `at` (dropped)
+    /// and `t` (dropped) and ends up as nothing in `employer_tokens`.
+    /// We compensate by also running the proper-noun regex (which
+    /// keeps `&`/`+`/`#`/`.` as connectors) over the structured
+    /// identifier fields (company, project name, institution), not
+    /// just the summary.
+    #[test]
+    fn accepts_punctuated_employer_name_from_company_field() {
+        let p = Profile {
+            personal: Personal {
+                name: "Test".into(),
+                email: "t@example.com".into(),
+                ..Default::default()
+            },
+            summary: "Engineer.".into(),
+            skills: Skills {
+                languages: vec![],
+                frameworks: vec![],
+                tools: vec![],
+            },
+            experience: vec![Experience {
+                title: "Engineer".into(),
+                company: "AT&T".into(),
+                location: String::new(),
+                start: "2018".into(),
+                end: "2020".into(),
+                bullets: vec!["Worked on telecom infrastructure.".into()],
+            }],
+            education: vec![],
+            projects: vec![],
+        };
+
+        // Reword reuses "AT&T" — present in the company field but not
+        // in the summary, not in skills, and not in this bullet's
+        // original. Must be accepted via the proper-noun harvest of
+        // structured identifier fields.
+        forbid_invented_entities(
+            "Migrated AT&T billing systems to a new platform.",
+            "Worked on telecom infrastructure.",
             &p,
             "x",
         )
