@@ -70,11 +70,9 @@ clippy + fmt` clean before merge.
   cohesive; `scheduler/{cron.rs,shutdown.rs,error.rs}` worth a look.
 - [ ] **`crates/careerai-submit/src/rate_limiter.rs`** (598 LOC).
 - [ ] **`crates/careerai-submit/src/linkedin.rs`** (565 LOC).
-- [ ] **`crates/careerai-llm/src/rig.rs`** (542 LOC).
-- [ ] **`crates/careerai-sources/src/naukri.rs`** (539 LOC).
-- [ ] **`crates/careerai-notify/src/lib.rs`** (504 LOC) — already has
-  `channels::{slack,telegram,email,ntfy}` submodules; split top-level
-  into `lib.rs` + `event.rs` + `dispatcher.rs`.
+- [x] **`crates/careerai-llm/src/rig.rs`** (542→17 LOC) → `rig/{driver.rs,response.rs,error.rs,tests.rs}`. ✓
+- [x] **`crates/careerai-sources/src/naukri.rs`** (539→27 LOC) → `naukri/{source.rs,types.rs,tests.rs}`. ✓
+- [x] **`crates/careerai-notify/src/lib.rs`** (504→44 LOC) → `lib.rs` + `event.rs` + `dispatcher.rs`. ✓
 
 ### Tier 3 — 300–500 LOC
 
