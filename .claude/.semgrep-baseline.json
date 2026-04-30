@@ -1,0 +1,90 @@
+{
+  "_about": [
+    "Semgrep baseline for career-ai per the global ~/.claude/CLAUDE.md rule.",
+    "Re-scan after PR merge, >=20 changed files, dep-manifest bumps,",
+    "or any change touching auth/crypto/SQL/deserialization."
+  ],
+  "scan": {
+    "timestamp_utc": "2026-04-29T22:00:00Z",
+    "commit_sha": "6a45e7d91011e509f62c293c41d1f190db6f62d1",
+    "branch": "main",
+    "tool": "semgrep 1.161.0",
+    "configs": [
+      "p/rust",
+      "p/security-audit"
+    ]
+  },
+  "summary": {
+    "total": 12,
+    "critical": 0,
+    "high": 0,
+    "error": 9,
+    "warn": 0,
+    "info": 3
+  },
+  "findings": [
+    {
+      "rule": "rust.actix.path-traversal.tainted-path.tainted-path",
+      "severity": "ERROR",
+      "count": 9,
+      "locations": [
+        "crates/careerai-cli/src/sources_sync.rs:149",
+        "crates/careerai-llm/src/cache.rs:63",
+        "crates/careerai-match/src/rules.rs:37",
+        "crates/careerai-pipeline/src/lib.rs:534",
+        "crates/careerai-pipeline/src/lib.rs:632",
+        "crates/careerai-profile/src/docx.rs:16",
+        "crates/careerai-profile/src/linkedin.rs:21",
+        "crates/careerai-submit/src/lib.rs:333",
+        "crates/careerai-tailor/src/lib.rs:60"
+      ],
+      "disposition": "accepted",
+      "rationale": [
+        "career-ai is a local single-user CLI. The rule was authored",
+        "for the actix-web request-handler model where paths flow from",
+        "HTTP requests (untrusted). Here the path sources are: CLI args",
+        "(operator-supplied), `~/career-ai-data/` (operator-rooted),",
+        "and config-file values (operator-edited). There is no",
+        "untrusted-network input boundary that this guards.",
+        "If we ever add a multi-user surface or accept paths from a",
+        "remote API, re-evaluate every site individually."
+      ]
+    },
+    {
+      "rule": "rust.lang.security.current-exe.current-exe",
+      "severity": "INFO",
+      "count": 1,
+      "locations": [
+        "crates/careerai-cli/src/service.rs:180"
+      ],
+      "disposition": "accepted",
+      "rationale": [
+        "`current_exe()` is intentional — `careerai service install`",
+        "writes the binary's resolved path into the systemd unit's",
+        "ExecStart so a renamed/moved binary is detected via",
+        "`careerai service install --force`. No race-window mitigation",
+        "is meaningful for a single-user install command."
+      ]
+    },
+    {
+      "rule": "rust.lang.security.temp-dir.temp-dir",
+      "severity": "INFO",
+      "count": 2,
+      "locations": [
+        "crates/careerai-llm/src/backend.rs:550",
+        "crates/careerai-llm/src/claude_cli.rs:376"
+      ],
+      "disposition": "accepted",
+      "rationale": [
+        "`std::env::temp_dir()` is used by the LLM probe to write a",
+        "tiny ping-prompt and read it back via the `claude --print`",
+        "subprocess. No secrets are written; no race-window matters",
+        "(the file content is `\"ping\"`)."
+      ]
+    }
+  ],
+  "next_action": [
+    "All findings are acknowledged. No critical/high requiring",
+    "remediation. Re-baseline per the global rule's triggers."
+  ]
+}
