@@ -99,6 +99,7 @@ fn token_bag(n: usize, seed: u64) -> String {
         "interviewed",
     ];
     let mut s = String::with_capacity(n * 16);
+    #[allow(clippy::cast_possible_truncation)]
     let mut idx = seed as usize;
     for i in 0..n {
         // `<vocab-stem>-<counter>` shape: the JaccardScorer tokenizer
@@ -132,8 +133,8 @@ fn make_listing(jd_tokens: usize, seed: u64) -> RawListing {
 fn bench_realistic_shape(c: &mut Criterion) {
     let scorer = JaccardScorer;
     // 500-token profile / 300-token JD — the shape TODO.md calls out.
-    let profile = token_bag(500, 0xC0FFEE);
-    let listing = make_listing(300, 0xDEADBEEF);
+    let profile = token_bag(500, 0x00C0_FFEE);
+    let listing = make_listing(300, 0xDEAD_BEEF);
     c.bench_function("jaccard/profile=500/jd=300", |b| {
         b.iter(|| {
             let s = scorer.score(black_box(&profile), black_box(&listing));
