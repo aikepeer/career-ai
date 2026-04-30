@@ -3,11 +3,12 @@
 Automated job discovery, resume tailoring, and auto-apply for a single user —
 runs as a local daemon and as a Claude Code plugin.
 
-**Status (2026-04-27):** M0–M6 shipped. The pipeline state machine, five
-discovery adapters (Greenhouse, Lever, Remotive, RemoteOK, Naukri),
-LinkedIn submitter, LLM-backed resume importer, MCP server, and Claude
-Code plugin shell are all merged on `main`. See
-[`CHANGELOG.md`](./CHANGELOG.md) for milestone detail.
+**Latest release: [v0.1.1-mcp](https://github.com/justdoGIT/career-ai/releases/tag/v0.1.1-mcp)** —
+prebuilt binaries for Linux (musl), macOS (arm64), and Windows
+(GNU). End-to-end-verified across discover → match → tailor →
+render → apply (dry-run) → daemon. All eight follow-up Codex /
+test / docs items closed by 2026-04-30; see
+[`CHANGELOG.md`](./CHANGELOG.md) for the full unreleased list.
 
 ## What it does
 
@@ -18,6 +19,20 @@ resume + cover letter per job description via Claude, and submits
 applications with a hard dry-run gate enabled by default. Niche focus:
 AI/ML + LLM apps and embedded platforms / robotics. Remote-first with
 Delhi-NCR fallback.
+
+## Three integration paths
+
+career-ai ships in three flavors so you can pick the surface that
+fits your workflow. Pick **one**:
+
+| Path | Best for | Setup |
+|---|---|---|
+| **Claude Code plugin** (below) | Daily use from Claude Code; LLM tailoring drives off your Max/Pro session | `claude plugins install` + cargo install |
+| **CLI / daemon** ([next section](#install--cli--daemon)) | Headless laptop or server; cron-driven discovery; scriptable | `cargo install` + `careerai daemon` (optionally via `careerai service install`) |
+| **MCP server alone** | Custom orchestrators / non-Claude-Code MCP clients | `cargo install --git ... careerai-mcp` and point your client at the binary |
+
+All three share the same SQLite database and `~/career-ai-data/`
+layout — install one, switch to another freely.
 
 ## Install — Claude Code plugin (recommended)
 
@@ -30,7 +45,11 @@ inference call bills against your existing Claude Code session.
 claude plugins install github.com/justdoGIT/career-ai
 
 # 2. Install the local MCP server binary that the plugin's slash commands call
-cargo install --git https://github.com/justdoGIT/career-ai careerai-mcp careerai-cli
+cargo install --git https://github.com/justdoGIT/career-ai \
+    --tag v0.1.1-mcp careerai-mcp careerai-cli
+
+# OR download the prebuilt binary tarball from the release page:
+#   https://github.com/justdoGIT/career-ai/releases/tag/v0.1.1-mcp
 
 # 3. Inside Claude Code
 /career:setup        # walks pandoc check + LLM probe + profile import
@@ -162,8 +181,42 @@ are the open items:
                   SQLite · keyring · governor rate-limits
 ```
 
-Crate boundaries are deliberate. See [CLAUDE.md](./CLAUDE.md) for the
-full architecture, invariants, testing layers, and contribution rules.
+Crate boundaries are deliberate. For the full picture:
+
+* [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — crate graph,
+  state-machine diagram, Mermaid sequence diagram for one full
+  pipeline tick, safety-invariant table.
+* [`docs/SECURITY.md`](./docs/SECURITY.md) — threat model, the
+  five load-bearing safety invariants the codebase enforces, and
+  the supply-chain policy.
+* [`docs/SERVICE.md`](./docs/SERVICE.md) — systemd-user
+  walkthrough for `careerai service install` (autostart, linger,
+  troubleshooting).
+* [`docs/MCP_TOOLS.md`](./docs/MCP_TOOLS.md) — every
+  `careerai_*` MCP tool documented with input/output schemas and
+  error semantics.
+* [`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md) — Slack /
+  Telegram / email / ntfy channel setup walkthroughs.
+* [`CLAUDE.md`](./CLAUDE.md) — workspace conventions, testing
+  layers, contribution rules.
+
+Each crate also has its own `README.md` with a boundary statement
+and key entry points:
+[careerai-cli](./crates/careerai-cli/README.md) ·
+[careerai-core](./crates/careerai-core/README.md) ·
+[careerai-db](./crates/careerai-db/README.md) ·
+[careerai-pipeline](./crates/careerai-pipeline/README.md) ·
+[careerai-llm](./crates/careerai-llm/README.md) ·
+[careerai-tailor](./crates/careerai-tailor/README.md) ·
+[careerai-render](./crates/careerai-render/README.md) ·
+[careerai-submit](./crates/careerai-submit/README.md) ·
+[careerai-sources](./crates/careerai-sources/README.md) ·
+[careerai-match](./crates/careerai-match/README.md) ·
+[careerai-profile](./crates/careerai-profile/README.md) ·
+[careerai-scheduler](./crates/careerai-scheduler/README.md) ·
+[careerai-notify](./crates/careerai-notify/README.md) ·
+[careerai-dashboard](./crates/careerai-dashboard/README.md) ·
+[careerai-mcp](./crates/careerai-mcp/README.md).
 
 ## Sources
 
