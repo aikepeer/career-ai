@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
@@ -38,6 +38,21 @@ use careerai_sources::{
 };
 use careerai_tailor::model::{CoverLetter, ResumeView};
 use careerai_tailor::tailor_for_listing;
+
+// Pipeline-stage submodules. Each owns one stage end-to-end and stays
+// under the project's 300-LOC cap. lib.rs keeps `discover_*`, `match_*`,
+// `tailor_*`, `render_*`, the shared `DiscoveryReport`/`MatchReport`/...
+// types + helpers, and re-exports the stage functions so callers can
+// continue using `careerai_pipeline::apply_one(...)` etc.
+mod apply;
+mod digest;
+mod inspect;
+mod linkedin;
+
+pub use apply::{applied_show, apply_all, apply_one, AppliedOutcome};
+pub use digest::digest_summary;
+pub use inspect::{inspect_show, InspectReport};
+pub use linkedin::{confirm_linkedin_submit, list_drafted_linkedin};
 
 pub async fn open_pool(root: &Path) -> Result<SqlitePool> {
     let path = root.join("data").join("careerai.sqlite");
@@ -790,369 +805,13 @@ pub async fn render_one(
     })
 }
 
-// --- apply / applied / inspect (M4 wave 2) ---------------------------------
+// apply / applied / inspect / linkedin / digest stages extracted to
+// crates/careerai-pipeline/src/{apply,linkedin,inspect,digest}.rs.
+// Re-exported at the top of this file via `pub use`.
 
-/// One row of `apply --all` output. One `AppliedOutcome` is emitted per
-/// application the CLI attempted to submit, regardless of whether the
-/// per-call result was success, skip, or dry-run.
-#[derive(Debug)]
-pub struct AppliedOutcome {
-    pub application_id: String,
-    pub source: String,
-    pub outcome: careerai_submit::SubmitOutcome,
-}
-
-/// Structured payload for `careerai inspect <application_id>`.
-#[derive(Debug)]
-pub struct InspectReport {
-    pub application: careerai_db::Application,
-    pub listing_title: String,
-    pub listing_company: String,
-    pub listing_source: String,
-    pub events: Vec<careerai_db::Event>,
-    pub artifacts: Vec<careerai_db::Artifact>,
-}
-
-/// Build a per-call `SubmitConfig` honoring the optional CLI override.
-///
-/// When `override_auto_submit` is `Some(true)` the call is forced live;
-/// `Some(false)` forces dry-run; `None` passes the config's stored value
-/// through unchanged.
-fn effective_submit_cfg(
-    cfg: &CoreConfig,
-    override_auto_submit: Option<bool>,
-) -> careerai_core::config::SubmitConfig {
-    let mut submit = cfg.submit.clone();
-    if let Some(v) = override_auto_submit {
-        submit.auto_submit = v;
-    }
-    submit
-}
-
-/// Submit a single prepared application (state `rendered` or `prepared`).
-///
-/// Gating, state transitions, and artifact loading all live inside
-/// `careerai_submit::submit_application`; this wrapper only opens the pool
-/// and overlays the `--auto-submit` flag on top of the config.
-pub async fn apply_one(
-    root: &Path,
-    cfg: &CoreConfig,
-    application_id: &str,
-    auto_submit_override: Option<bool>,
-) -> Result<AppliedOutcome> {
-    let pool = open_pool(root).await?;
-
-    // Pre-fetch surfaces the typed errors from careerai-db; the CLI's
-    // exit-code mapper downcasts to `DbError::NotFound` directly. We do
-    // NOT bail!() into a stringly-typed error here — that was previously
-    // breaking exit-code classification once any `.context(...)` wrapper
-    // ran upstream.
-    let application = queries::find_application_by_id(&pool, application_id).await?;
-    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
-
-    // LinkedIn assist mode: when interactive_only is set (default true), the
-    // daemon never opens a browser session and never clicks Submit
-    // autonomously. Transition the application to Drafted in the DB and
-    // return `SubmitOutcome::Drafted` (a real state change, not a dry-run).
-    // `careerai review` is the only path that turns Drafted → Submitted, by
-    // calling `confirm_linkedin_submit` which atomically claims the row and
-    // delegates to submit_application with interactive_only=false.
-    // listings.source is conventionally lowercase but the schema doesn't
-    // enforce it; submit_application uses to_ascii_lowercase too. Match
-    // case-insensitively here so a "LinkedIn" or "LINKEDIN" row doesn't
-    // silently bypass the assist-mode short-circuit.
-    if listing.source.eq_ignore_ascii_case("linkedin") && cfg.submit.linkedin.interactive_only {
-        queries::transition_application_and_listing(
-            &pool,
-            &application.id,
-            &listing.id,
-            ListingState::Drafted.as_str(),
-            ListingState::Drafted,
-            Some("drafted: awaiting careerai review"),
-        )
-        .await
-        .context("transition application to drafted")?;
-        return Ok(AppliedOutcome {
-            application_id: application.id,
-            source: listing.source,
-            outcome: careerai_submit::SubmitOutcome::Drafted {
-                note: "awaiting careerai review".into(),
-            },
-        });
-    }
-
-    let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
-    let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
-        .await
-        .context("submit_application")?;
-
-    Ok(AppliedOutcome {
-        application_id: application.id,
-        source: listing.source,
-        outcome,
-    })
-}
-
-/// Iterate every application currently in state `rendered` or `prepared`
-/// and submit each one. Per-application failures are logged and skipped —
-/// `apply --all` deliberately doesn't abort the batch on the first error.
-pub async fn apply_all(
-    root: &Path,
-    cfg: &CoreConfig,
-    source_filter: Option<&str>,
-    auto_submit_override: Option<bool>,
-) -> Result<Vec<AppliedOutcome>> {
-    let pool = open_pool(root).await?;
-
-    // Both "rendered" and "prepared" are eligible per submit_application's
-    // BadState guard. Use the JOIN-based query so a `--source` filter is
-    // pushed into SQL — previously the CLI fetched every listing per row
-    // (O(N) round-trips) and filtered client-side.
-    let mut eligible: Vec<careerai_db::Application> = Vec::new();
-    for state in ["rendered", "prepared"] {
-        let rows =
-            queries::list_applications_by_state_and_source(&pool, state, source_filter, 1_000)
-                .await
-                .with_context(|| format!("list applications in state '{state}'"))?;
-        eligible.extend(rows);
-    }
-
-    let mut out = Vec::with_capacity(eligible.len());
-    for app in eligible {
-        match apply_one(root, cfg, &app.id, auto_submit_override).await {
-            Ok(o) => out.push(o),
-            Err(e) => {
-                // H4: don't silently retry forever. A single corrupt
-                // artifact, persistent HTTP 500, or unknown-source error
-                // would otherwise re-fail every tick (every 15 min by
-                // default), polluting logs and burning rate-limit budget.
-                // Transition the application to `failed` so apply_all stops
-                // re-fetching it; operators who want to retry must
-                // explicitly re-shortlist via `careerai shortlist`.
-                warn!(
-                    application_id = %app.id,
-                    error = %e,
-                    "apply_one failed, marking application failed",
-                );
-                if let Err(transition_err) =
-                    queries::set_application_state(&pool, &app.id, "failed").await
-                {
-                    error!(
-                        application_id = %app.id,
-                        error = %transition_err,
-                        "failed to transition application to failed state",
-                    );
-                }
-            }
-        }
-    }
-    Ok(out)
-}
-
-/// List applications already submitted, newest first. Optional `source`
-/// filter matches against the linked listing's source.
-pub async fn applied_show(
-    root: &Path,
-    source_filter: Option<&str>,
-    limit: i64,
-) -> Result<Vec<careerai_db::Application>> {
-    let pool = open_pool(root).await?;
-    queries::list_applications_by_state_and_source(&pool, "submitted", source_filter, limit)
-        .await
-        .context("list submitted applications")
-}
-
-/// List all applications currently in the `drafted` state whose listing source
-/// is `linkedin`, oldest-first.
-///
-/// Consumed by `careerai review` to enumerate the queue of applications that
-/// the daemon parked in `Drafted` due to `interactive_only = true`. The
-/// operator is then prompted to confirm or skip each one.
-pub async fn list_drafted_linkedin(
-    root: &Path,
-    limit: i64,
-) -> Result<Vec<careerai_db::Application>> {
-    let pool = open_pool(root).await?;
-    queries::list_drafted_linkedin(&pool, limit)
-        .await
-        .context("list drafted linkedin applications")
-}
-
-/// Confirm-submit a drafted LinkedIn application via the browser, called
-/// from `careerai review` after the operator approves. Overrides
-/// `interactive_only` to `false` for this single invocation so the daemon-
-/// path short-circuit in `apply_one` doesn't fire.
-///
-/// The operator config on disk is **not** modified; only an ephemeral clone
-/// is used.
-///
-/// Race guard: uses an atomic conditional UPDATE
-/// (`queries::claim_drafted_application`) to transition Drafted → Rendered
-/// before the browser launch. Two concurrent `careerai review` processes
-/// serialize via SQLite's write lock; only one wins the claim. The loser
-/// returns a clear error and never spawns a Chromium session.
-pub async fn confirm_linkedin_submit(
-    root: &Path,
-    cfg: &CoreConfig,
-    application_id: &str,
-) -> Result<AppliedOutcome> {
-    // Clone config and lift the assist-mode gate just for this call.
-    let mut effective_cfg = cfg.clone();
-    effective_cfg.submit.linkedin.interactive_only = false;
-
-    let pool = open_pool(root).await?;
-    let claimed = queries::claim_drafted_application(&pool, application_id)
-        .await
-        .context("claim drafted application")?;
-    if !claimed {
-        // Read the current state for an actionable error. The claim
-        // already failed, so this read is purely diagnostic.
-        let app = queries::find_application_by_id(&pool, application_id).await?;
-        drop(pool);
-        let expected_state = ListingState::Drafted.as_str();
-        return Err(anyhow::anyhow!(
-            "application {} is in state '{}', expected '{}' \
-             (already submitted, already failed, or another `careerai review` won the claim)",
-            application_id,
-            app.state,
-            expected_state,
-        ));
-    }
-    drop(pool);
-
-    // Claim won — application is now in Rendered state. Delegate to
-    // apply_one with Some(true) to force live submission.  `careerai
-    // review` is the explicit operator-confirmation path; inheriting
-    // cfg.submit.auto_submit (which defaults to false) would silently
-    // dry-run after the operator typed 'y'.
-    apply_one(root, &effective_cfg, application_id, Some(true)).await
-}
-
-/// Gather everything needed to render `careerai inspect <id>`.
-pub async fn inspect_show(root: &Path, application_id: &str) -> Result<InspectReport> {
-    let pool = open_pool(root).await?;
-
-    // Same typed-error pattern as apply_one: don't bail!() into strings.
-    let application = queries::find_application_by_id(&pool, application_id).await?;
-    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
-    let events = queries::events_for(&pool, &listing.id)
-        .await
-        .context("events_for listing")?;
-    let artifacts = queries::list_artifacts(&pool, &application.id)
-        .await
-        .context("list_artifacts")?;
-
-    Ok(InspectReport {
-        application,
-        listing_title: listing.title,
-        listing_company: listing.company,
-        listing_source: listing.source,
-        events,
-        artifacts,
-    })
-}
-
-pub async fn digest_summary(root: &Path, since: chrono::Duration) -> Result<DigestReport> {
-    use sqlx::Row;
-
-    let pool = open_pool(root).await?;
-    let cutoff = chrono::Utc::now() - since;
-    // Format with millisecond precision to match SQLite's
-    // `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` (the `%f` modifier emits
-    // `SS.SSS` — three digits, milliseconds). The WHERE clause compares
-    // events.created_at >= cutoff_iso as TEXT, so the two formats MUST
-    // produce byte-equivalent strings at equal instants — otherwise an
-    // event at the exact cutoff could sort as either before or after,
-    // causing off-by-microsecond inclusion bugs at the boundary.
-    let cutoff_iso = cutoff.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
-    let mut report = DigestReport {
-        since_iso: cutoff_iso.clone(),
-        ..DigestReport::default()
-    };
-
-    // Per-state counts: distinct listing_id grouped by to_state in window.
-    let state_rows = sqlx::query(
-        "SELECT to_state, COUNT(DISTINCT listing_id) AS n
-         FROM events
-         WHERE created_at >= ?
-         GROUP BY to_state",
-    )
-    .bind(&cutoff_iso)
-    .fetch_all(&pool)
-    .await
-    .context("digest: per-state counts")?;
-
-    for row in state_rows {
-        let to_state: String = row.try_get("to_state")?;
-        let n: i64 = row.try_get("n")?;
-        // COUNT(DISTINCT ...) is non-negative by SQL spec; a negative
-        // here means schema corruption. Surface loudly rather than
-        // silently zeroing — a wrong count masquerading as 0 is the
-        // worst possible outcome for a reporting function.
-        let n: usize = n.try_into().with_context(|| {
-            format!("digest: COUNT returned negative ({n}) for state {to_state}")
-        })?;
-        match to_state.as_str() {
-            "discovered" => report.discovered = n,
-            "filtered_out" => report.matched += n,
-            "shortlisted" => {
-                report.shortlisted = n;
-                report.matched += n;
-            }
-            "drafted" => report.drafted = n,
-            "submitted" => report.submitted = n,
-            "failed" => report.failed = n,
-            "responded" => report.responded = n,
-            // Tailored / Rendered / Prepared / Skipped not surfaced in
-            // the digest summary — they're transient pipeline stages
-            // rather than operator-meaningful outcomes.
-            _ => {}
-        }
-    }
-
-    // Per-source: distinct listings with any transition in window.
-    // LOWER(l.source) merges "linkedin" / "LinkedIn" / "LINKEDIN" into
-    // a single bucket and lower-cases the result key (so the CLI doesn't
-    // have to). LOWER() is the function form vs PR #14's `COLLATE
-    // NOCASE` predicate trick — both produce the same merge, but here
-    // we're projecting (SELECT) rather than filtering (WHERE), so
-    // function form is the natural choice. listings.source isn't
-    // lowercase-enforced by the schema, and submit_application's
-    // dispatch already does to_ascii_lowercase, so we follow suit.
-    let source_rows = sqlx::query(
-        "SELECT LOWER(l.source) AS source, COUNT(DISTINCT e.listing_id) AS n
-         FROM events e
-         JOIN listings l ON l.id = e.listing_id
-         WHERE e.created_at >= ?
-         GROUP BY LOWER(l.source)",
-    )
-    .bind(&cutoff_iso)
-    .fetch_all(&pool)
-    .await
-    .context("digest: per-source counts")?;
-
-    for row in source_rows {
-        let source: String = row.try_get("source")?;
-        let n: i64 = row.try_get("n")?;
-        let total: usize = n.try_into().with_context(|| {
-            format!("digest: COUNT returned negative ({n}) for source {source}")
-        })?;
-        report.per_source.insert(source, SourceCounts { total });
-    }
-
-    // last_tick: most recent event in the database (not bounded by
-    // window). MAX(created_at) on an empty `events` returns one row
-    // containing NULL — sqlx's `Option<(String,)>` decode handles that
-    // by returning Ok(None), which is what we want.
-    let last: Option<(String,)> = sqlx::query_as("SELECT MAX(created_at) FROM events")
-        .fetch_optional(&pool)
-        .await
-        .context("digest: last_tick")?;
-    report.last_tick = last.and_then(|(s,)| if s.is_empty() { None } else { Some(s) });
-
-    Ok(report)
-}
+// Bodies live in the `apply` / `linkedin` / `inspect` / `digest`
+// submodules; they're re-exported via `pub use` at the top of this
+// file so `careerai_pipeline::apply_one(...)` keeps working.
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
