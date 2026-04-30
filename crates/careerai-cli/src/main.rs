@@ -4,6 +4,7 @@
 //! `profile show`, `profile validate`, and `--help` are wired end-to-end at
 //! M1; the rest are stubs until M2+.
 
+mod commands;
 mod cookies;
 mod digest;
 mod review;
@@ -388,7 +389,7 @@ async fn main() -> Result<()> {
         Command::Mcp { command } => match command {
             McpCommand::Probe => {
                 let cfg = load_cfg(&cwd)?;
-                run_mcp_probe(&cfg).await?;
+                commands::mcp::run_probe(&cfg).await?;
             }
         },
         Command::Llm { command } => match command {
@@ -396,13 +397,13 @@ async fn main() -> Result<()> {
                 // CoreConfig::load always succeeds (embedded defaults
                 // fill any gap), so even a fresh dir works.
                 let cfg = load_cfg(&cwd)?;
-                run_llm_probe(&cfg, backend_override).await?;
+                commands::llm::run_probe(&cfg, backend_override).await?;
             }
         },
         Command::Notify { command } => match command {
             NotifyCommand::Test => {
                 let cfg = load_cfg(&cwd)?;
-                run_notify_test(&cfg).await?;
+                commands::notify::run_test(&cfg).await?;
             }
         },
         Command::Sources { command } => match command {
@@ -438,189 +439,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_mcp_probe(cfg: &CoreConfig) -> Result<()> {
-    if cfg.sources.mcp.is_empty() {
-        println!("no `sources.mcp` entries configured");
-        return Ok(());
-    }
-    let mut any_unreachable = false;
-    for src_cfg in &cfg.sources.mcp {
-        if !src_cfg.enabled {
-            println!(
-                "{name}: (disabled) command={cmd} args={args:?}",
-                name = src_cfg.name,
-                cmd = src_cfg.mcp.command,
-                args = src_cfg.mcp.args,
-            );
-            continue;
-        }
-        match careerai_sources::probe_mcp_source(src_cfg).await {
-            Ok(report) => {
-                let matched = report.matched_tool.as_deref().map_or_else(
-                    || "no job-search tool".to_string(),
-                    |t| format!("{t} available"),
-                );
-                println!(
-                    "{name}: reachable ({count} tools, {matched})",
-                    name = report.source_name,
-                    count = report.tool_count,
-                );
-                if report.tool_count <= 12 {
-                    println!("  tools: {:?}", report.tools);
-                }
-            }
-            Err(e) => {
-                any_unreachable = true;
-                println!("{name}: unreachable -- {err}", name = src_cfg.name, err = e);
-                println!(
-                    "  hint: install/run `{cmd} {args}` and retry",
-                    cmd = src_cfg.mcp.command,
-                    args = src_cfg.mcp.args.join(" "),
-                );
-            }
-        }
-    }
-    if any_unreachable {
-        std::process::exit(2);
-    }
-    Ok(())
-}
-
-async fn run_llm_probe(
-    cfg: &CoreConfig,
-    backend_override: Option<careerai_core::config::BackendChoice>,
-) -> Result<()> {
-    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
-    {
-        use careerai_core::config::BackendChoice;
-        // Honor the global `--llm-backend` flag. Without this, `probe`
-        // silently ignored the override even though every other
-        // subcommand respects it.
-        let mut llm_cfg = cfg.llm.clone();
-        if let Some(b) = backend_override {
-            llm_cfg.backend = b;
-        }
-        let probe = careerai_llm::Backend::probe(&llm_cfg).await;
-
-        // Two lines when the operator forced something: their request
-        // and what would actually resolve. One line otherwise.
-        if let Some(forced) = probe.forced {
-            println!("forced:           {}", forced.as_str());
-            println!("would-resolve-to: {}", probe.chosen.as_str());
-        } else {
-            println!("backend: {}", probe.chosen.as_str());
-        }
-
-        if let Some(bin) = &probe.claude_binary {
-            print!("  claude binary: {}", bin.display());
-            if let Some(v) = &probe.claude_version {
-                print!(" ({v})");
-            }
-            println!();
-            print!("  claude auth:   ");
-            if probe.claude_auth_ok {
-                if let Some(ms) = probe.claude_ping_ms {
-                    println!("ok (ping {ms} ms)");
-                } else {
-                    println!("ok");
-                }
-            } else {
-                println!("not authenticated; run `claude login`");
-            }
-        } else {
-            println!("  claude binary: not found on PATH");
-        }
-        match probe.api_key_source {
-            Some(src) => println!("  ANTHROPIC key: present ({src})"),
-            None => println!("  ANTHROPIC key: not set"),
-        }
-
-        // Auto with nothing reachable is hard-fail (exit 1 via anyhow).
-        if probe.forced.is_none() && probe.chosen == BackendChoice::Auto {
-            anyhow::bail!(
-                "no LLM backend reachable; install Claude Code (https://claude.ai/download) \
-                 or export ANTHROPIC_API_KEY"
-            );
-        }
-
-        // Forced override is unusable — try resolving and surface the
-        // real error. Exit 2 to distinguish "your override is broken"
-        // from "nothing is reachable" (exit 1) so scripts can branch.
-        if probe.forced.is_some() {
-            if let Err(e) = probe_forced_resolve(&llm_cfg).await {
-                eprintln!(
-                    "error: forced backend `{}` is unusable: {e}",
-                    llm_cfg.backend.as_str()
-                );
-                std::process::exit(2);
-            }
-        }
-
-        Ok(())
-    }
-    #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
-    {
-        let _ = (cfg, backend_override);
-        println!("backend: none (binary built without `live-llm-cli` or `live-llm-api`)");
-        Ok(())
-    }
-}
-
-async fn probe_forced_resolve(
-    llm_cfg: &careerai_core::config::LlmConfig,
-) -> std::result::Result<(), careerai_llm::BackendError> {
-    use std::sync::Arc;
-    // Per-call tempdir so concurrent `careerai llm probe` invocations
-    // (e.g. parallel cargo-test threads, or two operators on a shared
-    // host) cannot collide on the same on-disk path. The `TempDir`
-    // value is held until after `.await` resolves, then `Drop` cleans
-    // up the directory automatically.
-    let cache_root = tempfile::tempdir()
-        .map_err(|e| careerai_llm::BackendError::Llm(careerai_llm::LlmError::Io(e)))?;
-    let cache = Arc::new(careerai_llm::Cache::new(cache_root.path().to_path_buf()));
-    let res = careerai_llm::Backend::resolve(llm_cfg.backend, llm_cfg, cache)
-        .await
-        .map(|_| ());
-    drop(cache_root);
-    res
-}
-
-/// Fire a synthetic notification through every configured channel so
-/// the operator can verify the pipeline end-to-end without waiting for
-/// a real event. Reports the number of channels active; exits with a
-/// non-zero code if there are zero channels (so a missing config is
-/// surfaced loudly even though `Pipeline::fire` itself is best-effort).
-async fn run_notify_test(cfg: &CoreConfig) -> Result<()> {
-    let pipe = careerai_notify::Pipeline::from_config(&cfg.notify)?;
-    let count = pipe.channel_count();
-    if count == 0 {
-        println!(
-            "no notify channels are configured. Edit config/local.yaml and \
-             add a slack / telegram / email / ntfy block under `notify.channels`."
-        );
-        std::process::exit(2);
-    }
-    // Fire at the configured `min_severity` so the test event is never
-    // silently dropped by the pipeline filter. Default `min_severity`
-    // is `Warning`, so an `Info` test event would never reach any
-    // channel and the operator would (rightly) believe the wiring is
-    // broken.
-    let severity = cfg.notify.min_severity;
-    println!(
-        "firing test notification ({severity:?}) through {count} channel(s): {:?}",
-        pipe.channel_names()
-    );
-    pipe.fire(
-        careerai_notify::NotifyEvent::SourceUnreachable {
-            source: "test".to_string(),
-            reason: "manual test via `careerai notify test`".to_string(),
-        },
-        severity,
-    )
-    .await;
-    println!("done. Check each channel's destination — failures are logged at WARN.");
-    Ok(())
-}
+// run_mcp_probe / run_llm_probe / probe_forced_resolve / run_notify_test
+// were extracted to crates/careerai-cli/src/commands/{mcp,llm,notify}.rs
+// to keep main.rs under the project's 300-LOC-per-file guidance.
 
 /// Dispatch for `careerai apply`. Errors short-circuit the process with a
 /// typed exit code; success paths print one line per application.
@@ -1475,7 +1296,7 @@ mod tests {
             backend: BackendChoice::Api,
             ..LlmConfig::default()
         };
-        let res = probe_forced_resolve(&llm_cfg).await;
+        let res = crate::commands::llm::probe_forced_resolve(&llm_cfg).await;
         if let Some(v) = prev {
             std::env::set_var("ANTHROPIC_API_KEY", v);
         }
@@ -1526,8 +1347,8 @@ mod tests {
         // (e.g. NoBackend, BinaryMissing). Anything else suggests the
         // tempdirs collided.
         let (r1, r2) = tokio::join!(
-            probe_forced_resolve(&llm_cfg),
-            probe_forced_resolve(&llm_cfg),
+            crate::commands::llm::probe_forced_resolve(&llm_cfg),
+            crate::commands::llm::probe_forced_resolve(&llm_cfg),
         );
         // Both calls must complete without panicking. We accept any
         // recognized BackendError variant (the CI box may not have a
