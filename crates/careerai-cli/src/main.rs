@@ -14,7 +14,7 @@ mod status;
 
 use careerai_pipeline as pipeline;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -249,7 +249,7 @@ enum CookiesCommand {
 }
 
 #[derive(Debug, Subcommand)]
-enum ProfileCommand {
+pub(crate) enum ProfileCommand {
     /// Import resume + LinkedIn export into `profile/profile.yaml`.
     Import {
         /// One or more source files (PDF, DOCX, or LinkedIn ZIP).
@@ -310,7 +310,7 @@ async fn main() -> Result<()> {
         Command::Init { force } => {
             careerai_core::init::scaffold(&cwd, force)?;
         }
-        Command::Profile { command } => run_profile(command, backend_override)?,
+        Command::Profile { command } => commands::profile::run(command, backend_override)?,
         Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
         Command::Match { tune } => commands::match_::run(&cwd, tune).await?,
         Command::Shortlist { command } => match command {
@@ -457,383 +457,21 @@ fn load_cfg(cwd: &Path) -> Result<CoreConfig> {
     CoreConfig::load(cwd).context("load config")
 }
 
-/// Default location for the canonical profile file: `./profile/profile.yaml`.
-fn profile_yaml_path() -> Result<PathBuf> {
-    Ok(std::env::current_dir()?
-        .join("profile")
-        .join("profile.yaml"))
-}
-
-fn run_profile(
-    command: ProfileCommand,
-    backend_override: Option<careerai_core::config::BackendChoice>,
-) -> Result<()> {
-    match command {
-        ProfileCommand::Import {
-            paths,
-            force,
-            use_llm,
-        } => profile_import(&paths, force, use_llm, backend_override),
-        ProfileCommand::Show => profile_show(),
-        ProfileCommand::Validate => profile_validate(),
-    }
-}
-
-fn profile_import(
-    paths: &[PathBuf],
-    force: bool,
-    use_llm: Option<bool>,
-    backend_override: Option<careerai_core::config::BackendChoice>,
-) -> Result<()> {
-    if paths.is_empty() {
-        anyhow::bail!("profile import: at least one source file is required");
-    }
-    let out = profile_yaml_path()?;
-    if out.exists() && !force {
-        anyhow::bail!(
-            "{} already exists; pass --force to overwrite",
-            out.display(),
-        );
-    }
-    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-
-    // Auto-enable LLM extraction when ANY live backend is compiled in
-    // and one is plausibly available — `claude` binary on PATH (auth
-    // NOT verified at this stage) or an Anthropic API key reachable.
-    // The actual reachability check (including `claude` auth) happens
-    // inside `run_profile_import_with_llm`; if it fails we fall back
-    // to the heuristic parser and print a hint to `claude login` or
-    // export `ANTHROPIC_API_KEY`.
-    let live_compiled = cfg!(any(feature = "live-llm-cli", feature = "live-llm-api"));
-    let want_llm = match use_llm {
-        Some(v) => v,
-        None => live_compiled && llm_backend_maybe_available(),
-    };
-
-    let profile = if want_llm {
-        // Fall back to the heuristic parser when LLM resolution fails
-        // mid-run (e.g. session expired since `llm_backend_maybe_available`
-        // checked, claude CLI binary stale, network drop). The
-        // heuristic parser is strictly better than a hard error here:
-        // the user gets a profile they can edit, and a clear log line
-        // points them at `claude login` / API key.
-        //
-        // When `--use-llm` was passed explicitly, surface the original
-        // error rather than silently downgrading — the user asked for
-        // the LLM path.
-        match run_profile_import_with_llm(&refs, backend_override) {
-            Ok(p) => p,
-            Err(e) if use_llm == Some(true) => {
-                return Err(e);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target = "profile",
-                    error = %format_args!("{e:#}"),
-                    "LLM extraction failed; falling back to heuristic parser \
-                     (run `claude login` or set ANTHROPIC_API_KEY to re-enable LLM)"
-                );
-                eprintln!(
-                    "warning: LLM extraction failed ({e}); falling back to heuristic \
-                     parser. Run `claude login` or set ANTHROPIC_API_KEY for better results."
-                );
-                careerai_profile::import_paths(&refs).context("parsing profile sources")?
-            }
-        }
-    } else {
-        if use_llm.is_none() && !live_compiled {
-            // Built without any live backend; nothing the user can do
-            // at runtime to improve this.
-        } else if use_llm.is_none() {
-            eprintln!(
-                "warning: no LLM backend reachable (claude CLI not authed and no \
-                 ANTHROPIC_API_KEY); falling back to heuristic parser. Run \
-                 `claude login` or set ANTHROPIC_API_KEY for better results."
-            );
-        }
-        careerai_profile::import_paths(&refs).context("parsing profile sources")?
-    };
-
-    if let Some(parent) = out.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let yaml = profile.to_yaml().context("serialize profile")?;
-    std::fs::write(&out, &yaml).with_context(|| format!("write {}", out.display()))?;
-    tracing::info!(out = %out.display(), bytes = yaml.len(), "profile imported");
-    println!("wrote {}", out.display());
-    Ok(())
-}
-
-fn profile_show() -> Result<()> {
-    let out = profile_yaml_path()?;
-    let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
-    println!("{text}");
-    Ok(())
-}
-
-fn profile_validate() -> Result<()> {
-    let out = profile_yaml_path()?;
-    let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
-
-    // Detect the stale-schema signature (`skills:` followed by a flat
-    // sequence) before serde gets a chance to bury the error in a generic
-    // "invalid type" message. The 0.x line wrote skills as `Vec<String>`;
-    // the current schema is the structured `Skills { languages, ... }`.
-    if detect_stale_skills_schema(&text) {
-        anyhow::bail!(
-            "Detected stale schema (skills as a flat list). Old binary wrote this file.\n\
-             Re-run: careerai profile import --force <your sources>"
-        );
-    }
-
-    let profile = careerai_profile::Profile::from_yaml(&text).context("parse profile yaml")?;
-    profile.check().context("profile validation failed")?;
-    println!("profile ok: {}", out.display());
-    Ok(())
-}
-
-/// Stale-schema sniffer for `profile validate`. The 0.x binary wrote
-/// `skills:` as a flat YAML sequence (`- Rust\n- Python`). The current
-/// schema serializes it as a nested mapping with `languages`,
-/// `frameworks`, `tools`. We detect the legacy shape via a quick string
-/// scan rather than pulling in a YAML parser — false-positive cost is
-/// just a misleading hint, which is fine.
-fn detect_stale_skills_schema(text: &str) -> bool {
-    let mut in_skills = false;
-    for line in text.lines() {
-        if !in_skills {
-            if line.trim_start() == "skills:" && !line.starts_with(' ') {
-                in_skills = true;
-            }
-            continue;
-        }
-        // Ignore blanks and pure comments inside the block.
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let leading = line.len() - trimmed.len();
-        if leading == 0 {
-            // Left the skills block without seeing nested keys.
-            return false;
-        }
-        // First non-empty child of `skills:`. Stale shape:  `- Rust`.
-        return trimmed.starts_with("- ");
-    }
-    false
-}
-
-/// Best-effort probe: is an Anthropic API key reachable without any
-/// network round-trip? Checks `ANTHROPIC_API_KEY` first, then the
-/// keyring (service "career-ai", username "anthropic/api_key"). Used
-/// to default `--use-llm`.
-fn anthropic_key_reachable() -> bool {
-    if std::env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty()) {
-        return true;
-    }
-    if let Ok(entry) = keyring::Entry::new("career-ai", "anthropic/api_key") {
-        if let Ok(v) = entry.get_password() {
-            if !v.is_empty() {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Cheap heuristic: would `Backend::resolve(Auto, ...)` likely succeed
-/// on this host? Returns `true` if either:
-///
-///   * the `claude` binary is on PATH (auth NOT verified — caller is
-///     expected to handle `Backend::resolve`'s failure gracefully when
-///     the session is logged out), or
-///   * an Anthropic API key is reachable (env or keyring).
-///
-/// This is intentionally NOT an auth probe (which costs ~5s on cold
-/// start). It is used by `--use-llm` auto-detection to decide whether
-/// to even ATTEMPT the LLM path. The actual reachability check
-/// happens inside `run_profile_import_with_llm`, which falls back to
-/// the heuristic parser when `Backend::resolve` errors and surfaces a
-/// hint to run `claude login` or set `ANTHROPIC_API_KEY`.
-fn llm_backend_maybe_available() -> bool {
-    if which::which("claude").is_ok() {
-        return true;
-    }
-    anthropic_key_reachable()
-}
-
-/// Parse PDF/DOCX inputs through an LLM extractor; LinkedIn ZIPs go
-/// through their structured CSV path unchanged. Selects the backend
-/// (`claude` CLI vs rig-core Anthropic API) via
-/// `careerai_llm::Backend::resolve` honoring `cfg.llm.backend` and the
-/// `--llm-backend` global flag.
-fn run_profile_import_with_llm(
-    paths: &[&Path],
-    backend_override: Option<careerai_core::config::BackendChoice>,
-) -> Result<careerai_profile::Profile> {
-    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
-    {
-        use std::sync::Arc;
-
-        let cwd = std::env::current_dir()?;
-        // Fall back to `LlmConfig::default()` ONLY when no `config/`
-        // directory is present (e.g. running `profile import` before
-        // `init`). When config exists, surface load/parse failures so
-        // malformed YAML and similar real errors don't silently hide
-        // behind defaults.
-        let mut llm_cfg = if cwd.join("config").exists() {
-            CoreConfig::load(&cwd).context("load config/")?.llm
-        } else {
-            careerai_core::config::LlmConfig::default()
-        };
-        if let Some(b) = backend_override {
-            llm_cfg.backend = b;
-        }
-
-        // Honor `config.llm.cache_dir` so live profile-extract caches
-        // sit next to tailor caches under `data/cache/llm`. `.gitignore`
-        // already excludes `/data/`.
-        let cache_root: PathBuf = if llm_cfg.cache_dir.is_empty() {
-            PathBuf::from("data").join("cache").join("llm")
-        } else {
-            PathBuf::from(&llm_cfg.cache_dir)
-        };
-        let cache_dir = if cache_root.is_absolute() {
-            cache_root
-        } else {
-            cwd.join(cache_root)
-        };
-        let cache = Arc::new(careerai_llm::Cache::new(cache_dir));
-
-        let mut opts = careerai_profile::ExtractOptions::default();
-        // Plumb config.llm.parse_resume_model into the extractor; strip
-        // any leading `provider/` prefix that the layered config uses
-        // (rig's anthropic transport expects the bare model id).
-        if !llm_cfg.parse_resume_model.is_empty() {
-            opts.model = strip_provider_prefix(&llm_cfg.parse_resume_model).to_string();
-        }
-        if !llm_cfg.prompt_version.is_empty() {
-            opts.prompt_version.clone_from(&llm_cfg.prompt_version);
-        }
-
-        let backend = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(careerai_llm::Backend::resolve(
-                llm_cfg.backend,
-                &llm_cfg,
-                cache,
-            ))
-        })
-        .map_err(|e| anyhow::anyhow!("resolve llm backend: {e}"))?;
-
-        let adapter = profile_llm_adapter::Adapter::new(&backend);
-        let ctx = careerai_profile::LlmExtractContext::new(&adapter, opts);
-        careerai_profile::import_paths_with_llm(paths, Some(&ctx))
-            .context("parsing profile sources via LLM")
-    }
-    #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
-    {
-        let _ = (paths, backend_override);
-        anyhow::bail!(
-            "LLM extraction requires the `live-llm-cli` or `live-llm-api` cargo feature. \
-             Re-run with: cargo run -p careerai-cli --features live-llm-cli -- profile import …"
-        )
-    }
-}
-
-/// Strip a leading `provider/` prefix (e.g. `anthropic/claude-haiku-4-5`
-/// → `claude-haiku-4-5`). Layered config templates use the prefixed
-/// form for human readability, but rig's transports want the bare model
-/// id. No-op when no slash is present.
-///
-/// Only the live-LLM import path consumes this; tests exercise it on
-/// every build.
-#[cfg_attr(not(any(feature = "live-llm", test)), allow(dead_code))]
-fn strip_provider_prefix(model: &str) -> &str {
-    model.split_once('/').map_or(model, |(_, rest)| rest)
-}
-
-/// Adapter that lets a `careerai_llm::Llm` be used as a
-/// `careerai_profile::LlmCaller`. Lives here (in the CLI) because the
-/// CLI is the only crate that depends on both, breaking the otherwise-
-/// circular `profile ↔ llm` edge.
-#[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
-mod profile_llm_adapter {
-    use async_trait::async_trait;
-    use careerai_llm::{Llm, LlmRequest};
-    use careerai_profile::llm_extract::{ExtractRequest, LlmCaller};
-
-    pub struct Adapter<'a> {
-        inner: &'a dyn Llm,
-    }
-
-    impl<'a> Adapter<'a> {
-        pub fn new(inner: &'a dyn Llm) -> Self {
-            Self { inner }
-        }
-    }
-
-    #[async_trait]
-    impl LlmCaller for Adapter<'_> {
-        async fn call(&self, req: &ExtractRequest) -> Result<String, String> {
-            let llm_req = LlmRequest {
-                system: req.system.clone(),
-                profile_block: req.profile_block.clone(),
-                user: req.user.clone(),
-                prompt_version: req.prompt_version.clone(),
-                model: req.model.clone(),
-                temperature: req.temperature,
-                max_tokens: req.max_tokens,
-                cache_profile: req.cache_schema,
-            };
-            self.inner
-                .complete(&llm_req)
-                .await
-                .map(|r| r.text)
-                .map_err(|e| e.to_string())
-        }
-    }
-}
+// Profile cluster extracted to commands/profile.rs (run_profile,
+// profile_import, profile_show, profile_validate,
+// detect_stale_skills_schema, profile_yaml_path) and
+// commands/profile_llm.rs (run_profile_import_with_llm,
+// anthropic_key_reachable, llm_backend_maybe_available,
+// strip_provider_prefix, profile_llm_adapter::Adapter).
+// All preserve their original semantics.
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn detect_stale_skills_flags_legacy_flat_list() {
-        let yaml = "personal:\n  name: Alice\nskills:\n  - Rust\n  - Python\n";
-        assert!(detect_stale_skills_schema(yaml));
-    }
-
-    #[test]
-    fn strip_provider_prefix_handles_layered_config_form() {
-        assert_eq!(
-            strip_provider_prefix("anthropic/claude-haiku-4-5"),
-            "claude-haiku-4-5"
-        );
-        assert_eq!(strip_provider_prefix("openai/gpt-4o-mini"), "gpt-4o-mini");
-    }
-
-    #[test]
-    fn strip_provider_prefix_passes_bare_model_id_through() {
-        assert_eq!(
-            strip_provider_prefix("claude-haiku-4-5"),
-            "claude-haiku-4-5"
-        );
-        assert_eq!(strip_provider_prefix(""), "");
-    }
-
-    #[test]
-    fn detect_stale_skills_passes_current_mapping_shape() {
-        let yaml = "personal:\n  name: Alice\nskills:\n  languages:\n    - Rust\n";
-        assert!(!detect_stale_skills_schema(yaml));
-    }
-
-    #[test]
-    fn detect_stale_skills_handles_missing_skills_block() {
-        let yaml = "personal:\n  name: Alice\nsummary: hi\n";
-        assert!(!detect_stale_skills_schema(yaml));
-    }
+    // detect_stale_skills_schema tests live in commands/profile.rs.
+    // strip_provider_prefix tests live in commands/profile_llm.rs.
 
     /// Regression: when the CLI logs a top-level error, it must include
     /// the full anyhow chain so the operator can see WHY a command
@@ -924,12 +562,6 @@ mod tests {
             }
             other => panic!("expected Discover; got {other:?}"),
         }
-    }
-
-    #[test]
-    fn detect_stale_skills_ignores_blank_lines_and_comments() {
-        let yaml = "personal:\n  name: Alice\nskills:\n\n  # a comment\n  languages:\n    - Rust\n";
-        assert!(!detect_stale_skills_schema(yaml));
     }
 
     /// Regression for the `--llm-backend` override on `careerai llm

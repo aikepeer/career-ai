@@ -12,6 +12,8 @@ pub mod llm;
 pub mod match_;
 pub mod mcp;
 pub mod notify;
+pub mod profile;
+pub mod profile_llm;
 pub mod render;
 pub mod shortlist;
 pub mod tailor;
