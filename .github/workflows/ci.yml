@@ -93,3 +93,34 @@ jobs:
       # deny.toml at repo root. RUSTSEC-2023-0071 is ignored there to
       # match cargo-audit.
       - run: cargo deny check
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    # Coverage is informational on PRs and recorded as an artifact
+    # rather than gating merges. Once we have a Codecov / Coveralls
+    # account the artifact upload step gets swapped for `codecov-action`
+    # with a delta-fail threshold (TODO.md: "fails on a coverage drop
+    # > 1%"). Until then, the lcov.info artifact is downloadable from
+    # the run page and parseable by any local tool.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        run: cargo install --locked cargo-llvm-cov
+      - name: Generate coverage report
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov-coverage
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 14
+      # Print a per-crate summary so the run log surfaces the headline
+      # numbers without forcing reviewers to download the artifact.
+      - name: Coverage summary
+        run: cargo llvm-cov report
