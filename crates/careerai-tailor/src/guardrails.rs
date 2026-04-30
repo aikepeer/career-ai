@@ -126,25 +126,51 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         }
     }
 
-    // Summary-only proper-noun harvest. Previously this scanned the
-    // FULL flattened profile (every employer's bullets, project
-    // descriptions, education) which let a tailored bullet for
-    // employer A reuse a proper noun mentioned only in employer B's
-    // bullet — a "cross-bullet token leak" that would let an LLM
-    // write "...accelerated Honeywell's deployment of Claude..." for
-    // an Anthropic-role bullet because Honeywell appears anywhere in
-    // the profile. Scope to the summary only: high-level vocabulary
-    // the candidate self-positions with, not role-specific names from
-    // unrelated experience entries.
+    // Proper-noun harvest from the summary + structured identifier
+    // fields (company names, project names, education institutions).
     //
-    // The other allowlists already cover legitimate cases:
-    //  * `employer_tokens` — company names from any experience entry
-    //  * `project_tokens`  — project names
+    // This deliberately does NOT include experience bullet bodies or
+    // project description bullets. Previously the harvest scanned the
+    // FULL flattened profile, which let a tailored bullet for employer
+    // A reuse a proper noun mentioned only in employer B's bullet — a
+    // "cross-bullet token leak" that would write "...accelerated
+    // Honeywell's deployment of Claude..." for an Anthropic-role bullet
+    // because Honeywell appeared anywhere in the profile.
+    //
+    // We still need to scan structured identifier fields with the
+    // proper-noun regex (rather than relying on `employer_tokens`
+    // alone) because `split_words_lowercase` drops punctuation and
+    // short fragments — `AT&T` becomes nothing in `employer_tokens`
+    // since `at`/`t` are both shorter than 3 chars. The proper-noun
+    // regex keeps `&`, `+`, `#`, `.` as connectors so `AT&T` survives.
+    //
+    // The other allowlists cover the rest:
     //  * `skill_tokens`    — every skill / language / framework / tool
     //  * `original_proper_nouns` (per-bullet, computed at check-time)
     //  * `COMMON_ENGLISH_CAPS` — the curated whitelist
+    let mut allowed_text = String::new();
+    allowed_text.push_str(&profile.summary);
+    allowed_text.push(' ');
+    for exp in &profile.experience {
+        allowed_text.push_str(&exp.company);
+        allowed_text.push(' ');
+        allowed_text.push_str(&exp.title);
+        allowed_text.push(' ');
+        allowed_text.push_str(&exp.location);
+        allowed_text.push(' ');
+    }
+    for ed in &profile.education {
+        allowed_text.push_str(&ed.institution);
+        allowed_text.push(' ');
+        allowed_text.push_str(&ed.degree);
+        allowed_text.push(' ');
+    }
+    for p in &profile.projects {
+        allowed_text.push_str(&p.name);
+        allowed_text.push(' ');
+    }
     let mut summary_proper_nouns: HashSet<String> = HashSet::new();
-    for m in proper_noun_regex().find_iter(&profile.summary) {
+    for m in proper_noun_regex().find_iter(&allowed_text) {
         for raw in m.as_str().split_whitespace() {
             let lower = raw.to_lowercase();
             if lower.len() < 3 {
@@ -836,6 +862,54 @@ mod tests {
         forbid_invented_entities(
             "Stabilized Wayland compositor performance.",
             "Built display servers.",
+            &p,
+            "x",
+        )
+        .unwrap();
+    }
+
+    /// Regression for Codex P1 on PR #53: punctuated employer names
+    /// like `AT&T` must clear the guardrail. `employer_tokens` is
+    /// built via `split_words_lowercase`, which drops fragments
+    /// shorter than 3 chars — so `AT&T` splits into `at` (dropped)
+    /// and `t` (dropped) and ends up as nothing in `employer_tokens`.
+    /// We compensate by also running the proper-noun regex (which
+    /// keeps `&`/`+`/`#`/`.` as connectors) over the structured
+    /// identifier fields (company, project name, institution), not
+    /// just the summary.
+    #[test]
+    fn accepts_punctuated_employer_name_from_company_field() {
+        let p = Profile {
+            personal: Personal {
+                name: "Test".into(),
+                email: "t@example.com".into(),
+                ..Default::default()
+            },
+            summary: "Engineer.".into(),
+            skills: Skills {
+                languages: vec![],
+                frameworks: vec![],
+                tools: vec![],
+            },
+            experience: vec![Experience {
+                title: "Engineer".into(),
+                company: "AT&T".into(),
+                location: String::new(),
+                start: "2018".into(),
+                end: "2020".into(),
+                bullets: vec!["Worked on telecom infrastructure.".into()],
+            }],
+            education: vec![],
+            projects: vec![],
+        };
+
+        // Reword reuses "AT&T" — present in the company field but not
+        // in the summary, not in skills, and not in this bullet's
+        // original. Must be accepted via the proper-noun harvest of
+        // structured identifier fields.
+        forbid_invented_entities(
+            "Migrated AT&T billing systems to a new platform.",
+            "Worked on telecom infrastructure.",
             &p,
             "x",
         )
