@@ -43,26 +43,23 @@ clippy + fmt` clean before merge.
   `render.rs`, `apply.rs`. Keep `lib.rs` as thin re-exports + the
   shared `DiscoveryReport` / `MatchReport` types.
 
-- [ ] **`crates/careerai-llm/src/backend.rs`** (1017 LOC) → likely
-  split: `resolution.rs` (BackendChoice + Auto resolver), `probe.rs`
-  (auth probe, `probe_forced_resolve` helpers), keep
-  `Backend` enum + `complete()` dispatch in `backend.rs`.
+- [x] **`crates/careerai-llm/src/backend.rs`** (1017→154 LOC) → split
+  into `backend/{resolution.rs,probe.rs,tests.rs}`. ✓
 
 ### Tier 2 — 500–1000 LOC
 
-- [ ] **`crates/careerai-db/src/queries.rs`** (972 LOC) → split by
-  entity: `queries/listings.rs`, `queries/applications.rs`,
-  `queries/artifacts.rs`, `queries/payloads.rs`, `queries/events.rs`.
-- [ ] **`crates/careerai-core/src/config.rs`** (914 LOC) → split by
-  section: `config/{user,domains,match_,rates,submit,llm,scheduler,
-  sources,render,notify}.rs`. Top-level `config.rs` re-exports.
+- [x] **`crates/careerai-db/src/queries.rs`** (972 LOC) → already split
+  into `queries/{listings,applications,artifacts,payloads,events}.rs`. ✓
+- [x] **`crates/careerai-core/src/config.rs`** (914→99 LOC) → split by
+  section: `config/{dashboard,llm,match_,rates,render,scheduler,
+  sources,submit}.rs`. Top-level re-exports. ✓
 - [ ] **`crates/careerai-tailor/src/diff.rs`** (894 LOC) → `diff/
   schema.rs` (DiffDoc + ops), `diff/parse.rs`, `diff/validate.rs`,
   `diff/apply.rs`.
-- [ ] **`crates/careerai-tailor/src/guardrails.rs`** (825 LOC) →
-  `guardrails/{tokens.rs,common_caps.rs,validator.rs}`.
-- [ ] **`crates/careerai-llm/src/claude_cli.rs`** (976 LOC) →
-  `claude_cli/{driver.rs,error.rs,binary_locator.rs}`.
+- [x] **`crates/careerai-tailor/src/guardrails.rs`** (825→23 LOC) →
+  `guardrails/{tokens.rs,common_caps.rs,validator.rs}`. ✓
+- [x] **`crates/careerai-llm/src/claude_cli.rs`** (976→35 LOC) →
+  `claude_cli/{driver.rs,error.rs,binary_locator.rs}`. ✓
 - [ ] **`crates/careerai-sources/src/indeed_rss.rs`** (795 LOC).
 - [ ] **`crates/careerai-sources/src/company_sync.rs`** (777 LOC) →
   `company_sync/{seed.rs,probe.rs,partition.rs}`.
