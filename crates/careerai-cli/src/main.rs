@@ -311,10 +311,10 @@ async fn main() -> Result<()> {
             careerai_core::init::scaffold(&cwd, force)?;
         }
         Command::Profile { command } => run_profile(command, backend_override)?,
-        Command::Discover { sources } => run_discover(&cwd, &sources).await?,
-        Command::Match { tune } => run_match(&cwd, tune).await?,
+        Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
+        Command::Match { tune } => commands::match_::run(&cwd, tune).await?,
         Command::Shortlist { command } => match command {
-            ShortlistCommand::Show { limit } => run_shortlist_show(&cwd, limit).await?,
+            ShortlistCommand::Show { limit } => commands::shortlist::run_show(&cwd, limit).await?,
         },
         Command::Tailor { listing_id } => {
             let mut cfg = load_cfg(&cwd)?;
@@ -334,7 +334,7 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     tracing::error!(error = %format_args!("{e:#}"), "tailor failed");
-                    std::process::exit(map_tailor_error_to_exit_code(&e));
+                    std::process::exit(commands::tailor::map_tailor_error_to_exit_code(&e));
                 }
             }
         }
@@ -349,7 +349,7 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     tracing::error!(error = %format_args!("{e:#}"), "render failed");
-                    std::process::exit(map_render_error_to_exit_code(&e));
+                    std::process::exit(commands::render::map_render_error_to_exit_code(&e));
                 }
             }
         }
@@ -360,7 +360,7 @@ async fn main() -> Result<()> {
             source,
         } => {
             let cfg = load_cfg(&cwd)?;
-            run_apply(
+            commands::apply::run(
                 &cwd,
                 &cfg,
                 application_id,
@@ -371,7 +371,7 @@ async fn main() -> Result<()> {
             .await?;
         }
         Command::Applied { source, limit } => {
-            run_applied(&cwd, source.as_deref(), limit).await?;
+            commands::apply::run_applied(&cwd, source.as_deref(), limit).await?;
         }
         Command::Review => {
             let cfg = load_cfg(&cwd)?;
@@ -412,7 +412,7 @@ async fn main() -> Result<()> {
             }
         },
         Command::Inspect { application_id } => {
-            run_inspect(&cwd, &application_id).await?;
+            commands::inspect::run(&cwd, &application_id).await?;
         }
         Command::Daemon => {
             let cfg = load_cfg(&cwd)?;
@@ -443,319 +443,18 @@ async fn main() -> Result<()> {
 // were extracted to crates/careerai-cli/src/commands/{mcp,llm,notify}.rs
 // to keep main.rs under the project's 300-LOC-per-file guidance.
 
-/// Dispatch for `careerai apply`. Errors short-circuit the process with a
-/// typed exit code; success paths print one line per application.
-async fn run_apply(
-    cwd: &Path,
-    cfg: &CoreConfig,
-    application_id: Option<String>,
-    all: bool,
-    auto_submit: bool,
-    source_filter: Option<&str>,
-) -> Result<()> {
-    let auto_submit_override = if auto_submit { Some(true) } else { Some(false) };
-
-    match (application_id, all) {
-        (None, false) => {
-            anyhow::bail!("specify --all or an application id");
-        }
-        (Some(_), true) => {
-            anyhow::bail!("pass either --all or an application id, not both");
-        }
-        (Some(id), false) => match pipeline::apply_one(cwd, cfg, &id, auto_submit_override).await {
-            Ok(outcome) => {
-                print_apply_line(&outcome, auto_submit);
-            }
-            Err(e) => {
-                tracing::error!(error = %format_args!("{e:#}"), "apply failed");
-                std::process::exit(map_apply_error_to_exit_code(&e));
-            }
-        },
-        (None, true) => {
-            match pipeline::apply_all(cwd, cfg, source_filter, auto_submit_override).await {
-                Ok(outcomes) => {
-                    if outcomes.is_empty() {
-                        println!(
-                            "(no rendered/prepared applications — run `careerai render` first)"
-                        );
-                        return Ok(());
-                    }
-                    for outcome in &outcomes {
-                        print_apply_line(outcome, auto_submit);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(error = %format_args!("{e:#}"), "apply --all failed");
-                    std::process::exit(map_apply_error_to_exit_code(&e));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn print_apply_line(outcome: &pipeline::AppliedOutcome, auto_submit: bool) {
-    let tag = if auto_submit {
-        "[live]   "
-    } else {
-        "[dry-run]"
-    };
-    match &outcome.outcome {
-        careerai_submit::SubmitOutcome::DryRun { .. } => {
-            println!(
-                "{tag} application={} source={} -> DryRun (would_submit logged)",
-                outcome.application_id, outcome.source,
-            );
-        }
-        careerai_submit::SubmitOutcome::Submitted { remote_id } => {
-            println!(
-                "[live]    application={} source={} -> Submitted (remote={})",
-                outcome.application_id, outcome.source, remote_id,
-            );
-        }
-        careerai_submit::SubmitOutcome::Skipped { reason } => {
-            println!(
-                "[skip]    application={} source={} -> Skipped ({})",
-                outcome.application_id, outcome.source, reason,
-            );
-        }
-        careerai_submit::SubmitOutcome::Drafted { note } => {
-            println!(
-                "[draft]   application={} source={} -> Drafted ({}; run `careerai review` to confirm)",
-                outcome.application_id, outcome.source, note,
-            );
-        }
-    }
-}
-
-async fn run_applied(cwd: &Path, source_filter: Option<&str>, limit: i64) -> Result<()> {
-    let rows = pipeline::applied_show(cwd, source_filter, limit).await?;
-    if rows.is_empty() {
-        println!("(no submitted applications yet)");
-        return Ok(());
-    }
-    // Columnar header.
-    println!(
-        "{:<38}  {:<12}  {:<10}  UPDATED_AT",
-        "APPLICATION_ID", "SOURCE", "STATE"
-    );
-    // We need the listing's source per row; fetch once per row.
-    let pool = pipeline::open_pool(cwd).await?;
-    for app in rows {
-        let source = careerai_db::queries::find_by_id(&pool, &app.listing_id)
-            .await
-            .map_or_else(|_| "?".to_owned(), |l| l.source);
-        println!(
-            "{:<38}  {:<12}  {:<10}  {}",
-            app.id,
-            source,
-            app.state,
-            app.updated_at.format("%Y-%m-%dT%H:%M:%SZ"),
-        );
-    }
-    Ok(())
-}
-
-async fn run_inspect(cwd: &Path, application_id: &str) -> Result<()> {
-    match pipeline::inspect_show(cwd, application_id).await {
-        Ok(report) => {
-            println!("Application  : {}", report.application.id);
-            println!("State        : {}", report.application.state);
-            println!(
-                "Listing      : {} @ {} (source={})",
-                report.listing_title, report.listing_company, report.listing_source,
-            );
-            println!("Profile hash : {}", report.application.profile_hash);
-            println!("Prompt ver   : {}", report.application.prompt_version);
-            println!("LLM model    : {}", report.application.llm_model);
-            println!("Events:");
-            for e in &report.events {
-                let ts = e.created_at.format("%Y-%m-%dT%H:%M:%SZ");
-                match &e.note {
-                    Some(note) => println!("  {ts} {} ({note})", e.to_state),
-                    None => println!("  {ts} {}", e.to_state),
-                }
-            }
-            println!("Artifacts:");
-            if report.artifacts.is_empty() {
-                println!("  (none)");
-            } else {
-                for a in &report.artifacts {
-                    println!("  {:<14} {} ({} bytes)", a.kind, a.path, a.bytes);
-                }
-            }
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!(error = %format_args!("{e:#}"), "inspect failed");
-            std::process::exit(map_apply_error_to_exit_code(&e));
-        }
-    }
-}
-
-/// Map an apply/inspect-path error to a stable exit code.
-///
-/// - 2: application / listing not found
-/// - 3: application in wrong state (not 'rendered'/'prepared')
-/// - 5: source disabled (per-source config gate)
-/// - 6: ATS upstream HTTP failure
-/// - 7: unknown source (no submitter registered)
-/// - 1: anything else
-fn map_apply_error_to_exit_code(err: &anyhow::Error) -> i32 {
-    // Walk the cause chain and match on typed errors only. The
-    // earlier stringly-typed fallback (`msg.starts_with("application
-    // not found:")`) was fragile: any `.context("…")` wrapping
-    // prepended text and silently broke the match. The typed downcast
-    // path covers every real path because `apply_one` / `inspect_show`
-    // wrap `careerai_db::DbError::NotFound` directly, and
-    // `submit_application` returns `careerai_submit::SubmitError`.
-    for cause in err.chain() {
-        if let Some(se) = cause.downcast_ref::<careerai_submit::SubmitError>() {
-            return match se {
-                careerai_submit::SubmitError::BadState { .. } => 3,
-                careerai_submit::SubmitError::SourceDisabled(_) => 5,
-                careerai_submit::SubmitError::UnknownSource(_) => 7,
-                careerai_submit::SubmitError::Http(_)
-                | careerai_submit::SubmitError::HttpStatus { .. } => 6,
-                careerai_submit::SubmitError::Db(careerai_db::DbError::NotFound(_)) => 2,
-                _ => 1,
-            };
-        }
-        if let Some(careerai_db::DbError::NotFound(_)) =
-            cause.downcast_ref::<careerai_db::DbError>()
-        {
-            return 2;
-        }
-    }
-    1
-}
-
-/// Map a tailor-path error into a stable process exit code.
-///
-/// - 2: listing / application not found
-/// - 3: listing in unexpected state
-/// - 4: constrained-diff validator rejected the LLM output
-/// - 5: LLM provider/upstream failure
-/// - 1: anything else
-fn map_tailor_error_to_exit_code(err: &anyhow::Error) -> i32 {
-    // Walk the chain looking for typed causes.
-    for cause in err.chain() {
-        if let Some(te) = cause.downcast_ref::<careerai_tailor::TailorError>() {
-            return match te {
-                careerai_tailor::TailorError::InventedContent { .. }
-                | careerai_tailor::TailorError::Schema(_)
-                | careerai_tailor::TailorError::BadPath(_)
-                | careerai_tailor::TailorError::CoverLetterTooLong { .. } => 4,
-                careerai_tailor::TailorError::Llm(_) => 5,
-                _ => 1,
-            };
-        }
-        if cause.downcast_ref::<careerai_llm::LlmError>().is_some() {
-            return 5;
-        }
-    }
-
-    // String-level fallbacks for the `anyhow::bail!` paths that never carry a
-    // typed cause — keep these in sync with the messages in `pipeline.rs`.
-    let msg = err.to_string();
-    if msg.starts_with("listing not found:") || msg.starts_with("application not found:") {
-        return 2;
-    }
-    if msg.contains("expected 'shortlisted'") {
-        return 3;
-    }
-    1
-}
-
-/// Map a render-path error into a stable process exit code.
-///
-/// - 2: application / payload / listing not found
-/// - 3: application in unexpected state
-/// - 6: pandoc missing on PATH
-/// - 1: anything else
-fn map_render_error_to_exit_code(err: &anyhow::Error) -> i32 {
-    for cause in err.chain() {
-        if let Some(re) = cause.downcast_ref::<careerai_render::RenderError>() {
-            if matches!(re, careerai_render::RenderError::PandocMissing) {
-                return 6;
-            }
-        }
-    }
-
-    let msg = err.to_string();
-    if msg.starts_with("application not found:")
-        || msg.starts_with("application payload not found:")
-        || msg.starts_with("listing not found:")
-    {
-        return 2;
-    }
-    if msg.contains("expected 'tailored'") {
-        return 3;
-    }
-    1
-}
+// Subcommand handlers extracted to `commands/`:
+//   * apply.rs    — run, run_applied, print_apply_line, map_apply_error_to_exit_code
+//   * inspect.rs  — run
+//   * tailor.rs   — map_tailor_error_to_exit_code
+//   * render.rs   — map_render_error_to_exit_code
+//   * discover.rs / match_.rs / shortlist.rs — one-call dispatchers
+// All preserve their original semantics; main.rs keeps the clap
+// structs, `main()`, dispatch, and `load_cfg` to stay closer to the
+// 300-LOC project guidance.
 
 fn load_cfg(cwd: &Path) -> Result<CoreConfig> {
     CoreConfig::load(cwd).context("load config")
-}
-
-async fn run_discover(cwd: &Path, source_filter: &[String]) -> Result<()> {
-    let cfg = load_cfg(cwd)?;
-    let report = pipeline::discover_all(cwd, &cfg, source_filter).await?;
-    println!(
-        "discover: fetched {}, new {}, duplicates {}, errors {}",
-        report.fetched, report.new_rows, report.duplicates, report.errors,
-    );
-    Ok(())
-}
-
-async fn run_match(cwd: &Path, tune: bool) -> Result<()> {
-    let cfg = load_cfg(cwd)?;
-    let report = pipeline::match_all(cwd, &cfg, tune).await?;
-    if tune {
-        println!(
-            "match --tune: {} listings after filters (filtered_out: {})",
-            report.histogram.iter().map(|(_, c)| c).sum::<usize>(),
-            report.filtered_out,
-        );
-        println!("score distribution:");
-        for (lower, count) in report.histogram {
-            let bar = "#".repeat(count.min(60));
-            println!("  [{:.1}-{:.1}) {:>4} {bar}", lower, lower + 0.1, count);
-        }
-        println!(
-            "threshold in config: {:.2} — use match (without --tune) to apply",
-            cfg.matching.score_threshold,
-        );
-    } else {
-        println!(
-            "match: filtered_out {}, shortlisted {}, below-threshold {}",
-            report.filtered_out, report.shortlisted, report.also_filtered,
-        );
-    }
-    Ok(())
-}
-
-async fn run_shortlist_show(cwd: &Path, limit: u32) -> Result<()> {
-    let rows = pipeline::shortlist_show(cwd, i64::from(limit)).await?;
-    if rows.is_empty() {
-        println!("(no shortlisted listings — run `careerai discover` then `careerai match`)");
-        return Ok(());
-    }
-    for (i, l) in rows.iter().enumerate() {
-        let score = l
-            .score
-            .map_or_else(|| "—".to_string(), |s| format!("{s:.3}"));
-        println!(
-            "{:>2}. [{score}] {} @ {} ({})\n    {}",
-            i + 1,
-            l.title,
-            l.company,
-            l.source,
-            l.url,
-        );
-    }
-    Ok(())
 }
 
 /// Default location for the canonical profile file: `./profile/profile.yaml`.
