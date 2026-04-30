@@ -64,7 +64,8 @@ clippy + fmt` clean before merge.
   `indeed_rss/{source.rs,parser.rs,tests.rs}`. ✓
 - [x] **`crates/careerai-sources/src/company_sync.rs`** (777→34 LOC) →
   `company_sync/{seed.rs,probe.rs,partition.rs}`. ✓
-- [ ] **`crates/careerai-sources/src/mcp_jobs.rs`** (705 LOC).
+- [x] **`crates/careerai-sources/src/mcp_jobs.rs`** (705→22 LOC) →
+  `mcp_jobs/{source.rs,discover.rs,parser.rs}`. ✓
 - [ ] **`crates/careerai-mcp/src/server.rs`** (693 LOC) → `server/
   {tools.rs,resources.rs,handlers.rs}`.
 - [ ] **`crates/careerai-scheduler/src/lib.rs`** (686 LOC) — mostly
