@@ -1,0 +1,74 @@
+# cargo-deny config for career-ai.
+#
+# Run with `cargo deny check` (after `cargo install --locked cargo-deny`).
+# CI runs the same command on every PR.
+#
+# Policy:
+#  * Advisories  — error, except a single ignore matching `cargo audit`
+#                  (RUSTSEC-2023-0071 is a ghost from sqlx-mysql; we
+#                   only compile sqlx-sqlite).
+#  * Licenses    — allow the standard permissive set; deny copyleft.
+#  * Sources     — crates.io + github.com only.
+#  * Bans        — warn on dup versions; no hard bans yet (the workspace
+#                  has the usual transitive duplicates and cleaning them
+#                  up is its own backlog).
+
+[graph]
+all-features = true
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+ignore = [
+    # See ci.yml + cargo-audit job: rsa is a lockfile-only artifact of
+    # sqlx-mysql which we never compile (only sqlx-sqlite is enabled).
+    # `cargo tree -i rsa` confirms it isn't in the compiled graph. No
+    # upstream fix exists yet.
+    "RUSTSEC-2023-0071",
+]
+
+[licenses]
+# `cargo deny` 0.14+ schema: a list of accepted license expressions
+# (SPDX). Anything outside this list errors.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "OpenSSL",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[[licenses.exceptions]]
+# `ring` ships under a custom OpenSSL+ISC+MIT triple. Recognized by
+# cargo-deny; included here for explicitness.
+name = "ring"
+allow = ["MIT", "ISC", "OpenSSL"]
+
+[bans]
+# Project policy: workspace dups are tolerated for now (cleaning the
+# transitive graph is in TODO.md as a separate task). Switch to
+# "deny" once the duplicate count is curated.
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
