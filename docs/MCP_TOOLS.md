@@ -55,8 +55,14 @@ parse, and validate?
 whenever the metadata is readable, even when YAML parse / validate
 fails. `issues` is empty when `valid: true`.
 
-**Errors:** none. The tool always succeeds; missing or unreadable
-file surfaces in `exists: false` / `valid: false`.
+**Errors:** can return MCP errors for filesystem failures —
+`ProfileIo` (metadata unreadable, e.g. parent directory permission
+denied) and `ProfileMissing` (file metadata says it exists but the
+subsequent read failed). Truly absent or schema-invalid files
+surface in-band as `exists: false` / `valid: false` rather than as
+errors. Clients should still wrap the call in error handling and
+treat `ProfileIo` / `ProfileMissing` distinctly from a clean
+"profile not yet imported" response.
 
 ---
 
@@ -210,9 +216,12 @@ To enable real submission you must pass:
 ```
 
 The `confirm` token must equal the literal string
-`"I_UNDERSTAND_TOS_RISK"`. Anything else (including absent or empty)
-is rejected at the schema level. Per-source `submit_enabled` in
-config still applies even with a valid confirm token.
+`"I_UNDERSTAND_TOS_RISK"`. The check is **runtime** in
+`careerai_apply`'s server handler — `ApplyArgs.confirm` is
+declared as an unconstrained `Option<String>` in the JSON Schema,
+so client-side schema validation will NOT catch a wrong token.
+Per-source `submit_enabled` in config still applies even with a
+valid confirm token.
 
 **Output**
 
@@ -321,7 +330,7 @@ The MCP server also exposes three resources (read-only):
 | URI | Description |
 |---|---|
 | `careerai://profile` | Current `profile/profile.yaml` body |
-| `careerai://shortlist/{date}` | Shortlist as a compact JSON list (per `CompactListing` shape) for the given date in YYYY-MM-DD UTC |
+| `careerai://shortlist/{date}` | **Currently returns the present-day shortlist regardless of `{date}`.** The path segment is parsed but ignored by `read_shortlist_resource`. Future work will honor it; until then, do not trust the URI as a historical slice — use it only as the live shortlist endpoint. |
 | `careerai://artifacts/{application_id}` | Index of artifacts attached to the application |
 
 Resource bodies use a compact projection (`CompactListing` for
