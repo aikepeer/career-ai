@@ -103,6 +103,11 @@ jobs:
     # with a delta-fail threshold (TODO.md: "fails on a coverage drop
     # > 1%"). Until then, the lcov.info artifact is downloadable from
     # the run page and parseable by any local tool.
+    #
+    # `continue-on-error: true` keeps this job non-blocking — a
+    # `cargo install` flake or transient cargo-llvm-cov bug must not
+    # block merge of an otherwise-green PR (Codex P2 on PR #64).
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -111,8 +116,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         run: cargo install --locked cargo-llvm-cov
+      # `--locked` matches every other cargo job in this workflow so
+      # an upstream-crate publish can't make the coverage job fail
+      # independently of the tested code (Codex P2 on PR #64).
       - name: Generate coverage report
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
