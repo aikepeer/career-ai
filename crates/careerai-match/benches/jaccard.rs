@@ -12,28 +12,104 @@ use careerai_match::{JaccardScorer, Scorer};
 use careerai_sources::RawListing;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-/// Build a deterministic token bag with `n` unique tokens. Uses the
-/// same vocabulary tokens as a real profile / JD would (skill names,
-/// resume action verbs) so the bag overlap pattern matches production.
+/// Build a deterministic token bag with `n` *distinct* tokens. Each
+/// token is `<vocab-stem>-<counter>` so distinct count == n at every
+/// scale.
+///
+/// Without the counter suffix, a 2000-token bag would only have ~70
+/// distinct entries (modulo VOCAB len). `JaccardScorer::score`
+/// deduplicates via `HashSet`, so its intersection/union work would
+/// be bounded by ~70 — understating real-input latency by
+/// roughly an order of magnitude and producing a misleading
+/// baseline for any future scorer comparison (Codex P1 on PR #66).
 fn token_bag(n: usize, seed: u64) -> String {
     const VOCAB: &[&str] = &[
-        "rust", "tokio", "async", "trait", "lifetime", "borrow", "move",
-        "ownership", "macro", "cargo", "clippy", "fmt", "test", "bench",
-        "tracing", "serde", "axum", "sqlx", "sqlite", "postgres",
-        "python", "go", "java", "kotlin", "swift", "typescript",
-        "react", "vue", "svelte", "next", "nuxt", "node", "deno",
-        "kubernetes", "docker", "helm", "terraform", "pulumi", "aws",
-        "gcp", "azure", "linux", "wayland", "embedded", "robotics",
-        "ros", "gpu", "cuda", "ml", "llm", "rag", "transformer",
-        "engineer", "developer", "architect", "designer", "manager",
-        "led", "owned", "shipped", "scaled", "automated", "designed",
-        "implemented", "rewrote", "migrated", "optimized", "reduced",
-        "improved", "delivered", "spearheaded", "mentored", "interviewed",
+        "rust",
+        "tokio",
+        "async",
+        "trait",
+        "lifetime",
+        "borrow",
+        "move",
+        "ownership",
+        "macro",
+        "cargo",
+        "clippy",
+        "fmt",
+        "test",
+        "bench",
+        "tracing",
+        "serde",
+        "axum",
+        "sqlx",
+        "sqlite",
+        "postgres",
+        "python",
+        "go",
+        "java",
+        "kotlin",
+        "swift",
+        "typescript",
+        "react",
+        "vue",
+        "svelte",
+        "next",
+        "nuxt",
+        "node",
+        "deno",
+        "kubernetes",
+        "docker",
+        "helm",
+        "terraform",
+        "pulumi",
+        "aws",
+        "gcp",
+        "azure",
+        "linux",
+        "wayland",
+        "embedded",
+        "robotics",
+        "ros",
+        "gpu",
+        "cuda",
+        "ml",
+        "llm",
+        "rag",
+        "transformer",
+        "engineer",
+        "developer",
+        "architect",
+        "designer",
+        "manager",
+        "led",
+        "owned",
+        "shipped",
+        "scaled",
+        "automated",
+        "designed",
+        "implemented",
+        "rewrote",
+        "migrated",
+        "optimized",
+        "reduced",
+        "improved",
+        "delivered",
+        "spearheaded",
+        "mentored",
+        "interviewed",
     ];
-    let mut s = String::with_capacity(n * 8);
+    let mut s = String::with_capacity(n * 16);
     let mut idx = seed as usize;
-    for _ in 0..n {
+    for i in 0..n {
+        // `<vocab-stem>-<counter>` shape: the JaccardScorer tokenizer
+        // splits on whitespace, so the hyphen does NOT split. The
+        // counter `i` guarantees distinctness up to `n`; the hashed
+        // `idx` decides which vocab stem to suffix so tokens still
+        // look plausible (e.g. `robotics-345`) rather than a flat
+        // `token42 token43` sequence.
         s.push_str(VOCAB[idx % VOCAB.len()]);
+        s.push('-');
+        s.push_str(&i.to_string());
         s.push(' ');
         idx = idx.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
     }
