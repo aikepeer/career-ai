@@ -1,5 +1,5 @@
 ---
-source: crates/careerai-sources/src/indeed_rss.rs
+source: crates/careerai-sources/src/indeed_rss/tests.rs
 expression: listings
 ---
 - source: indeed_rss
