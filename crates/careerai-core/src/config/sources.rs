@@ -1,0 +1,76 @@
+//! Discovery-source configuration. The umbrella `SourcesConfig` lives
+//! here; per-source bag types live in submodules grouped by transport
+//! family (web feeds vs. LinkedIn browser vs. MCP servers).
+
+use serde::{Deserialize, Serialize};
+
+mod linkedin;
+mod mcp;
+mod web;
+
+pub use linkedin::{LinkedinBrowserFilters, LinkedinBrowserSourceConfig};
+pub use mcp::{McpQueryConfig, McpSourceConfig, McpTransportConfig};
+pub use web::{IndeedRssSourceConfig, NaukriSourceConfig, RemotiveSourceConfig};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SourcesConfig {
+    #[serde(default)]
+    pub greenhouse: CompaniesSource,
+    #[serde(default)]
+    pub lever: CompaniesSource,
+    /// Ashby public posting API (`https://api.ashbyhq.com/posting-api/job-board/<slug>`).
+    /// Same shape as Greenhouse / Lever — one entry per company slug.
+    /// Discovery adapter ships in `careerai-sources` as `AshbySource`;
+    /// the `careerai sources sync` subcommand auto-populates this list
+    /// by probing seed slugs against the user's `domains:` keywords.
+    #[serde(default)]
+    pub ashby: CompaniesSource,
+    #[serde(default)]
+    pub remotive: RemotiveSourceConfig,
+    #[serde(default)]
+    pub remoteok: ToggleSource,
+    #[serde(default)]
+    pub naukri: NaukriSourceConfig,
+    /// Indeed public RSS feed (`https://rss.indeed.com/rss?q=&l=&fromage=`).
+    /// Stable, ToS-clean, no auth needed. Single configurable feed: one
+    /// keyword query + optional location + recency window. Disabled by
+    /// default so a fresh install never makes outbound requests unprompted.
+    #[serde(default)]
+    pub indeed_rss: IndeedRssSourceConfig,
+    /// Native LinkedIn browser-driven discovery source. Drives a stealth
+    /// Chromium session against `linkedin.com/jobs/search/` using the
+    /// same `li_at` cookie + stealth-v2.js infrastructure as the M5
+    /// submitter. Defaults to `enabled: false`; user opts in after
+    /// acknowledging the LinkedIn ToS §8.2 trade-off.
+    #[serde(default, alias = "linkedin-browser")]
+    pub linkedin_browser: LinkedinBrowserSourceConfig,
+    /// Community / third-party Model-Context-Protocol servers used as
+    /// discovery sources. Each entry spawns a stdio MCP server process,
+    /// calls `tools/list`, and invokes the first matching job-search
+    /// tool. Defaults to empty; users opt in by adding entries to
+    /// `config/local.yaml`.
+    #[serde(default)]
+    pub mcp: Vec<McpSourceConfig>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompaniesSource {
+    #[serde(default)]
+    pub companies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToggleSource {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for ToggleSource {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+pub(super) fn default_true() -> bool {
+    true
+}
