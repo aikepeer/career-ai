@@ -66,10 +66,10 @@ clippy + fmt` clean before merge.
   `company_sync/{seed.rs,probe.rs,partition.rs}`. ✓
 - [x] **`crates/careerai-sources/src/mcp_jobs.rs`** (705→22 LOC) →
   `mcp_jobs/{source.rs,discover.rs,parser.rs}`. ✓
-- [ ] **`crates/careerai-mcp/src/server.rs`** (693 LOC) → `server/
-  {tools.rs,resources.rs,handlers.rs}`.
-- [ ] **`crates/careerai-scheduler/src/lib.rs`** (686 LOC) — mostly
-  cohesive; `scheduler/{cron.rs,shutdown.rs,error.rs}` worth a look.
+- [x] **`crates/careerai-mcp/src/server.rs`** (693→236 LOC) → `server/
+  {tools.rs,resources.rs,handlers.rs}`. ✓
+- [x] **`crates/careerai-scheduler/src/lib.rs`** (686→241 LOC) —
+  `scheduler/{cron.rs,error.rs,shutdown.rs}`. ✓
 - [ ] **`crates/careerai-submit/src/rate_limiter.rs`** (598 LOC).
 - [ ] **`crates/careerai-submit/src/linkedin.rs`** (565 LOC).
 - [x] **`crates/careerai-llm/src/rig.rs`** (542→17 LOC) → `rig/{driver.rs,response.rs,error.rs,tests.rs}`. ✓

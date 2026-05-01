@@ -12,42 +12,33 @@
 //! `careerai-match`, `careerai-submit`, `careerai-db`, or any other
 //! implementation crate directly — the orchestration layer is
 //! `careerai-pipeline`, and this crate goes through it.
+//!
+//! ## Module layout (split to stay under the 300-LOC cap)
+//!
+//! * `error.rs` — `SchedulerError` enum + `SHUTDOWN_DRAIN` constant
+//! * `cron.rs`  — `build_tick_job`, `build_submit_job`, `effective_cadence`
+//! * `lib.rs`   — `Scheduler` struct, `from_config`, lifecycle methods
+
+mod cron;
+mod error;
+mod shutdown;
+#[cfg(test)]
+mod tests;
+
+pub use error::SchedulerError;
 
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::Duration;
 
 use careerai_core::config::CoreConfig;
-#[cfg(unix)]
-use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Mutex;
-use tokio_cron_scheduler::{Job, JobScheduler, JobSchedulerError};
+use tokio_cron_scheduler::JobScheduler;
 use tracing::{error, info, info_span, warn, Instrument};
 
-/// Time the scheduler is allowed to drain after a shutdown signal before we
-/// give up and return anyway. Kept short so `careerai daemon` always exits
-/// promptly under operator Ctrl-C.
-const SHUTDOWN_DRAIN: Duration = Duration::from_secs(10);
-
-/// Errors surfaced by the scheduler crate.
-///
-/// Kept small on purpose. The cron jobs themselves swallow their own errors
-/// and log via `tracing::error!`, so a single bad source can never propagate
-/// out and tear the whole daemon down.
-#[derive(Debug, thiserror::Error)]
-pub enum SchedulerError {
-    /// Either constructing the underlying `JobScheduler`, registering a job,
-    /// starting it, or shutting it down failed.
-    #[error("scheduler init failed: {0}")]
-    Init(#[from] JobSchedulerError),
-
-    /// Wiring SIGTERM via `tokio::signal::unix` failed. SIGINT goes through
-    /// `tokio::signal::ctrl_c` which surfaces its own `io::Error` here too.
-    #[error("signal handler install failed: {0}")]
-    Signal(#[from] std::io::Error),
-}
+use crate::cron::{build_submit_job, build_tick_job, effective_cadence};
+use crate::error::SHUTDOWN_DRAIN;
 
 /// Long-running daemon scaffolding around `tokio-cron-scheduler`.
 ///
@@ -63,7 +54,7 @@ pub enum SchedulerError {
 /// `Self` because the registered jobs keep it alive for the daemon's
 /// lifetime.
 pub struct Scheduler {
-    inner: JobScheduler,
+    pub(crate) inner: JobScheduler,
 }
 
 // `tokio_cron_scheduler::JobScheduler` does not implement `Debug`, so we emit a
@@ -211,10 +202,6 @@ impl Scheduler {
                     ),
                 }
             } else {
-                // H5: never silent. Operators who typo `submit_cadence` (or set
-                // it under the wrong YAML key) need a visible startup line so
-                // they can tell the difference between "intentionally disabled"
-                // and "I thought I enabled this and it's quietly not running".
                 info!("submit cron disabled — set scheduler.submit_cadence to enable periodic dry-run apply sweeps");
             }
 
@@ -249,438 +236,5 @@ impl Scheduler {
                 Ok(())
             }
         }
-    }
-
-    /// Run until SIGINT or SIGTERM, then gracefully shut down.
-    ///
-    /// On signal we call `JobScheduler::shutdown()` and wait up to
-    /// `SHUTDOWN_DRAIN` for in-flight jobs to settle. If the drain times out
-    /// we still return `Ok(())` — the daemon's contract is "exit promptly on
-    /// Ctrl-C", not "block until every job finishes".
-    pub async fn run_until_shutdown(mut self) -> Result<(), SchedulerError> {
-        let span = info_span!("scheduler");
-        async move {
-            // H2: install signal handlers BEFORE starting the scheduler.
-            // `tokio::signal::ctrl_c` registers lazily on first poll, and on
-            // Unix the `signal()` syscall itself happens at construction —
-            // any signal delivered between `start()` returning and the first
-            // `select!` poll could otherwise fall through to the default
-            // disposition (terminate without drain). Registering both here
-            // closes that window: the kernel queues SIGINT/SIGTERM into our
-            // handlers as soon as `signal()` returns.
-            //
-            // On Windows there is no `tokio::signal::unix`; the daemon
-            // shuts down on Ctrl-C only (operator-driven). systemd-style
-            // SIGTERM doesn't apply on Windows.
-            #[cfg(unix)]
-            {
-                let mut sigint = signal(SignalKind::interrupt())?;
-                let mut sigterm = signal(SignalKind::terminate())?;
-
-                self.start().await?;
-
-                // SIGTERM (e.g. systemd stop) and SIGINT (Ctrl-C) both
-                // initiate graceful shutdown. Race them with
-                // `tokio::select!` so whichever arrives first wins.
-                tokio::select! {
-                    _ = sigint.recv() => {
-                        info!("received SIGINT, shutting down");
-                    }
-                    _ = sigterm.recv() => {
-                        info!("received SIGTERM, shutting down");
-                    }
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                self.start().await?;
-
-                tokio::signal::ctrl_c().await?;
-                info!("received Ctrl-C, shutting down");
-            }
-
-            let drain = tokio::time::timeout(SHUTDOWN_DRAIN, self.inner.shutdown()).await;
-            match drain {
-                Ok(Ok(())) => info!("scheduler drained cleanly"),
-                Ok(Err(e)) => error!(error = %e, "scheduler shutdown reported an error"),
-                Err(_) => warn!(
-                    drain_secs = SHUTDOWN_DRAIN.as_secs(),
-                    "scheduler shutdown timed out; exiting anyway",
-                ),
-            }
-            Ok::<(), SchedulerError>(())
-        }
-        .instrument(span)
-        .await
-    }
-}
-
-/// Build the per-tick async job for a single source.
-///
-/// Each fired tick runs `discover_one` then `match_one` against the shared
-/// pipeline crate, scoped to this single source. Errors from either stage
-/// are logged at `error` and swallowed — one source's failure must never
-/// propagate up and cancel sibling jobs registered with the same scheduler.
-///
-/// `match_lock` (H1) serializes the `match_one` call across all per-source
-/// jobs. `match_all` walks every `discovered`-state row regardless of
-/// source, so two sources ticking at the same minute (default greenhouse +
-/// lever both fire `0 0 */1 * * *`) would otherwise race on the SQLite
-/// UPDATE that transitions rows out of `discovered` — both would fetch the
-/// same set, both would try to set state, and one would clobber the other's
-/// score or hit a unique-state constraint. Discover stays unlocked: it's
-/// per-source, network-bound, and writes only its own source's rows.
-fn build_tick_job(
-    source: &str,
-    cron_expr: &str,
-    root: Arc<PathBuf>,
-    cfg: Arc<CoreConfig>,
-    match_lock: Arc<Mutex<()>>,
-    #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
-) -> Result<Job, JobSchedulerError> {
-    let source_owned = source.to_owned();
-    Job::new_async(cron_expr, move |_uuid, _scheduler| {
-        let source = source_owned.clone();
-        let root = Arc::clone(&root);
-        let cfg = Arc::clone(&cfg);
-        let match_lock = Arc::clone(&match_lock);
-        #[cfg(feature = "test-hooks")]
-        let tick_counter = tick_counter.clone();
-        Box::pin(async move {
-            // Each stage's Result is matched independently: a discover
-            // failure should not block the match retry, since match runs
-            // against rows already in the DB from prior ticks. Both arms
-            // log per-source so log filtering by `source=...` keeps working.
-            match careerai_pipeline::discover_one(root.as_path(), cfg.as_ref(), &source).await {
-                Ok(report) => info!(
-                    source = %source,
-                    fetched = report.fetched,
-                    new = report.new_rows,
-                    duplicates = report.duplicates,
-                    errors = report.errors,
-                    "discover ok",
-                ),
-                Err(e) => error!(source = %source, error = %e, "discover failed"),
-            }
-
-            // H1: serialize the global match write path across sources.
-            // Lock is acquired in its own scope so it drops as soon as
-            // `match_one` returns, never held across discover.
-            {
-                let _lock = match_lock.lock().await;
-                match careerai_pipeline::match_one(root.as_path(), cfg.as_ref(), &source).await {
-                    Ok(report) => info!(
-                        source = %source,
-                        filtered_out = report.filtered_out,
-                        shortlisted = report.shortlisted,
-                        below_threshold = report.also_filtered,
-                        "match ok",
-                    ),
-                    Err(e) => error!(source = %source, error = %e, "match failed"),
-                }
-            }
-
-            #[cfg(feature = "test-hooks")]
-            if let Some(counter) = &tick_counter {
-                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-        })
-    })
-}
-
-/// Build the submit cron job. The daemon hard-pins `auto_submit=false` —
-/// live submission is operator-driven only (`careerai apply --auto-submit
-/// ...`). This invariant is non-negotiable: the daemon must never live-submit
-/// from a cron tick. The `debug_assert!` below documents the contract and
-/// trips loudly in test/dev builds if someone ever flips the flag.
-fn build_submit_job(
-    cron_expr: &str,
-    root: Arc<PathBuf>,
-    cfg: Arc<CoreConfig>,
-    #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<AtomicUsize>>,
-) -> Result<Job, JobSchedulerError> {
-    Job::new_async(cron_expr, move |_uuid, _scheduler| {
-        let root = Arc::clone(&root);
-        let cfg = Arc::clone(&cfg);
-        #[cfg(feature = "test-hooks")]
-        let tick_counter = tick_counter.clone();
-        Box::pin(async move {
-            // SAFETY INVARIANT (see CLAUDE.md "Submit safety invariant"):
-            // the scheduler tick must always force dry-run. We pass
-            // `Some(false)` to override whatever `cfg.submit.auto_submit`
-            // says — operators can still flip live mode for one-shot CLI
-            // runs, but the daemon never live-submits.
-            let auto_submit_override: Option<bool> = Some(false);
-            debug_assert!(
-                matches!(auto_submit_override, Some(false)),
-                "scheduler submit job must always be dry-run",
-            );
-
-            match careerai_pipeline::apply_all(
-                root.as_path(),
-                cfg.as_ref(),
-                None, // no source filter — sweep every eligible application
-                auto_submit_override,
-            )
-            .await
-            {
-                Ok(outcomes) => info!(submitted = outcomes.len(), "apply tick",),
-                Err(e) => error!(error = %e, "apply tick failed"),
-            }
-
-            #[cfg(feature = "test-hooks")]
-            if let Some(counter) = &tick_counter {
-                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-        })
-    })
-}
-
-/// Compose the effective per-source cron map from `cfg.scheduler.cadence`
-/// plus per-source overrides on enabled `sources.mcp[*]` entries.
-///
-/// Resolution order, highest priority last:
-///   1. `cfg.scheduler.cadence.<name>` — global cadence map.
-///   2. `cfg.sources.mcp[name=<name>].cron` (when enabled and `Some`) —
-///      per-source override.
-///
-/// Disabled MCP sources (`enabled: false`) are ignored entirely **and any
-/// matching `scheduler.cadence` entry is removed** before per-source
-/// overrides are applied. That way flipping `enabled: false` on an MCP
-/// source can never accidentally leave a stale global cadence active —
-/// disabling an MCP cancels its cron unconditionally. ATS sources have no
-/// per-source `cron` field today; if that ever lands, extend this helper
-/// rather than the caller.
-fn effective_cadence(cfg: &CoreConfig) -> std::collections::HashMap<String, String> {
-    let mut cadence: std::collections::HashMap<String, String> = cfg.scheduler.cadence.clone();
-    // First pass: drop cadence entries for disabled MCP sources so a stale
-    // `scheduler.cadence` value cannot survive `enabled: false`.
-    for mcp in &cfg.sources.mcp {
-        if !mcp.enabled && cadence.remove(&mcp.name).is_some() {
-            info!(
-                source = %mcp.name,
-                "disabled mcp source removed stale scheduler.cadence entry",
-            );
-        }
-    }
-    // Second pass: apply per-source cron overrides for enabled MCP sources.
-    for mcp in &cfg.sources.mcp {
-        if !mcp.enabled {
-            continue;
-        }
-        if let Some(cron_expr) = &mcp.cron {
-            if let Some(prev) = cadence.insert(mcp.name.clone(), cron_expr.clone()) {
-                if &prev != cron_expr {
-                    info!(
-                        source = %mcp.name,
-                        global = %prev,
-                        per_source = %cron_expr,
-                        "mcp source cron overrides scheduler.cadence",
-                    );
-                }
-            } else {
-                info!(
-                    source = %mcp.name,
-                    cron = %cron_expr,
-                    "mcp source cron registered (no cadence entry)",
-                );
-            }
-        }
-    }
-    cadence
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    /// Load a fresh `CoreConfig` backed by the embedded defaults — same
-    /// pattern `careerai-core` uses in its own unit tests. Returns the
-    /// config plus the tempdir guarding the scratch root, so the dir
-    /// outlives the test body.
-    fn embedded_cfg() -> (tempfile::TempDir, CoreConfig) {
-        let tmp = tempfile::tempdir().unwrap();
-        let cfg = CoreConfig::load(tmp.path()).unwrap();
-        (tmp, cfg)
-    }
-
-    #[tokio::test]
-    async fn from_config_with_embedded_defaults_succeeds() {
-        let (tmp, cfg) = embedded_cfg();
-        // Embedded defaults declare a non-empty cadence map, so this also
-        // exercises the per-source registration branch.
-        assert!(!cfg.scheduler.cadence.is_empty());
-        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
-        assert!(sched.is_ok(), "embedded cadence must register cleanly");
-    }
-
-    #[tokio::test]
-    async fn from_config_with_empty_cadence_succeeds() {
-        let (tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
-        assert!(sched.is_ok(), "empty cadence must not be an error");
-    }
-
-    #[tokio::test]
-    async fn from_config_skips_invalid_cron_without_failing() {
-        // A clearly invalid cron string must not abort startup. Other
-        // (valid) sources should still register.
-        let (tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.scheduler
-            .cadence
-            .insert("greenhouse".into(), "0 0 */1 * * *".into());
-        cfg.scheduler
-            .cadence
-            .insert("bogus".into(), "this is not a cron expression".into());
-        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
-        assert!(
-            sched.is_ok(),
-            "invalid cron in one source must not fail the scheduler",
-        );
-    }
-
-    #[tokio::test]
-    async fn start_then_immediate_shutdown_is_clean() {
-        let (tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.scheduler
-            .cadence
-            .insert("greenhouse".into(), "0 0 */1 * * *".into());
-
-        let mut sched = Scheduler::from_config(tmp.path(), &cfg).await.unwrap();
-        sched.start().await.unwrap();
-        // Use the public shutdown API — same path `run_until_shutdown` uses.
-        sched.shutdown().await.expect("shutdown should not error");
-    }
-
-    /// Helper: minimal enabled MCP source with the given name + cron.
-    fn mcp_source_with_cron(
-        name: &str,
-        cron: Option<&str>,
-    ) -> careerai_core::config::McpSourceConfig {
-        careerai_core::config::McpSourceConfig {
-            name: name.to_owned(),
-            enabled: true,
-            submit_enabled: false,
-            cron: cron.map(str::to_owned),
-            rate_per_minute: 0,
-            mcp: careerai_core::config::McpTransportConfig {
-                command: "/bin/true".to_owned(),
-                ..Default::default()
-            },
-        }
-    }
-
-    #[test]
-    fn effective_cadence_uses_mcp_per_source_cron_when_set() {
-        let (_tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.sources.mcp.clear();
-        cfg.sources
-            .mcp
-            .push(mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *")));
-
-        let cadence = effective_cadence(&cfg);
-        assert_eq!(
-            cadence.get("linkedin-mcp").map(String::as_str),
-            Some("0 */2 * * * *"),
-            "per-source cron must register when no global cadence entry exists",
-        );
-    }
-
-    #[test]
-    fn effective_cadence_per_source_cron_overrides_global() {
-        let (_tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.scheduler
-            .cadence
-            .insert("linkedin-mcp".into(), "0 0 */1 * * *".into());
-        cfg.sources.mcp.clear();
-        cfg.sources
-            .mcp
-            .push(mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *")));
-
-        let cadence = effective_cadence(&cfg);
-        assert_eq!(
-            cadence.get("linkedin-mcp").map(String::as_str),
-            Some("0 */2 * * * *"),
-            "per-source cron must beat the global cadence entry",
-        );
-    }
-
-    #[test]
-    fn effective_cadence_falls_back_to_cadence_map_when_cron_unset() {
-        let (_tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.scheduler
-            .cadence
-            .insert("linkedin-mcp".into(), "0 0 */1 * * *".into());
-        cfg.sources.mcp.clear();
-        cfg.sources
-            .mcp
-            .push(mcp_source_with_cron("linkedin-mcp", None));
-
-        let cadence = effective_cadence(&cfg);
-        assert_eq!(
-            cadence.get("linkedin-mcp").map(String::as_str),
-            Some("0 0 */1 * * *"),
-            "with no per-source cron, the global cadence wins",
-        );
-    }
-
-    #[test]
-    fn effective_cadence_skips_disabled_mcp_sources() {
-        let (_tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.sources.mcp.clear();
-        let mut s = mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *"));
-        s.enabled = false;
-        cfg.sources.mcp.push(s);
-
-        let cadence = effective_cadence(&cfg);
-        assert!(
-            cadence.is_empty(),
-            "disabled mcp source must not register a cron entry",
-        );
-    }
-
-    #[test]
-    fn disabled_mcp_removes_global_cadence_entry() {
-        // Regression: a disabled MCP source must drop any matching
-        // `scheduler.cadence` entry, not just skip its own per-source cron.
-        // Previously a flipped-off MCP could leave a stale global cron alive.
-        let (_tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.scheduler
-            .cadence
-            .insert("linkedin-jobs".into(), "0 */6 * * *".into());
-        cfg.sources.mcp.clear();
-        let mut s = mcp_source_with_cron("linkedin-jobs", None);
-        s.enabled = false;
-        cfg.sources.mcp.push(s);
-
-        let cadence = effective_cadence(&cfg);
-        assert!(
-            !cadence.contains_key("linkedin-jobs"),
-            "disabled mcp source must drop the matching scheduler.cadence entry",
-        );
-    }
-
-    #[tokio::test]
-    async fn from_config_registers_mcp_per_source_cron() {
-        // End-to-end check: per-source cron flows all the way into
-        // `Scheduler::from_config` and the scheduler builds cleanly.
-        let (tmp, mut cfg) = embedded_cfg();
-        cfg.scheduler.cadence.clear();
-        cfg.sources.mcp.clear();
-        cfg.sources
-            .mcp
-            .push(mcp_source_with_cron("linkedin-mcp", Some("0 */2 * * * *")));
-
-        let sched = Scheduler::from_config(tmp.path(), &cfg).await;
-        assert!(sched.is_ok(), "mcp per-source cron must register cleanly");
     }
 }
