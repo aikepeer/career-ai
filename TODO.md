@@ -53,9 +53,8 @@ clippy + fmt` clean before merge.
 - [x] **`crates/careerai-core/src/config.rs`** (914→99 LOC) → split by
   section: `config/{dashboard,llm,match_,rates,render,scheduler,
   sources,submit}.rs`. Top-level re-exports. ✓
-- [ ] **`crates/careerai-tailor/src/diff.rs`** (894 LOC) → `diff/
-  schema.rs` (DiffDoc + ops), `diff/parse.rs`, `diff/validate.rs`,
-  `diff/apply.rs`.
+- [x] **`crates/careerai-tailor/src/diff.rs`** (894→29 LOC) → `diff/
+  {schema.rs,parse.rs,validate.rs,apply.rs}`. ✓
 - [x] **`crates/careerai-tailor/src/guardrails.rs`** (825→23 LOC) →
   `guardrails/{tokens.rs,common_caps.rs,validator.rs}`. ✓
 - [x] **`crates/careerai-llm/src/claude_cli.rs`** (976→35 LOC) →
