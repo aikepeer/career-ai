@@ -15,14 +15,14 @@ clippy + fmt` clean before merge.
 
 ### Tier 1 — over 1000 LOC (do these first)
 
-- [ ] **`crates/careerai-cli/src/main.rs`** (1499 LOC) → split into
+- [x] **`crates/careerai-cli/src/main.rs`** (1499→188 LOC) → split into
   per-command modules under `src/commands/`:
   - `commands/profile.rs` — `run_profile`, `profile_import`,
     `profile_show`, `profile_validate`, `profile_yaml_path`,
-    `detect_stale_skills_schema`, `anthropic_key_reachable`,
-    `llm_backend_maybe_available`, `run_profile_import_with_llm`,
+    `detect_stale_skills_schema`
+  - `commands/profile_llm.rs` — `run_profile_import_with_llm`,
+    `anthropic_key_reachable`, `llm_backend_maybe_available`,
     `strip_provider_prefix`, plus the inline `profile_llm_adapter` mod
-    (~600 LOC, biggest cohesive group)
   - `commands/llm.rs` — `run_llm_probe`, `probe_forced_resolve`
   - `commands/mcp.rs` — `run_mcp_probe`
   - `commands/notify.rs` — `run_notify_test`
@@ -34,9 +34,9 @@ clippy + fmt` clean before merge.
   - `commands/inspect.rs` — `run_inspect`
   - `commands/tailor.rs` — `map_tailor_error_to_exit_code`
   - `commands/render.rs` — `map_render_error_to_exit_code`
-  - **Stay in `main.rs`**: `Cli`/`Command` clap structs, `main`,
-    `init_tracing`, `load_cfg`, dispatcher, the inline `mod tests` arg-
-    parser tests (test the parser, not handlers).
+  - `cli_def.rs` (145 LOC) — `Cli`/`Command` clap structs, `init_tracing`
+  - `main_tests.rs` (235 LOC) — arg-parser tests
+  - **Stay in `main.rs`**: `main`, `load_cfg`, dispatcher (188 LOC). ✓
 
 - [ ] **`crates/careerai-pipeline/src/lib.rs`** (1051 LOC) → split by
   pipeline stage: `discover.rs`, `match_.rs` (or rename), `tailor.rs`,
