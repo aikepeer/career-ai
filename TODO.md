@@ -38,10 +38,11 @@ clippy + fmt` clean before merge.
   - `main_tests.rs` (235 LOC) — arg-parser tests
   - **Stay in `main.rs`**: `main`, `load_cfg`, dispatcher (188 LOC). ✓
 
-- [ ] **`crates/careerai-pipeline/src/lib.rs`** (1051 LOC) → split by
-  pipeline stage: `discover.rs`, `match_.rs` (or rename), `tailor.rs`,
-  `render.rs`, `apply.rs`. Keep `lib.rs` as thin re-exports + the
-  shared `DiscoveryReport` / `MatchReport` types.
+- [x] **`crates/careerai-pipeline/src/lib.rs`** (848→200 LOC) → split by
+  pipeline stage: `discover.rs` (74 LOC), `match_.rs` (257 LOC),
+  `tailor.rs` (155 LOC), `render.rs` (122 LOC). `apply.rs`,
+  `digest.rs`, `inspect.rs`, `linkedin.rs` already extracted earlier.
+  `lib.rs` keeps shared helpers, types, and re-exports. ✓
 
 - [x] **`crates/careerai-llm/src/backend.rs`** (1017→154 LOC) → split
   into `backend/{resolution.rs,probe.rs,tests.rs}`. ✓

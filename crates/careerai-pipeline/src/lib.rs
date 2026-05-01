@@ -2,57 +2,48 @@
 //!
 //! Owns the linear-state-machine entry points the CLI and scheduler both
 //! drive. Lives in its own crate (rather than `careerai-core`) because the
-//! implementation crates it pulls in — `careerai-db`, `careerai-sources`,
-//! `careerai-match`, `careerai-tailor`, `careerai-render`, `careerai-submit`,
-//! `careerai-llm`, `careerai-profile` — all already depend on `careerai-core`
-//! for shared types. Putting orchestration in core would create a cycle.
+//! implementation crates it pulls in already depend on `careerai-core` for
+//! shared types. Putting orchestration in core would create a cycle.
 //!
-//! Architectural rule: this crate is the *only* place where the pipeline
-//! stages get composed end-to-end. Both `careerai-cli` (for one-shot
-//! subcommands) and `careerai-scheduler` (for cron ticks) call into here.
-//! Neither of them should reach past this layer into the implementation
-//! crates directly.
+//! Each pipeline stage lives in its own submodule so `lib.rs` stays under
+//! the project's 300-LOC cap. Shared helpers (`open_pool`, `build_sources`,
+//! `load_profile`) and report types stay here.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tracing::{info, warn};
 
 use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
-use careerai_db::models::{NewArtifact, NewListing};
 use careerai_db::{pool_from_path, queries, SqlitePool};
-use careerai_llm::mock::MockLlm;
-use careerai_match::{
-    classify, flatten_profile, rank_all, score_histogram, split_at_threshold, Decision,
-    FilterRules, JaccardScorer,
-};
-use careerai_notify::{NotifyEvent, Pipeline as NotifyPipeline, Severity};
 use careerai_profile::Profile;
-use careerai_render::render_application;
 use careerai_sources::{
-    GreenhouseSource, IndeedRssSource, LeverSource, McpJobsSource, NaukriSource, RawListing,
-    RemoteOkSource, RemotiveSource, Source,
+    GreenhouseSource, IndeedRssSource, LeverSource, McpJobsSource, NaukriSource, RemoteOkSource,
+    RemotiveSource, Source,
 };
-use careerai_tailor::model::{CoverLetter, ResumeView};
-use careerai_tailor::tailor_for_listing;
 
-// Pipeline-stage submodules. Each owns one stage end-to-end and stays
-// under the project's 300-LOC cap. lib.rs keeps `discover_*`, `match_*`,
-// `tailor_*`, `render_*`, the shared `DiscoveryReport`/`MatchReport`/...
-// types + helpers, and re-exports the stage functions so callers can
-// continue using `careerai_pipeline::apply_one(...)` etc.
+// Pipeline-stage submodules.
 mod apply;
 mod digest;
+mod discover;
 mod inspect;
 mod linkedin;
+#[path = "match_.rs"]
+mod match_;
+mod render;
+mod tailor;
 
+// Re-exports so callers can use `careerai_pipeline::apply_one(...)` etc.
 pub use apply::{applied_show, apply_all, apply_one, AppliedOutcome};
 pub use digest::digest_summary;
+pub use discover::{discover_all, discover_one};
 pub use inspect::{inspect_show, InspectReport};
 pub use linkedin::{confirm_linkedin_submit, list_drafted_linkedin};
+pub use match_::{match_all, match_one};
+pub use render::render_one;
+pub use tailor::tailor_one;
 
 pub async fn open_pool(root: &Path) -> Result<SqlitePool> {
     let path = root.join("data").join("careerai.sqlite");
@@ -62,7 +53,7 @@ pub async fn open_pool(root: &Path) -> Result<SqlitePool> {
 }
 
 /// Build the list of configured source adapters from `CoreConfig`.
-fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
+pub(crate) fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     let mut out: Vec<Arc<dyn Source>> = Vec::new();
     for company in &cfg.sources.greenhouse.companies {
         out.push(Arc::new(GreenhouseSource::new(company.clone())));
@@ -109,12 +100,6 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
         }
         out.push(Arc::new(McpJobsSource::new(mcp_cfg.clone())));
     }
-    // LinkedIn browser-driven discovery (PR #21). Only registered
-    // when both the `browser` feature is compiled in AND the user
-    // has opted in via `sources.linkedin_browser.enabled = true`.
-    // The runtime adapter pulls in chromiumoxide + the M5
-    // BrowserSession, so the cfg-gate keeps the default `cargo
-    // build` lean for hosts without Chromium.
     #[cfg(feature = "browser")]
     {
         if cfg.sources.linkedin_browser.enabled {
@@ -135,69 +120,16 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     out
 }
 
-pub async fn discover_all(
-    root: &Path,
-    cfg: &CoreConfig,
-    source_filter: &[String],
-) -> Result<DiscoveryReport> {
-    let pool = open_pool(root).await?;
-    let mut sources = build_sources(cfg);
-    if !source_filter.is_empty() {
-        sources.retain(|s| source_filter.iter().any(|f| f == s.name()));
-    }
-    if sources.is_empty() {
-        warn!("no sources enabled — edit config/default.yaml or config/local.yaml");
-        return Ok(DiscoveryReport::default());
-    }
-
-    let mut report = DiscoveryReport::default();
-    for source in sources {
-        let name = source.name();
-        match source.discover().await {
-            Ok(listings) => {
-                info!(source = name, count = listings.len(), "discovered");
-                report.fetched += listings.len();
-                for raw in listings {
-                    let new = NewListing {
-                        source: raw.source,
-                        external_id: raw.external_id,
-                        title: raw.title,
-                        company: raw.company,
-                        location: raw.location,
-                        url: raw.url,
-                        description: raw.description,
-                        raw_json: raw.raw_json,
-                    };
-                    match queries::insert_or_ignore(&pool, &new).await {
-                        Ok((_, true)) => report.new_rows += 1,
-                        Ok((_, false)) => report.duplicates += 1,
-                        Err(e) => {
-                            warn!(error = %e, "persist failed");
-                            report.errors += 1;
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                warn!(source = name, error = %e, "source failed");
-                report.errors += 1;
-            }
-        }
-    }
-    Ok(report)
+pub(crate) fn load_profile(root: &Path) -> Result<Profile> {
+    let path = root.join("profile").join("profile.yaml");
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    Profile::from_yaml(&text).context("parse profile yaml")
 }
 
-/// Run discovery for a single configured source. Used by the scheduler's
-/// per-source cron tick — each tick fires this for exactly one source.
-///
-/// Internally delegates to `discover_all` with a one-element filter so the
-/// adapter-construction logic stays in one place. Returns an empty report
-/// (with no error) if `source` doesn't match any enabled adapter, matching
-/// the behavior of `discover_all` with an unmatched filter.
-pub async fn discover_one(root: &Path, cfg: &CoreConfig, source: &str) -> Result<DiscoveryReport> {
-    let filter = [source.to_owned()];
-    discover_all(root, cfg, &filter).await
-}
+// ---------------------------------------------------------------------------
+// Shared report types. Defined here (not in submodules) so the MCP server,
+// CLI, and scheduler can import them without reaching into submodule paths.
 
 #[derive(Debug, Default)]
 pub struct DiscoveryReport {
@@ -208,40 +140,19 @@ pub struct DiscoveryReport {
 }
 
 /// Per-source activity counts within the digest window.
-///
-/// `#[non_exhaustive]` reserves the right to add per-source breakdowns
-/// (submitted, failed, etc.) without breaking exhaustive struct patterns
-/// at call sites.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct SourceCounts {
-    /// Distinct listings from this source that had any state transition
-    /// within the window.
     pub total: usize,
 }
 
-/// Daily-digest snapshot returned by `digest_summary`. All count fields
-/// are "distinct listings that reached this state within `since`" — so a
-/// listing that moved Discovered → Shortlisted → Submitted in the window
-/// contributes once each to `discovered`, `shortlisted`, and `submitted`.
-///
-/// **Counting invariant:** `matched` is a *superset* of `shortlisted`.
-/// `matched = (listings that reached Shortlisted) + (listings that
-/// reached FilteredOut)`. The CLI prints them side-by-side so the
-/// operator can read `matched: 12   shortlisted: 8` as "12 listings
-/// were classified, 8 of them survived the filter".
-///
-/// `#[non_exhaustive]` so report fields can be added without breaking
-/// callers that pattern-match exhaustively.
+/// Daily-digest snapshot returned by `digest_summary`.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct DigestReport {
-    /// ISO-8601 UTC timestamp marking the start of the window.
     pub since_iso: String,
     pub discovered: usize,
-    /// Listings that reached either `shortlisted` or `filtered_out` —
-    /// i.e. matcher activity (kept + rejected combined). Superset of
-    /// `shortlisted`.
+    /// Listings that reached either `shortlisted` or `filtered_out`.
     pub matched: usize,
     pub shortlisted: usize,
     pub drafted: usize,
@@ -249,282 +160,8 @@ pub struct DigestReport {
     pub failed: usize,
     pub responded: usize,
     pub per_source: std::collections::HashMap<String, SourceCounts>,
-    /// Most recent `events.created_at` in the database, formatted as ISO-
-    /// 8601 UTC. `None` when there are no events at all.
     pub last_tick: Option<String>,
-    /// Human-readable warnings about credential expiry, missing
-    /// keyring entries, or unparseable cookies, e.g.
-    /// `"li_at expires in 1d 6h"`. The pipeline crate leaves this
-    /// empty; the CLI populates it via `careerai_submit::credentials`.
-    /// Held here (rather than in a CLI-side wrapper) so other
-    /// consumers of `digest_summary` (future web UI, API) get the
-    /// same shape without each re-implementing the populate step.
     pub cookie_warnings: Vec<String>,
-}
-
-// Orchestrator function; splitting it would just shuffle the same
-// logic across helpers without clarifying it.
-#[allow(clippy::too_many_lines)]
-pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<MatchReport> {
-    let pool = open_pool(root).await?;
-    let profile = load_profile(root)?;
-    let rules = FilterRules::load(root).context("load rules")?;
-
-    // Surface the must_include_skills filter at the top of every match
-    // run. Operators who typo a skill in local.yaml otherwise see
-    // "filtered_out: 100" with zero diagnostic. This one log line tells
-    // them which filter is active before any work starts.
-    if !cfg.matching.must_include_skills.is_empty() {
-        info!(
-            skills = ?cfg.matching.must_include_skills,
-            "must_include_skills filter active — listings missing all of these will be rejected before scoring",
-        );
-    }
-
-    let discovered = queries::list_by_state(&pool, ListingState::Discovered, 10_000)
-        .await
-        .context("list discovered")?;
-    info!(count = discovered.len(), "matching against profile");
-
-    let raws: Vec<RawListing> = discovered
-        .iter()
-        .map(|l| RawListing {
-            source: l.source.clone(),
-            external_id: l.external_id.clone(),
-            title: l.title.clone(),
-            company: l.company.clone(),
-            location: l.location.clone(),
-            url: l.url.clone(),
-            description: l.description.clone(),
-            raw_json: l.raw_json.clone(),
-        })
-        .collect();
-
-    // Apply hard filters first. When not in tune mode, rejected listings are
-    // transitioned to `FilteredOut` so they are skipped on subsequent runs.
-    let mut post_filter: Vec<(&careerai_db::models::Listing, RawListing)> = Vec::new();
-    let mut filtered_out = 0usize;
-    for (db_row, raw) in discovered.iter().zip(raws) {
-        match classify(&raw, cfg, &rules) {
-            Decision::Keep => post_filter.push((db_row, raw)),
-            Decision::Reject(reason) => {
-                filtered_out += 1;
-                if !tune {
-                    queries::transition(&pool, &db_row.id, ListingState::FilteredOut, Some(reason))
-                        .await?;
-                }
-            }
-        }
-    }
-
-    let profile_text = flatten_profile(&profile);
-    let raws_only: Vec<RawListing> = post_filter.iter().map(|(_, r)| r.clone()).collect();
-    let ranked = rank_all(&JaccardScorer, &profile_text, &raws_only);
-
-    if tune {
-        // Tuning mode: don't persist, just return the histogram so the CLI
-        // can print it.
-        return Ok(MatchReport {
-            filtered_out,
-            shortlisted: 0,
-            also_filtered: 0,
-            histogram: score_histogram(&ranked),
-        });
-    }
-
-    let threshold = cfg.matching.score_threshold;
-    let (keep, drop) = split_at_threshold(ranked, threshold);
-
-    // Build the notify pipeline once per match run, not per listing.
-    // `from_config` returning Err (e.g. malformed channel config) is
-    // logged and treated as "no channels" so a config bug never kills
-    // a match run; high-score notifications are best-effort.
-    let notify = match NotifyPipeline::from_config(&cfg.notify) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            warn!(error = %e, "notify pipeline init failed; skipping high-score alerts");
-            None
-        }
-    };
-    let notify_threshold = cfg.matching.notify_threshold;
-
-    for scored in &keep {
-        let db_row = post_filter
-            .iter()
-            .find(|(_, r)| {
-                r.source == scored.listing.source && r.external_id == scored.listing.external_id
-            })
-            .map(|(d, _)| d)
-            .context("bug: scored listing missing from post_filter map")?;
-        queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
-        queries::transition(
-            &pool,
-            &db_row.id,
-            ListingState::Shortlisted,
-            Some(&format!("score={:.3}", scored.score)),
-        )
-        .await?;
-
-        // Fire HighScoreMatch when score crosses the configured
-        // notify threshold. We only get here for listings that are
-        // currently in `discovered` state (match_all only walks
-        // discovered rows), so this naturally won't double-fire on
-        // re-runs — once a listing is shortlisted, it's no longer
-        // a candidate for re-scoring without manual rollback.
-        if let Some(pipe) = &notify {
-            fire_high_score_if_above(
-                pipe,
-                &db_row.id,
-                &scored.listing.title,
-                &scored.listing.company,
-                scored.score,
-                notify_threshold,
-            )
-            .await;
-        }
-    }
-
-    for scored in &drop {
-        let db_row = post_filter
-            .iter()
-            .find(|(_, r)| {
-                r.source == scored.listing.source && r.external_id == scored.listing.external_id
-            })
-            .map(|(d, _)| d)
-            .context("bug: below-threshold listing missing")?;
-        queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
-        queries::transition(
-            &pool,
-            &db_row.id,
-            ListingState::FilteredOut,
-            Some(&format!("below threshold ({:.3})", scored.score)),
-        )
-        .await?;
-    }
-
-    Ok(MatchReport {
-        filtered_out,
-        shortlisted: keep.len(),
-        also_filtered: drop.len(),
-        histogram: [(0.0, 0); 10],
-    })
-}
-
-/// Fire a `HighScoreMatch` notification when `score >= threshold`.
-/// Pulled out so the threshold check is unit-testable against a
-/// mock channel without standing up a full DB + match run.
-/// Returns whether an event was fired.
-async fn fire_high_score_if_above(
-    pipe: &NotifyPipeline,
-    listing_id: &str,
-    title: &str,
-    company: &str,
-    score: f32,
-    threshold: f32,
-) -> bool {
-    if score < threshold {
-        return false;
-    }
-    pipe.fire(
-        NotifyEvent::HighScoreMatch {
-            listing_id: listing_id.to_string(),
-            title: title.to_string(),
-            company: company.to_string(),
-            score,
-        },
-        Severity::Warning,
-    )
-    .await;
-    true
-}
-
-#[cfg(test)]
-#[allow(clippy::expect_used)]
-mod high_score_notify_tests {
-    use super::*;
-    use async_trait::async_trait;
-    use careerai_notify::Notifier;
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Debug, Default)]
-    struct CapturingNotifier {
-        captured: Mutex<Vec<NotifyEvent>>,
-    }
-
-    #[async_trait]
-    impl Notifier for CapturingNotifier {
-        fn name(&self) -> &'static str {
-            "capturing"
-        }
-        async fn notify(
-            &self,
-            event: &NotifyEvent,
-            _severity: Severity,
-        ) -> std::result::Result<(), careerai_notify::NotifyError> {
-            self.captured.lock().expect("lock").push(event.clone());
-            Ok(())
-        }
-    }
-
-    fn pipeline_with_capture() -> (NotifyPipeline, Arc<CapturingNotifier>) {
-        let cap = Arc::new(CapturingNotifier::default());
-        let pipe = NotifyPipeline::with_channels(vec![cap.clone()], Severity::Info);
-        (pipe, cap)
-    }
-
-    #[tokio::test]
-    async fn score_above_threshold_fires_event() {
-        let (pipe, cap) = pipeline_with_capture();
-        let fired =
-            fire_high_score_if_above(&pipe, "lst-1", "ML Engineer", "Acme", 0.95, 0.85).await;
-        assert!(fired);
-        let captured = cap.captured.lock().expect("lock");
-        assert_eq!(captured.len(), 1);
-        match &captured[0] {
-            NotifyEvent::HighScoreMatch {
-                listing_id,
-                title,
-                company,
-                score,
-            } => {
-                assert_eq!(listing_id, "lst-1");
-                assert_eq!(title, "ML Engineer");
-                assert_eq!(company, "Acme");
-                assert!((score - 0.95).abs() < 1e-6);
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn score_at_threshold_fires_event() {
-        let (pipe, cap) = pipeline_with_capture();
-        let fired = fire_high_score_if_above(&pipe, "lst-2", "T", "C", 0.85, 0.85).await;
-        assert!(fired);
-        assert_eq!(cap.captured.lock().expect("lock").len(), 1);
-    }
-
-    #[tokio::test]
-    async fn score_below_threshold_does_not_fire() {
-        let (pipe, cap) = pipeline_with_capture();
-        let fired = fire_high_score_if_above(&pipe, "lst-3", "T", "C", 0.84, 0.85).await;
-        assert!(!fired);
-        assert!(cap.captured.lock().expect("lock").is_empty());
-    }
-}
-
-/// Per-source match wrapper used by the scheduler's cron tick.
-///
-/// Matching is naturally global — `match_all` walks every `discovered`-state
-/// row regardless of source, and the filter/score logic doesn't read the
-/// `source` column. So `match_one` just delegates to `match_all`. The
-/// `_source` argument is accepted for symmetry with `discover_one` and to
-/// give the scheduler a place to attach span context per tick. Keeping match
-/// global also means a tick that fired discover for source A still rescores
-/// any listings from source B that arrived earlier — desirable when the
-/// profile or rules have been edited between ticks.
-pub async fn match_one(root: &Path, cfg: &CoreConfig, _source: &str) -> Result<MatchReport> {
-    match_all(root, cfg, false).await
 }
 
 #[derive(Debug, Default)]
@@ -533,21 +170,6 @@ pub struct MatchReport {
     pub shortlisted: usize,
     pub also_filtered: usize,
     pub histogram: [(f32, usize); 10],
-}
-
-pub async fn shortlist_show(root: &Path, limit: i64) -> Result<Vec<careerai_db::Listing>> {
-    let pool = open_pool(root).await?;
-    let rows = queries::list_by_state(&pool, ListingState::Shortlisted, limit)
-        .await
-        .context("list shortlisted")?;
-    Ok(rows)
-}
-
-fn load_profile(root: &Path) -> Result<Profile> {
-    let path = root.join("profile").join("profile.yaml");
-    let text =
-        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    Profile::from_yaml(&text).context("parse profile yaml")
 }
 
 #[derive(Debug)]
@@ -568,281 +190,10 @@ pub struct RenderedOutcome {
     pub bytes: BTreeMap<PathBuf, u64>,
 }
 
-/// Resolve the LLM fixtures directory. Honors the `CAREERAI_LLM_FIXTURES_DIR`
-/// environment override, else falls back to `<root>/data/cache/llm/fixtures`.
-fn fixtures_dir(root: &Path) -> PathBuf {
-    std::env::var("CAREERAI_LLM_FIXTURES_DIR").map_or_else(
-        |_| root.join("data").join("cache").join("llm").join("fixtures"),
-        PathBuf::from,
-    )
-}
-
-/// Returns true when the caller has opted in to a live LLM backend via
-/// `CAREERAI_LLM_LIVE=1`. Any other value (including unset) means use
-/// fixtures. Centralized so the gate logic is unit-testable without
-/// spinning up a DB.
-fn live_llm_opt_in() -> bool {
-    std::env::var("CAREERAI_LLM_LIVE").ok().as_deref() == Some("1")
-}
-
-/// Tailor a shortlisted listing into an application row + persisted payload.
-///
-/// Backend selection: `CAREERAI_LLM_LIVE=1` opts in to a live backend
-/// (`Backend::resolve` picks CLI vs API per `cfg.llm.backend`). Without
-/// the env var, falls back to the `MockLlm` fixtures dir at
-/// `CAREERAI_LLM_FIXTURES_DIR` (default `<root>/data/cache/llm/fixtures`)
-/// — this keeps integration tests deterministic even on dev boxes with
-/// a real `claude` install or `ANTHROPIC_API_KEY`.
-pub async fn tailor_one(
-    root: &Path,
-    cfg: &CoreConfig,
-    listing_id: &str,
-) -> Result<TailoredOutcome> {
+pub async fn shortlist_show(root: &Path, limit: i64) -> Result<Vec<careerai_db::Listing>> {
     let pool = open_pool(root).await?;
-
-    let listing = match queries::find_by_id(&pool, listing_id).await {
-        Ok(l) => l,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("listing not found: {listing_id}");
-        }
-        Err(e) => return Err(e).context("fetch listing"),
-    };
-
-    if listing.state != ListingState::Shortlisted.as_str() {
-        anyhow::bail!(
-            "listing {listing_id} is in state '{}'; expected 'shortlisted'",
-            listing.state
-        );
-    }
-
-    let profile = load_profile(root)?;
-
-    info!(
-        target = "tailor",
-        listing_id = %listing.id,
-        title = %listing.title,
-        company = %listing.company,
-        "tailoring listing"
-    );
-
-    // Backend selection rules:
-    //
-    // * `CAREERAI_LLM_LIVE=1` → resolve a live backend (CLI or API per
-    //   `cfg.llm.backend`). Falls back to fixtures only on resolve error.
-    // * Unset → use `MockLlm::from_dir(<fixtures>)` deterministically.
-    //   This keeps integration tests (e.g. `tailor_render_it.rs`) on a
-    //   fixed code path even on dev boxes that have an authed `claude`
-    //   binary or a populated `ANTHROPIC_API_KEY`.
-    //
-    // The env var is the historical contract; the previous revision
-    // dropped it and made every call attempt a live resolve, which
-    // caused flaky integration runs on machines with `claude` on PATH.
-    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
-    {
-        if live_llm_opt_in() {
-            use std::sync::Arc;
-            let cache_root = if cfg.llm.cache_dir.is_empty() {
-                root.join("data").join("cache").join("llm")
-            } else {
-                let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
-                if p.is_absolute() {
-                    p
-                } else {
-                    root.join(p)
-                }
-            };
-            let cache = Arc::new(careerai_llm::Cache::new(cache_root));
-            match careerai_llm::Backend::resolve(cfg.llm.backend, &cfg.llm, cache).await {
-                Ok(backend) => {
-                    let outcome =
-                        tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm)
-                            .await
-                            .context("tailor_for_listing")?;
-                    return Ok(TailoredOutcome {
-                        application_id: outcome.application_id,
-                        listing_title: listing.title,
-                        company: listing.company,
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target = "tailor",
-                        error = %e,
-                        "live backend unavailable; falling back to MockLlm fixtures"
-                    );
-                }
-            }
-        }
-    }
-
-    let fixtures = fixtures_dir(root);
-    if !fixtures.is_dir() {
-        anyhow::bail!(
-            "no LLM fixtures at {}; either set CAREERAI_LLM_LIVE=1 (with a live \
-             backend compiled in) or provide fixtures via CAREERAI_LLM_FIXTURES_DIR \
-             / `<root>/data/cache/llm/fixtures/`",
-            fixtures.display()
-        );
-    }
-    let llm = MockLlm::from_dir(&fixtures)
-        .with_context(|| format!("load llm fixtures from {}", fixtures.display()))?;
-
-    let outcome = tailor_for_listing(&pool, &llm, &listing.id, &profile, &cfg.llm)
+    let rows = queries::list_by_state(&pool, ListingState::Shortlisted, limit)
         .await
-        .context("tailor_for_listing")?;
-
-    Ok(TailoredOutcome {
-        application_id: outcome.application_id,
-        listing_title: listing.title,
-        company: listing.company,
-    })
-}
-
-/// Render a tailored application to DOCX + PDF on disk, attach artifact rows,
-/// and transition both listing and application to `rendered`.
-pub async fn render_one(
-    root: &Path,
-    cfg: &CoreConfig,
-    application_id: &str,
-) -> Result<RenderedOutcome> {
-    let pool = open_pool(root).await?;
-
-    let application = match queries::find_application_by_id(&pool, application_id).await {
-        Ok(a) => a,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("application not found: {application_id}");
-        }
-        Err(e) => return Err(e).context("fetch application"),
-    };
-
-    if application.state != "tailored" {
-        anyhow::bail!(
-            "application {application_id} is in state '{}'; expected 'tailored'",
-            application.state
-        );
-    }
-
-    let payload = match queries::find_payload_by_application_id(&pool, application_id).await {
-        Ok(p) => p,
-        Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("application payload not found: {application_id}");
-        }
-        Err(e) => return Err(e).context("fetch application payload"),
-    };
-
-    let resume_view: ResumeView =
-        serde_json::from_str(&payload.resume_view_json).context("deserialize resume_view_json")?;
-    let cover_letter = CoverLetter {
-        body: payload.cover_letter_text.clone(),
-    };
-
-    let listing = queries::find_by_id(&pool, &application.listing_id)
-        .await
-        .context("fetch listing for application")?;
-    let profile = load_profile(root)?;
-
-    // Resolve artifacts_dir against `root` if it's relative so the CLI and
-    // integration tests share the same on-disk layout regardless of cwd.
-    let mut render_cfg = cfg.render.clone();
-    if render_cfg.artifacts_dir.is_relative() {
-        render_cfg.artifacts_dir = root.join(&render_cfg.artifacts_dir);
-    }
-
-    let artifacts = render_application(
-        &render_cfg,
-        &application.id,
-        &resume_view,
-        &cover_letter,
-        &profile.personal.name,
-        &listing.company,
-    )
-    .await
-    .context("render_application")?;
-
-    // Attach artifact rows for each rendered file. `bytes` is the canonical
-    // size map returned from render; we look each path up there.
-    for (kind, path) in [
-        ("resume_md", &artifacts.resume_md),
-        ("resume_docx", &artifacts.resume_docx),
-        ("resume_pdf", &artifacts.resume_pdf),
-        ("cover_md", &artifacts.cover_md),
-        ("cover_docx", &artifacts.cover_docx),
-    ] {
-        let size = artifacts.bytes.get(path).copied().unwrap_or_default();
-        queries::attach_artifact(
-            &pool,
-            &application.id,
-            &NewArtifact {
-                kind: kind.to_string(),
-                path: path.to_string_lossy().into_owned(),
-                bytes: i64::try_from(size).unwrap_or(i64::MAX),
-            },
-        )
-        .await
-        .with_context(|| format!("attach_artifact {kind}"))?;
-    }
-
-    queries::transition(
-        &pool,
-        &application.listing_id,
-        ListingState::Rendered,
-        Some(&format!("app={}", application.id)),
-    )
-    .await
-    .context("transition listing to rendered")?;
-    queries::set_application_state(&pool, &application.id, "rendered")
-        .await
-        .context("set application state=rendered")?;
-
-    Ok(RenderedOutcome {
-        application_id: application.id,
-        resume_md: artifacts.resume_md,
-        resume_docx: artifacts.resume_docx,
-        resume_pdf: artifacts.resume_pdf,
-        cover_md: artifacts.cover_md,
-        cover_docx: artifacts.cover_docx,
-        bytes: artifacts.bytes,
-    })
-}
-
-// apply / applied / inspect / linkedin / digest stages extracted to
-// crates/careerai-pipeline/src/{apply,linkedin,inspect,digest}.rs.
-// Re-exported at the top of this file via `pub use`.
-
-// Bodies live in the `apply` / `linkedin` / `inspect` / `digest`
-// submodules; they're re-exported via `pub use` at the top of this
-// file so `careerai_pipeline::apply_one(...)` keeps working.
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    /// Serialize the env-var mutations in this module's tests so parallel
-    /// cargo-test threads can't race on `CAREERAI_LLM_LIVE`.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Regression for the `tailor_one` live-call gate. The helper must
-    /// return `true` only for the literal value "1"; any other value
-    /// (or absence) means use the `MockLlm` fixtures path. Without this
-    /// gate, `tailor_one` made nondeterministic live calls on dev boxes
-    /// with an authed `claude` binary, breaking `tailor_render_it.rs`.
-    #[test]
-    fn live_llm_opt_in_true_only_for_literal_one() {
-        let _guard = ENV_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let prev = std::env::var("CAREERAI_LLM_LIVE").ok();
-        std::env::set_var("CAREERAI_LLM_LIVE", "1");
-        assert!(live_llm_opt_in(), "literal '1' must opt in");
-        std::env::set_var("CAREERAI_LLM_LIVE", "true");
-        assert!(!live_llm_opt_in(), "'true' must NOT opt in (only '1')");
-        std::env::set_var("CAREERAI_LLM_LIVE", "");
-        assert!(!live_llm_opt_in(), "empty must NOT opt in");
-        std::env::remove_var("CAREERAI_LLM_LIVE");
-        assert!(!live_llm_opt_in(), "unset must NOT opt in");
-        if let Some(v) = prev {
-            std::env::set_var("CAREERAI_LLM_LIVE", v);
-        }
-    }
+        .context("list shortlisted")?;
+    Ok(rows)
 }
