@@ -70,8 +70,10 @@ clippy + fmt` clean before merge.
   {tools.rs,resources.rs,handlers.rs}`. ✓
 - [x] **`crates/careerai-scheduler/src/lib.rs`** (686→241 LOC) —
   `scheduler/{cron.rs,error.rs,shutdown.rs}`. ✓
-- [ ] **`crates/careerai-submit/src/rate_limiter.rs`** (598 LOC).
-- [ ] **`crates/careerai-submit/src/linkedin.rs`** (565 LOC).
+- [x] **`crates/careerai-submit/src/rate_limiter.rs`** (598→16 LOC) →
+  `rate_limiter/{types.rs,permit.rs,limiter.rs,tests.rs}`. ✓
+- [x] **`crates/careerai-submit/src/linkedin.rs`** (565→22 LOC) →
+  `linkedin/{config.rs,submitter.rs,tests.rs}`. ✓
 - [x] **`crates/careerai-llm/src/rig.rs`** (542→17 LOC) → `rig/{driver.rs,response.rs,error.rs,tests.rs}`. ✓
 - [x] **`crates/careerai-sources/src/naukri.rs`** (539→27 LOC) → `naukri/{source.rs,types.rs,tests.rs}`. ✓
 - [x] **`crates/careerai-notify/src/lib.rs`** (504→44 LOC) → `lib.rs` + `event.rs` + `dispatcher.rs`. ✓
