@@ -4,6 +4,8 @@
 //! `per_source.naukri.enabled=true`. No `interactive_only` gate (Naukri
 //! risk profile is lower than LinkedIn per the design spec).
 
+#![cfg(feature = "browser")]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
