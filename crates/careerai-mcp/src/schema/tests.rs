@@ -10,8 +10,7 @@ fn discover_args_default_when_empty() {
 
 #[test]
 fn discover_args_accepts_sources_array() {
-    let args: DiscoverArgs =
-        serde_json::from_str(r#"{"sources":["greenhouse","lever"]}"#).unwrap();
+    let args: DiscoverArgs = serde_json::from_str(r#"{"sources":["greenhouse","lever"]}"#).unwrap();
     assert_eq!(args.sources, vec!["greenhouse", "lever"]);
 }
 

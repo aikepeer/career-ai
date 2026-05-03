@@ -55,9 +55,7 @@ async fn scrape_pages(
     session
         .set_cookie(COOKIE_NAME, li_at, COOKIE_DOMAIN)
         .await
-        .map_err(|e| {
-            SourceError::Parse(format!("linkedin-browser cookie install failed: {e}"))
-        })?;
+        .map_err(|e| SourceError::Parse(format!("linkedin-browser cookie install failed: {e}")))?;
 
     let pages = src.cfg.max_pages.max(1);
     let mut all: Vec<RawListing> = Vec::new();
@@ -110,7 +108,5 @@ async fn capture_outer_html(session: &BrowserSession) -> Result<String, SourceEr
         .page()
         .content()
         .await
-        .map_err(|e| {
-            SourceError::Parse(format!("linkedin-browser page content fetch failed: {e}"))
-        })
+        .map_err(|e| SourceError::Parse(format!("linkedin-browser page content fetch failed: {e}")))
 }

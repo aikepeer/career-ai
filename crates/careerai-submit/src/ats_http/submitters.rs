@@ -3,9 +3,7 @@ use async_trait::async_trait;
 use crate::base::{SubmitContext, Submitter, WouldSubmit};
 use crate::error::{Result, SubmitError};
 
-use super::support::{
-    artifact_kinds_owned, build_body_preview, slugify, CandidatePayload,
-};
+use super::support::{artifact_kinds_owned, build_body_preview, slugify, CandidatePayload};
 
 // NOTE: `sanitize_external_id` is re-exported from the root via `pub use`.
 

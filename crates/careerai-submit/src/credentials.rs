@@ -5,12 +5,10 @@
 //!
 //! Split into per-concern submodules to stay under the 300-LOC cap.
 
-mod credential;
 mod cookie;
+mod credential;
 #[cfg(test)]
 mod tests;
 
+pub use cookie::{cookie_expiry, cookie_health, cookie_remaining, parse_jwt_exp, CookieHealth};
 pub use credential::{delete, load, store, Credential, SERVICE};
-pub use cookie::{
-    cookie_expiry, cookie_health, cookie_remaining, parse_jwt_exp, CookieHealth,
-};

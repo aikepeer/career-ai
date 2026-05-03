@@ -21,8 +21,7 @@ fn fake_jwt_with_exp(exp_secs: i64) -> String {
     let header =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
     let payload_json = format!(r#"{{"sub":"test","exp":{exp_secs}}}"#);
-    let payload =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
     let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"unverified");
     format!("{header}.{payload}.{sig}")
 }
