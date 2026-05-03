@@ -6,19 +6,25 @@
 //! lives here and re-exports every section type so existing callers can
 //! continue importing `careerai_core::config::FooConfig` without churn.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use config::{Config, ConfigError, Environment, File, FileFormat};
 use serde::{Deserialize, Serialize};
 
+mod dashboard;
 mod llm;
 mod match_;
 mod rates;
+mod render;
+mod scheduler;
 mod sources;
 mod submit;
 #[cfg(test)]
 mod tests;
+
+pub use dashboard::DashboardConfig;
+pub use render::RenderConfig;
+pub use scheduler::SchedulerConfig;
 
 pub use llm::{BackendChoice, LlmConfig};
 pub use match_::{Domain, MatchConfig, UserConfig};
@@ -65,50 +71,6 @@ pub struct CoreConfig {
     /// applies built-in defaults (port 8787, refresh 60s) when absent.
     #[serde(default)]
     pub dashboard: DashboardConfig,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DashboardConfig {
-    pub port: Option<u16>,
-    pub refresh_seconds: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RenderConfig {
-    pub artifacts_dir: std::path::PathBuf,
-    pub pandoc_bin: Option<std::path::PathBuf>,
-    pub pdf_engine: String,
-    pub timeout_seconds: u64,
-    pub keep_intermediate_markdown: bool,
-}
-
-impl Default for RenderConfig {
-    fn default() -> Self {
-        Self {
-            artifacts_dir: std::path::PathBuf::from("artifacts"),
-            pandoc_bin: None,
-            pdf_engine: "weasyprint".into(),
-            timeout_seconds: 60,
-            keep_intermediate_markdown: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SchedulerConfig {
-    #[serde(default)]
-    pub cadence: HashMap<String, String>,
-    /// Optional cron schedule that drives a periodic apply-all sweep over
-    /// every shortlisted/rendered application. Distinct from `cadence`,
-    /// which is keyed by source and only drives discover→match. When unset
-    /// the daemon does not poll for submissions at all — operators apply
-    /// manually via `careerai apply --auto-submit ...`. Even when set, the
-    /// daemon hard-pins `auto_submit=false` for safety; see
-    /// `careerai-scheduler::Scheduler::from_config`.
-    #[serde(default)]
-    pub submit_cadence: Option<String>,
 }
 
 impl CoreConfig {
