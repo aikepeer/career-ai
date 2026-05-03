@@ -7,8 +7,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde::Deserialize;
-use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -20,7 +18,8 @@ use crate::trait_def::Llm;
 use crate::types::{LlmRequest, LlmResponse};
 
 use super::binary_locator::locate_claude_binary;
-use super::error::ClaudeCliError;
+use super::error::{classify_error_payload, classify_failure_stderr, ClaudeCliError};
+use super::response::{clamp_u64_u32, ClaudeCliResult};
 
 /// Subprocess-backed `Llm` impl that shells out to the user's
 /// `claude` CLI (`--print --output-format json`).
@@ -314,93 +313,4 @@ fn log_no_prompt_cache_once() {
             "anthropic prompt cache unavailable on claude-cli backend (cache_profile flag is silently ignored)"
         );
     });
-}
-
-/// Best-effort classifier for stderr text when stdout had no JSON.
-fn classify_failure_stderr(stderr: &str) -> ClaudeCliError {
-    let lc = stderr.to_lowercase();
-    if lc.contains("not logged in") || lc.contains("/login") {
-        ClaudeCliError::AuthExpired
-    } else if lc.contains("rate") && lc.contains("limit") {
-        ClaudeCliError::RateLimited {
-            retry_after_seconds: 60,
-        }
-    } else if stderr.is_empty() {
-        ClaudeCliError::Transport("empty stdout/stderr from claude".into())
-    } else {
-        // Trim noisy prefix; cap length.
-        let snippet: String = stderr.chars().take(256).collect();
-        ClaudeCliError::Transport(snippet)
-    }
-}
-
-/// Classify a parsed-but-errorful JSON payload.
-pub(crate) fn classify_error_payload(parsed: &ClaudeCliResult) -> ClaudeCliError {
-    let msg = parsed.result.clone().unwrap_or_default();
-    let lc = msg.to_lowercase();
-
-    if let Some(status) = parsed.api_error_status {
-        match status {
-            401 | 403 => return ClaudeCliError::AuthExpired,
-            429 => {
-                return ClaudeCliError::RateLimited {
-                    retry_after_seconds: 60,
-                };
-            }
-            _ => {}
-        }
-    }
-
-    if lc.contains("not logged in") || lc.contains("/login") || lc.contains("invalid api key") {
-        return ClaudeCliError::AuthExpired;
-    }
-    if lc.contains("rate") && lc.contains("limit") {
-        return ClaudeCliError::RateLimited {
-            retry_after_seconds: 60,
-        };
-    }
-
-    let snippet: String = msg.chars().take(256).collect();
-    ClaudeCliError::Transport(if snippet.is_empty() {
-        "claude reported error with no message".into()
-    } else {
-        snippet
-    })
-}
-
-fn clamp_u64_u32(v: u64) -> u32 {
-    u32::try_from(v).unwrap_or(u32::MAX)
-}
-
-/// Mirror of the relevant fields in the `claude --print --output-format json`
-/// payload. Defensive: every field is `Option`, unknown fields tolerated.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct ClaudeCliResult {
-    #[serde(default)]
-    pub(crate) is_error: Option<bool>,
-    #[serde(default)]
-    pub(crate) api_error_status: Option<u16>,
-    #[serde(default)]
-    pub(crate) result: Option<String>,
-    #[serde(default)]
-    pub(crate) usage: Option<ClaudeCliUsage>,
-    /// Catch-all so unknown keys (e.g. `modelUsage`, `terminal_reason`)
-    /// don't break parsing.
-    #[serde(flatten, default)]
-    #[allow(dead_code)]
-    pub(crate) extra: std::collections::BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[allow(clippy::struct_field_names)] // mirrors the upstream JSON shape
-pub(crate) struct ClaudeCliUsage {
-    #[serde(default)]
-    pub(crate) input_tokens: u64,
-    #[serde(default)]
-    pub(crate) output_tokens: u64,
-    #[serde(default)]
-    pub(crate) cache_read_input_tokens: u64,
-    #[serde(default, rename = "cache_creation_input_tokens")]
-    #[allow(dead_code)]
-    pub(crate) cache_creation_input_tokens: u64,
 }

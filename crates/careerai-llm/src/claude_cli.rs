@@ -8,8 +8,9 @@
 //!
 //! ## Module layout
 //!
-//! * [`driver`] — [`ClaudeCliLlm`] struct, `Llm` trait impl, response parser.
-//! * [`error`] — [`ClaudeCliError`] types and `From` mapping into [`LlmError`].
+//! * [`driver`] — [`ClaudeCliLlm`] struct, `Llm` trait impl.
+//! * [`error`] — [`ClaudeCliError`] types, `From` mapping, error classifiers.
+//! * [`response`] — `ClaudeCliResult`, `ClaudeCliUsage` JSON payload types.
 //! * [`binary_locator`] — locate + validate the `claude` binary on the host.
 //!
 //! # Caching
@@ -25,11 +26,14 @@
 mod binary_locator;
 pub(crate) mod driver;
 mod error;
+mod response;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use binary_locator::locate_claude_binary;
 pub use driver::ClaudeCliLlm;
 #[cfg(test)]
-pub(crate) use driver::{classify_error_payload, ClaudeCliResult};
+pub(crate) use error::classify_error_payload;
 pub use error::ClaudeCliError;
+#[cfg(test)]
+pub(crate) use response::ClaudeCliResult;
