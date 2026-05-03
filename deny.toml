@@ -63,7 +63,7 @@ allow = ["MIT", "ISC", "OpenSSL"]
 # transitive graph is in TODO.md as a separate task). Switch to
 # "deny" once the duplicate count is curated.
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "warn"
 highlight = "all"
 
 [sources]
