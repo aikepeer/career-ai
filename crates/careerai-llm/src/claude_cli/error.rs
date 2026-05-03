@@ -4,6 +4,8 @@
 
 use crate::error::LlmError;
 
+use super::response::ClaudeCliResult;
+
 /// Errors specific to the `claude` CLI subprocess driver.
 #[derive(Debug, thiserror::Error)]
 pub enum ClaudeCliError {
@@ -46,4 +48,55 @@ impl From<ClaudeCliError> for LlmError {
             ClaudeCliError::Timeout { seconds } => LlmError::Timeout { seconds },
         }
     }
+}
+
+/// Best-effort classifier for stderr text when stdout had no JSON.
+pub(crate) fn classify_failure_stderr(stderr: &str) -> ClaudeCliError {
+    let lc = stderr.to_lowercase();
+    if lc.contains("not logged in") || lc.contains("/login") {
+        ClaudeCliError::AuthExpired
+    } else if lc.contains("rate") && lc.contains("limit") {
+        ClaudeCliError::RateLimited {
+            retry_after_seconds: 60,
+        }
+    } else if stderr.is_empty() {
+        ClaudeCliError::Transport("empty stdout/stderr from claude".into())
+    } else {
+        let snippet: String = stderr.chars().take(256).collect();
+        ClaudeCliError::Transport(snippet)
+    }
+}
+
+/// Classify a parsed-but-errorful JSON payload.
+pub(crate) fn classify_error_payload(parsed: &ClaudeCliResult) -> ClaudeCliError {
+    let msg = parsed.result.clone().unwrap_or_default();
+    let lc = msg.to_lowercase();
+
+    if let Some(status) = parsed.api_error_status {
+        match status {
+            401 | 403 => return ClaudeCliError::AuthExpired,
+            429 => {
+                return ClaudeCliError::RateLimited {
+                    retry_after_seconds: 60,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    if lc.contains("not logged in") || lc.contains("/login") || lc.contains("invalid api key") {
+        return ClaudeCliError::AuthExpired;
+    }
+    if lc.contains("rate") && lc.contains("limit") {
+        return ClaudeCliError::RateLimited {
+            retry_after_seconds: 60,
+        };
+    }
+
+    let snippet: String = msg.chars().take(256).collect();
+    ClaudeCliError::Transport(if snippet.is_empty() {
+        "claude reported error with no message".into()
+    } else {
+        snippet
+    })
 }
