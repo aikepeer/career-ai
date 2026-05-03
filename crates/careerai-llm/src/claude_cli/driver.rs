@@ -404,4 +404,3 @@ pub(crate) struct ClaudeCliUsage {
     #[allow(dead_code)]
     pub(crate) cache_creation_input_tokens: u64,
 }
-
