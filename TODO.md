@@ -15,14 +15,14 @@ clippy + fmt` clean before merge.
 
 ### Tier 1 — over 1000 LOC (do these first)
 
-- [ ] **`crates/careerai-cli/src/main.rs`** (1499 LOC) → split into
+- [x] **`crates/careerai-cli/src/main.rs`** (1499→188 LOC) → split into
   per-command modules under `src/commands/`:
   - `commands/profile.rs` — `run_profile`, `profile_import`,
     `profile_show`, `profile_validate`, `profile_yaml_path`,
-    `detect_stale_skills_schema`, `anthropic_key_reachable`,
-    `llm_backend_maybe_available`, `run_profile_import_with_llm`,
+    `detect_stale_skills_schema`
+  - `commands/profile_llm.rs` — `run_profile_import_with_llm`,
+    `anthropic_key_reachable`, `llm_backend_maybe_available`,
     `strip_provider_prefix`, plus the inline `profile_llm_adapter` mod
-    (~600 LOC, biggest cohesive group)
   - `commands/llm.rs` — `run_llm_probe`, `probe_forced_resolve`
   - `commands/mcp.rs` — `run_mcp_probe`
   - `commands/notify.rs` — `run_notify_test`
@@ -34,9 +34,9 @@ clippy + fmt` clean before merge.
   - `commands/inspect.rs` — `run_inspect`
   - `commands/tailor.rs` — `map_tailor_error_to_exit_code`
   - `commands/render.rs` — `map_render_error_to_exit_code`
-  - **Stay in `main.rs`**: `Cli`/`Command` clap structs, `main`,
-    `init_tracing`, `load_cfg`, dispatcher, the inline `mod tests` arg-
-    parser tests (test the parser, not handlers).
+  - `cli_def.rs` (145 LOC) — `Cli`/`Command` clap structs, `init_tracing`
+  - `main_tests.rs` (235 LOC) — arg-parser tests
+  - **Stay in `main.rs`**: `main`, `load_cfg`, dispatcher (188 LOC). ✓
 
 - [ ] **`crates/careerai-pipeline/src/lib.rs`** (1051 LOC) → split by
   pipeline stage: `discover.rs`, `match_.rs` (or rename), `tailor.rs`,
@@ -60,21 +60,21 @@ clippy + fmt` clean before merge.
   `guardrails/{tokens.rs,common_caps.rs,validator.rs}`. ✓
 - [x] **`crates/careerai-llm/src/claude_cli.rs`** (976→35 LOC) →
   `claude_cli/{driver.rs,error.rs,binary_locator.rs}`. ✓
-- [ ] **`crates/careerai-sources/src/indeed_rss.rs`** (795 LOC).
-- [ ] **`crates/careerai-sources/src/company_sync.rs`** (777 LOC) →
-  `company_sync/{seed.rs,probe.rs,partition.rs}`.
-- [ ] **`crates/careerai-sources/src/mcp_jobs.rs`** (705 LOC).
-- [ ] **`crates/careerai-mcp/src/server.rs`** (693 LOC) → `server/
-  {tools.rs,resources.rs,handlers.rs}`.
-- [ ] **`crates/careerai-scheduler/src/lib.rs`** (686 LOC) — mostly
-  cohesive; `scheduler/{cron.rs,shutdown.rs,error.rs}` worth a look.
+- [x] **`crates/careerai-sources/src/indeed_rss.rs`** (795→31 LOC) →
+  `indeed_rss/{source.rs,parser.rs,tests.rs}`. ✓
+- [x] **`crates/careerai-sources/src/company_sync.rs`** (777→34 LOC) →
+  `company_sync/{seed.rs,probe.rs,partition.rs}`. ✓
+- [x] **`crates/careerai-sources/src/mcp_jobs.rs`** (705→22 LOC) →
+  `mcp_jobs/{source.rs,discover.rs,parser.rs}`. ✓
+- [x] **`crates/careerai-mcp/src/server.rs`** (693→236 LOC) → `server/
+  {tools.rs,resources.rs,handlers.rs}`. ✓
+- [x] **`crates/careerai-scheduler/src/lib.rs`** (686→241 LOC) —
+  `scheduler/{cron.rs,error.rs,shutdown.rs}`. ✓
 - [ ] **`crates/careerai-submit/src/rate_limiter.rs`** (598 LOC).
 - [ ] **`crates/careerai-submit/src/linkedin.rs`** (565 LOC).
-- [ ] **`crates/careerai-llm/src/rig.rs`** (542 LOC).
-- [ ] **`crates/careerai-sources/src/naukri.rs`** (539 LOC).
-- [ ] **`crates/careerai-notify/src/lib.rs`** (504 LOC) — already has
-  `channels::{slack,telegram,email,ntfy}` submodules; split top-level
-  into `lib.rs` + `event.rs` + `dispatcher.rs`.
+- [x] **`crates/careerai-llm/src/rig.rs`** (542→17 LOC) → `rig/{driver.rs,response.rs,error.rs,tests.rs}`. ✓
+- [x] **`crates/careerai-sources/src/naukri.rs`** (539→27 LOC) → `naukri/{source.rs,types.rs,tests.rs}`. ✓
+- [x] **`crates/careerai-notify/src/lib.rs`** (504→44 LOC) → `lib.rs` + `event.rs` + `dispatcher.rs`. ✓
 
 ### Tier 3 — 300–500 LOC
 
