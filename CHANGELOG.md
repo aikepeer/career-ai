@@ -4,33 +4,97 @@ All notable changes to career-ai. The format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); pre-1.0
 versions don't promise semver yet.
 
-## [Unreleased]
+## [0.1.2] — 2026-05-04
+
+Second end-to-end release. Consolidates two major feature streams (dashboard
++ service management; ATS company-sync + Ashby + Claude CLI backend + MCP
+sources adapter), months of file-size refactoring (30+ files split into
+per-concern submodules, every Rust source file under 375 LOC), and a
+comprehensive CI/docs/test-coverage/performance hardening pass.
 
 ### Added
 
-- **`careerai status serve`** — read-only HTTP dashboard at
-  `http://127.0.0.1:8787` (port configurable via `--port` or
-  `dashboard.port` in config). Single page: KPI strip (today's
-  discovered, shortlisted active, applied lifetime, response rate),
-  kanban funnel across pipeline states with the top 3 cards per
-  column, and a deterministic "next steps" punch list (action >
-  warn > info ordering: ready-to-tailor / ready-to-render /
-  ready-to-apply / source-stale / cookie-expiring / profile-stale).
-  Every card title is a clickable JD link. Loopback-only by default;
-  `--bind` is hidden and any non-loopback bind logs a loud no-auth
-  warning. Auto-refresh every 60s via meta-refresh, no JS, no CDN.
-- **`careerai service install/status/uninstall`** — manages a systemd
-  user unit at `~/.config/systemd/user/careerai.service`. `install`
-  writes the unit atomically, runs `systemctl --user daemon-reload`,
-  then prompts for `loginctl enable-linger $USER` so the daemon
-  survives logout. The unit ships with `Restart=on-failure`,
-  `MemoryMax=2G`, `CPUQuota=80%`, and an optional
-  `EnvironmentFile=-%h/.config/careerai/env` to keep secrets out of
-  the unit. The install does NOT auto-enable the service —
-  operators run `systemctl --user enable --now careerai` themselves.
-  Linux-only; macOS/Windows exit with an actionable message.
-- New `careerai-dashboard` crate (axum + tera) with 7 unit + 1
-  integration test, all under the 300-LOC-per-file cap.
+- **Dashboard** (`careerai status serve`) — read-only HTTP dashboard at
+  `http://127.0.0.1:8787`. KPI strip, kanban funnel, "next steps" punch
+  list, auto-refresh via meta-refresh. Loopback-only by default.
+- **Service management** (`careerai service install/status/uninstall`) —
+  systemd user unit with `Restart=on-failure`, `MemoryMax=2G`,
+  `CPUQuota=80%`. Linux-only.
+- `careerai-dashboard` crate (axum + tera).
+- **`careerai sources sync`** — probes ~80 curated ATS slugs (Greenhouse /
+  Lever / Ashby) and scores each against configured `domains[].keywords_any`.
+  Three-way diff (`+ add` / `keep` / `- consider removing`); `--apply` writes
+  merged lists into `config/local.yaml` preserving user keys. 8-way
+  concurrency, 10s per-company timeout.
+- **Ashby adapter** (`careerai-sources::AshbySource`) — public posting API
+  (`/posting-api/job-board/<slug>`). Wired into `SourcesConfig`.
+- **Claude CLI LLM backend** (`careerai-llm::ClaudeCliLlm`) — subprocesses
+  the local `claude` CLI. Default for Claude Code subscribers; no API key
+  required. `BackendChoice` enum (auto | claude-cli | api), `--llm-backend`
+  flag, `careerai llm probe` subcommand.
+- **MCP sources adapter** (`careerai-sources::mcp_jobs`) — consumes community
+  MCP servers as discovery sources. `careerai mcp probe` reachability check.
+- **Criterion benchmarks** — `JaccardScorer` (65µs–1.8ms across 3 scales) in
+  `careerai-match/benches/jaccard.rs`; LLM cache miss/hit/put (23–155µs) in
+  `careerai-llm/benches/cache.rs`.
+- **Flamegraph** — profiled daemon tick against ~85 companies; careerai
+  user-space 45%, tokio runtime 55%, mostly I/O-bound.
+- **`docs/SECURITY.md`** — design invariants, accepted risks, reporting.
+- **`docs/ARCHITECTURE.md`** — Mermaid sequence diagram covering full
+  pipeline tick.
+- **`docs/MCP_TOOLS.md`** — 8 tools documented with input/output schemas.
+- **Per-crate READMEs** — all 15 crates have READMEs (42–181 LOC each).
+- **Semgrep baseline** — `.claude/.semgrep-baseline.json` (9 false positives).
+
+### Changed
+
+- **File-size cap enforcement** — 30+ Rust files split into per-concern
+  submodules across 8 PRs (#73–#80): `claude_cli/driver.rs`,
+  `claude_cli/tests.rs`, `company_sync/tests.rs`, `tailor/diff.rs`,
+  `tailor/diff/tests.rs`, `llm_extract.rs`, `merge.rs`, `heuristic.rs`,
+  `rate_limiter.rs`, `linkedin.rs`, and more. Every Rust source file now
+  under the 375 LOC cap.
+- **Probe timeout injectable** — `probe_one()` takes `timeout: Duration`
+  parameter (was hardcoded `PROBE_TIMEOUT`). Enables integration tests to
+  assert timeout behavior with `wiremock::set_delay()`.
+- **Tera cache process-wide** — `OnceLock<Result<Tera, String>>` caches a
+  single instance; both `render_resume` and `render_cover_letter` share it.
+- **README audit** — stale PR references removed; install options and
+  integration paths current.
+
+### CI / Tooling
+
+- **Codecov** — `codecov-action@v5` uploads coverage in CI; token in
+  secrets + status-check gate in Codecov UI.
+- **Windows cross-compile check** — CI has `windows-check` job (previously
+  gated behind `if: false`).
+- **`cargo-deny`** — `deny.toml` with advisory ignore, license allowlist,
+  source restrictions.
+- **`cargo-udeps`** — pass; removed 2 unused dev-deps (`docx-rs`, `tempfile`).
+
+### Fixed
+
+- **argv PII leak** (PR #21) — system prompt + profile block moved from
+  `--append-system-prompt <text>` to a 0o600 tempfile
+  (`--append-system-prompt-file <path>`). Regression test in
+  `claude_cli/tests.rs`.
+- **Cross-bullet token leak** — `summary_proper_nouns` now excludes bullet
+  bodies in `guardrails/tokens.rs`.
+- **Windows atomic rename** — confirmed `tempfile::NamedTempFile::persist()`
+  handles atomic rename on Windows.
+- **`notify_threshold`** — confirmed wired in `match_.rs` via
+  `fire_high_score_if_above`.
+- **Missing feature gate** — `live-llm` feature umbrella alias restored.
+- **`cargo-deny` wildcards** — license allowlist tightened from wildcard to
+  explicit SPDX identifiers.
+- **Tailor diff validation** — 6 new gap-fill tests (rules 2, 3, 8, 9:
+  summary guardrails, cover-letter word cap, MoveBefore parse, missing
+  entry/bullet).
+
+### Security
+
+- `ClaudeCliLlm` no longer leaks profile content to argv (see Fixed above).
+- `docs/SECURITY.md` published with design invariants and accepted risks.
 
 ## [0.1.1-mcp] — 2026-04-29
 
@@ -99,7 +163,7 @@ profile and live job listings.
 
 - The `embedding_model: BAAI/bge-small-en-v1.5` config field is
   reserved for a future scorer; the v1 scorer is plain `JaccardScorer`.
-  Match quality is therefore deliberately naïve in this release —
+  Match quality is therefore deliberately naive in this release —
   shortlisting is correct on the calibrated threshold but ranking
   semantics are token-overlap, not semantic similarity. Tracking the
   embedding-scorer swap separately.
@@ -117,89 +181,6 @@ profile and live job listings.
   pointed at the merge commit of #30, predating every bug fix above.
   Two stuck release-workflow runs that targeted that commit were
   cancelled.
-
-## [Unreleased]
-
-### Added
-
-- `careerai sources sync` (`feat/sources-sync`) — auto-discovers
-  Greenhouse / Lever / Ashby companies whose currently-open jobs
-  match the user's `domains:` keywords. Probes a curated seed list
-  of ~80 known-public ATS slugs (embedded in
-  `crates/careerai-sources/src/templates/seed_companies.yaml`,
-  verified 2026-04-28), scores each board against
-  `cfg.domains[].keywords_any` (case-insensitive substring across
-  title + description), and prints a three-way diff
-  (`+ add` / `keep` / `- consider removing`). Default is preview;
-  `--apply` writes the merged lists into `config/local.yaml` while
-  preserving every other user key (round-trip via `serde_yaml::Value`).
-  Manual slugs the user added by hand are never silently dropped.
-  Concurrency: up to 8 in-flight probes, 10s per-company timeout,
-  HTTP errors soft-fail and surface as `probe_failures`. CLI-only in
-  this release; daemon integration is deferred to a later PR.
-- New `careerai-sources::AshbySource` adapter for the Ashby public
-  posting API (`/posting-api/job-board/<slug>`). Same shape as
-  `GreenhouseSource` / `LeverSource`. Wired into `SourcesConfig` as
-  `sources.ashby.companies` and `pipeline::build_sources`.
-
-### Security
-
-- **`careerai-llm::ClaudeCliLlm` no longer leaks profile content to
-  argv** (PR #21 review). The system prompt + profile block (rendered
-  YAML, includes PII) used to ride on `--append-system-prompt <text>`,
-  which made the data visible to any local user via
-  `/proc/<pid>/cmdline` or `ps -ef`. The driver now writes the
-  combined prompt to a 0o600-mode tempfile under
-  `target/.careerai-prompts/` (project-local, `.gitignore`'d) and
-  passes `--append-system-prompt-file <path>`. argv carries only flags
-  + model id. Unit test
-  `claude_cli::tests::stub_binary_does_not_leak_profile_to_argv`
-  asserts the absence regression.
-
-### Changed
-
-- `feat/claude-cli-backend` — new `careerai-llm::ClaudeCliLlm` driver
-  that subprocesses the local `claude` CLI (`--print --output-format
-  json`). Default for Claude Code subscribers — no `ANTHROPIC_API_KEY`
-  required. Adds `careerai-llm::Backend` resolver and `BackendChoice`
-  enum (auto | claude-cli | api), `--llm-backend` global CLI flag,
-  `careerai llm probe` subcommand. The `live-llm` feature is split
-  into `live-llm-cli` (default) and `live-llm-api`; the umbrella
-  `live-llm` alias still toggles both for back-compat. Anthropic
-  prompt caching is not exposed via the CLI surface, so
-  `cache_profile=true` is silently ignored on the CLI backend
-  (logged once).
-- `careerai llm probe` honors the global `--llm-backend` flag
-  (previously silently ignored). `Backend::probe` also honors
-  `CAREERAI_SKIP_CLI_PROBE=1` for parity with `Backend::resolve` and
-  `build_cli`.
-- `locate_claude_binary` now validates the resolved path is a regular
-  executable file. A stale `CAREERAI_CLAUDE_BIN` pointing at a missing
-  or non-exec path surfaces as `ClaudeCliError::BinaryUnusable {
-  path, reason }` rather than a confusing spawn ENOENT later.
-- `careerai profile import` falls back to the heuristic parser when
-  LLM resolution fails mid-run (claude session expired, network drop,
-  etc.). The user gets a usable profile and a clear log line pointing
-  at `claude login` / `ANTHROPIC_API_KEY`. Explicit `--use-llm=true`
-  preserves the previous fail-fast behavior.
-- `ClaudeCliLlm::complete` no longer maintains a second on-disk cache
-  layer with a `claude-cli:` key prefix. The on-disk response cache
-  lives in the consumer wrapper (e.g.
-  `careerai-tailor::tailor_for_listing`), keyed by the
-  provider-agnostic `compose_key(...)` shared with the API backend.
-  Two cache layers had been writing duplicate files to the same dir
-  with different filenames.
-- `feat/mcp-sources-adapter` (PR #19, in review) —
-  `careerai-sources::mcp_jobs` adapter consumes any community MCP
-  server as a discovery source. New CLI: `careerai mcp probe`
-  reachability check. `kind: mcp` source type in config (default
-  `enabled: false`).
-- `docs/plugin-release` (PR #20) — README + CONTRIBUTING + CHANGELOG
-  refreshed; `.mcp.json` migrated to `uvx --from git+...` form
-  (community LinkedIn MCPs aren't on PyPI under the canonical names),
-  with both community entries `disabled: true` until upstream
-  packaging is sorted; `cargo-dist` configured for prebuilt binaries;
-  plugin manifest gains `categories` + extended `keywords`.
 
 ## [0.1.0-mcp] — 2026-04-27
 

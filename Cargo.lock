@@ -448,6 +448,7 @@ dependencies = [
  "backon",
  "careerai-core",
  "careerai-profile",
+ "criterion",
  "hex",
  "keyring",
  "reqwest",
