@@ -5,6 +5,8 @@ use super::*;
 use crate::TailorError;
 use careerai_profile::schema::{Experience, Personal, Profile, Project, Skills};
 
+mod validate_tests;
+
 fn fixture_profile() -> Profile {
     Profile {
         personal: Personal {
