@@ -26,9 +26,11 @@ none block the current release.
 
 ## Test coverage
 
-- [ ] **Targeted gap-fill** — `tailor::diff::validate` rule
-  permutations, `submit` rate-limiter quiet-hours edge cases,
-  `sources::company_sync` large-seed timeouts.
+- [x] **Targeted gap-fill** — partly done. `tailor::diff::validate`:
+  6 tests added (rules 2, 3, 8, 9 — summary guardrails, cover letter
+  word cap, MoveBefore parse, missing entry/bullet). `company_sync`:
+  probe timeout test with injectable `timeout` param. `rate-limiter`
+  quiet-hours: deferred — requires clock abstraction to test safely.
 
 ## Performance
 
