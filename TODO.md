@@ -34,10 +34,12 @@ none block the current release.
 
 ## Performance
 
-- [ ] **Criterion benchmarks** for hot paths: tailor cache hit/miss,
-  JaccardScorer against realistic profile/JD sizes, company_sync
-  probe-pool throughput.
-- [ ] **Flamegraph** on a real `careerai daemon` tick.
+- [x] **Criterion benchmarks** — JaccardScorer (65µs–1.8ms across 3
+  scales, `benches/jaccard.rs`), LLM cache (miss 23µs, hit 33µs, put
+  155µs, `benches/cache.rs`). company_sync probe-pool skipped
+  (requires wiremock servers, better suited as integration test).
+- [ ] **Flamegraph** on a real `careerai daemon` tick — blocked on
+  `sudo apt-get install -y linux-perf` (needed by `cargo flamegraph`).
 - [x] **Tera template cache reuse** — `OnceLock<Result<Tera, String>>`
   in `templates.rs:91` caches a single process-wide instance; both
   `render_resume` and `render_cover_letter` share it.
