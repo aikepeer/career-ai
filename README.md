@@ -13,8 +13,8 @@ test / docs items closed by 2026-04-30; see
 ## What it does
 
 Finds jobs across ATSes and job boards (Greenhouse, Lever, Remotive,
-RemoteOK, Naukri; plus any MCP-exposed source via the upcoming `mcp_jobs`
-adapter — see PR #19), matches them against your profile, tailors a
+RemoteOK, Naukri; plus any MCP-exposed source via the `mcp_jobs`
+adapter), matches them against your profile, tailors a
 resume + cover letter per job description via Claude, and submits
 applications with a hard dry-run gate enabled by default. Niche focus:
 AI/ML + LLM apps and embedded platforms / robotics. Remote-first with
@@ -60,7 +60,7 @@ cargo install --git https://github.com/justdoGIT/career-ai \
 ```
 
 For LinkedIn discovery, the supported path is the native
-`linkedin_browser` source (PR #21). It drives a stealth Chromium
+`linkedin_browser` source. It drives a stealth Chromium
 session, reuses the M5 `li_at` cookie + stealth-v2.js infrastructure,
 and integrates with the daemon's cron + `governor` rate limiter. It
 defaults to `enabled: false`; flip `sources.linkedin_browser.enabled`
@@ -141,14 +141,12 @@ require the literal `I_UNDERSTAND_TOS_RISK` confirmation. See the
 The pipeline is end-to-end usable for ATS-API sources today. These
 are the open items:
 
-- **LinkedIn discovery** — first-class adapter is the `mcp_jobs`
-  source (PR #19, merged), which discovers via any MCP server that
-  advertises a known job-search tool name. The bundled
-  `linkedin-jobs` MCP (`Rom7699/linkedin-jobs-mcp-server`) currently
-  ships as `python main.py` with no script entry — manual enable
-  steps are in `.mcp.json`. The `linkedin-browser` MCP is a
-  ToS-violating scraper and stays opt-in. A native chromiumoxide
-  LinkedIn discovery adapter is in flight separately.
+- **LinkedIn discovery** — the native `linkedin_browser` source
+  (chromiumoxide + stealth-v2.js) is the recommended path. The
+  `mcp_jobs` adapter provides an alternative surface via any MCP
+  server that advertises a known job-search tool name. The bundled
+  `linkedin-jobs` MCP and `linkedin-browser` community MCPs are
+  opt-in alternatives in `.mcp.json`.
 - **Response tracking (M7, planned)** — `submitted` applications do
   not yet roll up into a `responded` state automatically. Until M7
   lands, watch your inbox; `careerai applied --since <window>` shows
@@ -227,8 +225,8 @@ and key entry points:
 | `remotive`          | enabled   | Public job feed.                                                                                            |
 | `remoteok`          | enabled   | Public job feed.                                                                                            |
 | `naukri`            | disabled  | Undocumented `jobapi/v3/search`; opt-in.                                                                    |
-| `linkedin_browser`  | disabled  | Native browser-driven discovery (M2/PR #21). Violates LinkedIn UA §8.2 — opt-in only. Requires `--features browser` and a `li_at` cookie stored in the OS keychain. |
-| `mcp_jobs`          | disabled  | Generic MCP-server adapter for community job-search MCPs (PR #19). Per-server opt-in.                       |
+| `linkedin_browser`  | disabled  | Native browser-driven discovery. Violates LinkedIn UA §8.2 — opt-in only. Requires `--features browser` and a `li_at` cookie stored in the OS keychain. |
+| `mcp_jobs`          | disabled  | Generic MCP-server adapter for community job-search MCPs. Per-server opt-in.                                |
 
 To enable the native LinkedIn source, edit `config/local.yaml`:
 
