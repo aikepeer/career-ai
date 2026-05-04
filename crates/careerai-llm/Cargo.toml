@@ -37,6 +37,12 @@ tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[[bench]]
+name = "cache"
+harness = false
 
 [features]
 default = ["live-llm-cli"]
