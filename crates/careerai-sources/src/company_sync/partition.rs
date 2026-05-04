@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 
 use careerai_core::config::CoreConfig;
 
-use super::probe::{probe_one, BaseUrls, CompanyHit, ProbeOutcome, PROBE_CONCURRENCY};
+use super::probe::{probe_one, BaseUrls, CompanyHit, ProbeOutcome, PROBE_CONCURRENCY, PROBE_TIMEOUT};
 use super::seed::{AtsVendor, SeedEntry, SyncError};
 
 /// Three-way diff against the currently-configured ATS lists.
@@ -56,7 +56,7 @@ pub async fn sync_with_base_urls(
     let mut iter = seed.iter().cloned();
     for _ in 0..PROBE_CONCURRENCY {
         if let Some(entry) = iter.next() {
-            probes.push(probe_one(entry, bases.clone(), domains.clone()));
+            probes.push(probe_one(entry, bases.clone(), domains.clone(), PROBE_TIMEOUT));
         }
     }
 
@@ -73,7 +73,7 @@ pub async fn sync_with_base_urls(
             }
         }
         if let Some(entry) = iter.next() {
-            probes.push(probe_one(entry, bases.clone(), domains.clone()));
+            probes.push(probe_one(entry, bases.clone(), domains.clone(), PROBE_TIMEOUT));
         }
     }
 

@@ -6,7 +6,7 @@ use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::super::partition::sync_with_base_urls;
-use super::super::probe::BaseUrls;
+use super::super::probe::{probe_one, BaseUrls, ProbeOutcome};
 use super::super::seed::{AtsVendor, SeedEntry};
 
 #[tokio::test]
@@ -245,4 +245,40 @@ async fn probe_failure_does_not_propose_removal_of_configured_slug() {
         !remove_slugs.contains(&"flaky".to_string()),
         "probe-failed slug should not be marked for removal; got: {remove_slugs:?}"
     );
+}
+
+#[tokio::test]
+async fn probe_timeout_with_large_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/v1/boards/slow/jobs"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(30)))
+        .mount(&server)
+        .await;
+
+    let cfg = cfg_with_domains(vec![ai_ml_domain()]);
+    let entry = SeedEntry {
+        slug: "slow".into(),
+        ats: AtsVendor::Greenhouse,
+        domain_hint: vec![],
+    };
+    let bases = BaseUrls {
+        greenhouse: server.uri(),
+        lever: server.uri(),
+        ashby: server.uri(),
+    };
+    let outcome = probe_one(
+        entry,
+        bases,
+        cfg.domains,
+        std::time::Duration::from_secs(1),
+    )
+    .await;
+    match outcome {
+        ProbeOutcome::Failure { slug, reason } => {
+            assert_eq!(slug, "slow");
+            assert!(reason.contains("timeout"), "reason: {reason}");
+        }
+        other => panic!("expected timeout Failure, got {other:?}"),
+    }
 }

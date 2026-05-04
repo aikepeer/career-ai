@@ -55,6 +55,7 @@ pub struct CompanyHit {
     pub matched_jobs: u32,
 }
 
+#[derive(Debug)]
 pub(crate) enum ProbeOutcome {
     Hit(CompanyHit),
     Miss(String),
@@ -65,8 +66,9 @@ pub(crate) async fn probe_one(
     entry: SeedEntry,
     bases: BaseUrls,
     domains: Vec<careerai_core::config::Domain>,
+    timeout: Duration,
 ) -> ProbeOutcome {
-    let probe = tokio::time::timeout(PROBE_TIMEOUT, fetch_listings(&entry, &bases)).await;
+    let probe = tokio::time::timeout(timeout, fetch_listings(&entry, &bases)).await;
     let listings = match probe {
         Ok(Ok(rows)) => rows,
         Ok(Err(e)) => {
@@ -78,7 +80,7 @@ pub(crate) async fn probe_one(
         Err(_) => {
             return ProbeOutcome::Failure {
                 slug: entry.slug,
-                reason: format!("timeout after {}s", PROBE_TIMEOUT.as_secs()),
+                reason: format!("timeout after {}s", timeout.as_secs()),
             };
         }
     };
