@@ -38,8 +38,9 @@ none block the current release.
   JaccardScorer against realistic profile/JD sizes, company_sync
   probe-pool throughput.
 - [ ] **Flamegraph** on a real `careerai daemon` tick.
-- [ ] **Tera template cache reuse** — verify caching is shared across
-  renders.
+- [x] **Tera template cache reuse** — `OnceLock<Result<Tera, String>>`
+  in `templates.rs:91` caches a single process-wide instance; both
+  `render_resume` and `render_cover_letter` share it.
 
 ## Documentation
 
