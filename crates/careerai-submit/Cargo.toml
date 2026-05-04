@@ -35,7 +35,6 @@ default = []
 browser = ["dep:chromiumoxide", "dep:futures"]
 
 [dev-dependencies]
-tempfile.workspace = true
 wiremock.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 scraper = { workspace = true }
