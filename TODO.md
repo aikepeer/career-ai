@@ -38,8 +38,11 @@ none block the current release.
   scales, `benches/jaccard.rs`), LLM cache (miss 23µs, hit 33µs, put
   155µs, `benches/cache.rs`). company_sync probe-pool skipped
   (requires wiremock servers, better suited as integration test).
-- [ ] **Flamegraph** on a real `careerai daemon` tick — blocked on
-  `sudo apt-get install -y linux-perf` (needed by `cargo flamegraph`).
+- [x] **Flamegraph** — captured `flamegraph.svg` (49KB) from a real
+  daemon tick against ~85 Greenhouse/Lever/Ashby companies. Careerai
+  user-space 45%, tokio runtime 55%, mostly I/O-bound (write/futex
+  syscalls dominate). Re-capture with:
+  `CARGO_PROFILE_RELEASE_DEBUG=true CAREERAI_ROOT=~/career-ai-data cargo flamegraph --bin careerai -- daemon`
 - [x] **Tera template cache reuse** — `OnceLock<Result<Tera, String>>`
   in `templates.rs:91` caches a single process-wide instance; both
   `render_resume` and `render_cover_letter` share it.
