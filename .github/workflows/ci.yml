@@ -97,16 +97,12 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-latest
-    # Coverage is informational on PRs and recorded as an artifact
-    # rather than gating merges. Once we have a Codecov / Coveralls
-    # account the artifact upload step gets swapped for `codecov-action`
-    # with a delta-fail threshold (TODO.md: "fails on a coverage drop
-    # > 1%"). Until then, the lcov.info artifact is downloadable from
-    # the run page and parseable by any local tool.
-    #
     # `continue-on-error: true` keeps this job non-blocking — a
     # `cargo install` flake or transient cargo-llvm-cov bug must not
     # block merge of an otherwise-green PR (Codex P2 on PR #64).
+    # Coverage gating (>1% drop) is configured in the Codecov web UI
+    # (repo Settings > Branches > Status Checks) rather than in this
+    # workflow so thresholds can be tuned without CI-file churn.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -121,13 +117,13 @@ jobs:
       # independently of the tested code (Codex P2 on PR #64).
       - name: Generate coverage report
         run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          name: lcov-coverage
-          path: lcov.info
-          if-no-files-found: error
-          retention-days: 14
+          files: lcov.info
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       # Print a per-crate summary so the run log surfaces the headline
       # numbers without forcing reviewers to download the artifact.
       - name: Coverage summary

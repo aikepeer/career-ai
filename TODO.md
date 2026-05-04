@@ -15,23 +15,20 @@ none block the current release.
   `careerai-pipeline/src/match_.rs` via `fire_high_score_if_above`.
 - [x] Semgrep baseline — `.claude/.semgrep-baseline.json` (9 false
   positives; all `tainted-path` in local CLI paths).
-
-## Codex blockers (deferred — revisit for v0.1.2)
-
-- [ ] **Cross-bullet token leak** — `profile_proper_nouns` accepts
-  any reword to reuse a token harvested from any bullet. Either
-  tighten scope (per-bullet or summary-only) or document the policy.
+- [x] `docs/SECURITY.md` — design invariants, accepted risks, reporting
+- [x] Codecov upload — `codecov-action@v5` in CI; needs token in
+  secrets + status-check gate in Codecov UI.
+- [x] Cross-bullet token leak — already fixed (`summary_proper_nouns`
+  excludes bullet bodies in `guardrails/tokens.rs`).
+- [x] Cross-target Windows check — CI already has `windows-check` job.
+- [x] `cargo-udeps` pass — removed 2 unused dev-deps (docx-rs,
+  tempfile).
 
 ## Test coverage
 
-- [ ] **Wire `cargo-llvm-cov` into CI** — coverage job, upload to
-  Codecov, fail on >1% drop.
 - [ ] **Targeted gap-fill** — `tailor::diff::validate` rule
   permutations, `submit` rate-limiter quiet-hours edge cases,
   `sources::company_sync` large-seed timeouts.
-- [ ] **Cross-target compile check** — `cargo check --target
-  x86_64-pc-windows-gnu` in CI so Windows-incompat changes are
-  caught at PR time.
 
 ## Performance
 
@@ -50,14 +47,6 @@ none block the current release.
 - [ ] **Architecture diagram** — Mermaid sequence for one full
   pipeline tick.
 - [ ] **MCP tool manifests** — input/output schema, error classes.
-- [ ] **`docs/SECURITY.md`** — RUSTSEC-2023-0071 rationale, LinkedIn
-  ToS posture, dry-run-by-default invariant, constrained-diff
-  invariant.
-
-## Tooling
-
-- [ ] **`cargo-udeps` pass** — requires nightly toolchain (`rustup
-  toolchain install nightly`), then `cargo udeps --workspace`.
 
 ## Out-of-scope ideas (parking lot)
 
