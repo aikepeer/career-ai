@@ -41,12 +41,15 @@ none block the current release.
 
 ## Documentation
 
-- [ ] **Top-level README audit** — install options, three integration
-  paths (CLI / MCP / plugin).
-- [ ] **Per-crate READMEs** for crates missing them.
-- [ ] **Architecture diagram** — Mermaid sequence for one full
-  pipeline tick.
-- [ ] **MCP tool manifests** — input/output schema, error classes.
+- [x] **Top-level README audit** — stale PR references removed;
+  install options and integration paths current.
+- [x] **Per-crate READMEs** — all 15 crates have READMEs (42–181 LOC
+  each).
+- [x] **Architecture diagram** — Mermaid sequence diagram in
+  `docs/ARCHITECTURE.md` covering full pipeline tick.
+- [x] **MCP tool manifests** — 8 tools documented in
+  `docs/MCP_TOOLS.md` (351 lines) with input/output schemas and
+  error semantics.
 
 ## Out-of-scope ideas (parking lot)
 
