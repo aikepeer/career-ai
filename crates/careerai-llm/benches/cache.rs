@@ -6,6 +6,7 @@
 //! to detect regressions if the storage format or hashing changes.
 //!
 //! Run: `cargo bench -p careerai-llm --bench cache`
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::cell::Cell;
 
@@ -71,7 +72,7 @@ fn bench_cache_put(c: &mut Criterion) {
         b.iter(|| {
             let n = counter.get();
             counter.set(n + 1);
-            let key = CacheKey::new(format!("c{:063x}", n));
+            let key = CacheKey::new(format!("c{n:063x}"));
             rt.block_on(async {
                 cache.put(black_box(&key), black_box(&resp)).await.unwrap();
             });
