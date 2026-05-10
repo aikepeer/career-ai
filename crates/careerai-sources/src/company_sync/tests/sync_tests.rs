@@ -267,13 +267,7 @@ async fn probe_timeout_with_large_delay() {
         lever: server.uri(),
         ashby: server.uri(),
     };
-    let outcome = probe_one(
-        entry,
-        bases,
-        cfg.domains,
-        std::time::Duration::from_secs(1),
-    )
-    .await;
+    let outcome = probe_one(entry, bases, cfg.domains, std::time::Duration::from_secs(1)).await;
     match outcome {
         ProbeOutcome::Failure { slug, reason } => {
             assert_eq!(slug, "slow");

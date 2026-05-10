@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
-use crate::TailorError;
 use crate::diff::SummaryOp;
+use crate::TailorError;
 
 /// Rule 8 — summary reword rejects an invented proper noun (Google
 /// is not in the fixture profile).
@@ -80,10 +80,7 @@ fn rejects_move_before_unparseable_target() {
     };
     let doc = minimal_doc(ops);
     let err = validate(&doc, &profile).unwrap_err();
-    assert!(
-        matches!(err, TailorError::BadPath(_)),
-        "got {err:?}"
-    );
+    assert!(matches!(err, TailorError::BadPath(_)), "got {err:?}");
 }
 
 /// Rule 3 — path references a missing entry (entry_index out of
