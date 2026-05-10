@@ -4,6 +4,14 @@ All notable changes to career-ai. The format roughly follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); pre-1.0
 versions don't promise semver yet.
 
+## [0.1.3] — 2026-05-10
+
+### Fixed
+- Cargo.lock stale after workspace version bump, causing `--locked` CI
+  jobs to fail. Regenerated and locked.
+- rustfmt formatting in `partition.rs`, `sync_tests.rs`, and
+  `validate_tests.rs`.
+
 ## [0.1.2] — 2026-05-04
 
 Second end-to-end release. Consolidates two major feature streams (dashboard
