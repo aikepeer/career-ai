@@ -3,12 +3,12 @@
 Automated job discovery, resume tailoring, and auto-apply for a single user —
 runs as a local daemon and as a Claude Code plugin.
 
-**Latest release: [v0.1.1-mcp](https://github.com/justdoGIT/career-ai/releases/tag/v0.1.1-mcp)** —
+**Latest release: [v0.1.3](https://github.com/justdoGIT/career-ai/releases/tag/v0.1.3)** —
 prebuilt binaries for Linux (musl), macOS (arm64), and Windows
 (GNU). End-to-end-verified across discover → match → tailor →
-render → apply (dry-run) → daemon. All eight follow-up Codex /
-test / docs items closed by 2026-04-30; see
-[`CHANGELOG.md`](./CHANGELOG.md) for the full unreleased list.
+render → apply (dry-run) → daemon. Criterion benchmarks,
+flamegraph, full docs suite, and CI hardening shipped;
+see [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## What it does
 
@@ -46,10 +46,10 @@ claude plugins install github.com/justdoGIT/career-ai
 
 # 2. Install the local MCP server binary that the plugin's slash commands call
 cargo install --git https://github.com/justdoGIT/career-ai \
-    --tag v0.1.1-mcp careerai-mcp careerai-cli
+    --tag v0.1.3 careerai-mcp careerai-cli
 
 # OR download the prebuilt binary tarball from the release page:
-#   https://github.com/justdoGIT/career-ai/releases/tag/v0.1.1-mcp
+#   https://github.com/justdoGIT/career-ai/releases/tag/v0.1.3
 
 # 3. Inside Claude Code
 /career:setup        # walks pandoc check + LLM probe + profile import
@@ -70,7 +70,7 @@ disabled by default and kept only as alternative discovery surfaces
 for power users — `linkedin-jobs` (RapidAPI-backed) and
 `linkedin-browser` (community scraper). The native source is the
 recommended path. Generic MCP-exposed sources are supported through
-the separate `mcp_jobs` adapter (PR #19).
+the separate `mcp_jobs` adapter.
 
 ## Install — CLI / daemon
 
