@@ -10,7 +10,7 @@ Windows alternatives.
 
 ```bash
 # 1. From your initialized project root (where `careerai init` was run)
-cd ~/career-ai-data       # or wherever your config/ + data/ live
+cd ~/projects/career-ai/career-ai-data       # or wherever your config/ + data/ live
 careerai service install
 
 # 2. Enable + start
@@ -38,8 +38,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/home/<you>/.cargo/bin/careerai daemon
-WorkingDirectory=/home/<you>/career-ai-data
+ExecStart=/home/kk/toolchains/cargo/bin/careerai daemon
+WorkingDirectory=/home/kk/projects/career-ai/career-ai-data
 Restart=on-failure
 RestartSec=10s
 EnvironmentFile=-%h/.config/careerai/env
@@ -63,18 +63,19 @@ Things to know:
 
   ```ini
   ANTHROPIC_API_KEY=sk-ant-...
-  CAREERAI_ROOT=/home/you/career-ai-data
+  CAREERAI_ROOT=/home/kk/projects/career-ai/career-ai-data
   RUST_LOG=info
   ```
 
   The `EnvironmentFile=-%h/...` (note the leading `-`) makes the file
   optional — the service starts cleanly even if it doesn't exist.
+
 - **Resource caps.** `MemoryMax=2G` and `CPUQuota=80%` keep a runaway
   daemon from eating the laptop. Override by editing the unit if you
   hit them legitimately.
 - **`careerai service install` does NOT auto-enable the unit.** That's
   a deliberate operator action. Run `systemctl --user enable --now
-  careerai` after install when you're ready.
+careerai` after install when you're ready.
 
 ## Linger
 
@@ -95,16 +96,16 @@ You'll only need to do this once per machine. Disable with
 
 ## Daily operations
 
-| What | Command |
-|---|---|
-| Status (active? failed? last log lines) | `careerai service status` |
-| Live logs | `journalctl --user -u careerai -f` |
-| Recent logs (last 100 lines) | `journalctl --user -u careerai -n 100` |
-| Restart after a config change | `systemctl --user restart careerai` |
-| Pause | `systemctl --user stop careerai` |
-| Resume | `systemctl --user start careerai` |
-| Disable autostart | `systemctl --user disable careerai` |
-| Re-enable autostart | `systemctl --user enable careerai` |
+| What                                    | Command                                |
+| --------------------------------------- | -------------------------------------- |
+| Status (active? failed? last log lines) | `careerai service status`              |
+| Live logs                               | `journalctl --user -u careerai -f`     |
+| Recent logs (last 100 lines)            | `journalctl --user -u careerai -n 100` |
+| Restart after a config change           | `systemctl --user restart careerai`    |
+| Pause                                   | `systemctl --user stop careerai`       |
+| Resume                                  | `systemctl --user start careerai`      |
+| Disable autostart                       | `systemctl --user disable careerai`    |
+| Re-enable autostart                     | `systemctl --user enable careerai`     |
 
 `careerai service status` is a thin wrapper around `systemctl --user
 status careerai` — its exit code matches systemctl's (0 active, 3
@@ -126,6 +127,7 @@ careerai service uninstall
 ```
 
 This:
+
 1. Runs `systemctl --user disable --now careerai` (stops + removes
    from autostart, ignoring "not loaded" errors)
 2. Removes the unit file
@@ -144,13 +146,13 @@ journalctl --user -u careerai -n 50
 
 Common causes:
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `failed to load config: ...config/default.yaml: No such file` | `WorkingDirectory` points at a directory without `careerai init` results | Re-run `service install` from the right project root |
-| `database error: failed to open ...data/careerai.sqlite` | Same as above, or wrong `CAREERAI_ROOT` in env file | Check `WorkingDirectory` in the unit + `~/.config/careerai/env` |
-| `LLM backend unavailable` | `claude` CLI isn't reachable, no `ANTHROPIC_API_KEY` set | Either `claude login`, or add the key to `~/.config/careerai/env` |
-| Daemon runs but nothing happens after logout | Linger isn't enabled | `loginctl enable-linger $USER` |
-| `MemoryMax=2G` killed the process | Long-running scoring or render exceeded the cap | Edit the unit to raise `MemoryMax`, then `daemon-reload` + restart |
+| Symptom                                                       | Likely cause                                                             | Fix                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `failed to load config: ...config/default.yaml: No such file` | `WorkingDirectory` points at a directory without `careerai init` results | Re-run `service install` from the right project root               |
+| `database error: failed to open ...data/careerai.sqlite`      | Same as above, or wrong `CAREERAI_ROOT` in env file                      | Check `WorkingDirectory` in the unit + `~/.config/careerai/env`    |
+| `LLM backend unavailable`                                     | `claude` CLI isn't reachable, no `ANTHROPIC_API_KEY` set                 | Either `claude login`, or add the key to `~/.config/careerai/env`  |
+| Daemon runs but nothing happens after logout                  | Linger isn't enabled                                                     | `loginctl enable-linger $USER`                                     |
+| `MemoryMax=2G` killed the process                             | Long-running scoring or render exceeded the cap                          | Edit the unit to raise `MemoryMax`, then `daemon-reload` + restart |
 
 **`careerai service status` reports the unit but `is-active` is
 `activating (auto-restart)` in a loop.** The daemon is crashing on

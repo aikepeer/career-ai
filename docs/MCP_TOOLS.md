@@ -12,16 +12,16 @@ runtime via `tools/list`.
 
 ## Tool index
 
-| Tool | Read/write | Required args | Default safety |
-|---|---|---|---|
-| `careerai_profile_status` | read | (none) | — |
-| `careerai_discover` | write (DB) | (none) | runs every enabled source |
-| `careerai_shortlist` | read | (none) | limit defaults to 50 |
-| `careerai_tailor` | write (DB) + LLM call | `listing_id` | constrained-diff guardrails apply |
-| `careerai_render` | write (filesystem) | `application_id` | requires pandoc on PATH |
-| `careerai_apply` | write (DB), optionally network | `application_id` | **dry-run by default** |
-| `careerai_inspect` | read | `application_id` | — |
-| `careerai_digest` | read | `since` | — |
+| Tool                      | Read/write                     | Required args    | Default safety                    |
+| ------------------------- | ------------------------------ | ---------------- | --------------------------------- |
+| `careerai_profile_status` | read                           | (none)           | —                                 |
+| `careerai_discover`       | write (DB)                     | (none)           | runs every enabled source         |
+| `careerai_shortlist`      | read                           | (none)           | limit defaults to 50              |
+| `careerai_tailor`         | write (DB) + LLM call          | `listing_id`     | constrained-diff guardrails apply |
+| `careerai_render`         | write (filesystem)             | `application_id` | requires pandoc on PATH           |
+| `careerai_apply`          | write (DB), optionally network | `application_id` | **dry-run by default**            |
+| `careerai_inspect`        | read                           | `application_id` | —                                 |
+| `careerai_digest`         | read                           | `since`          | —                                 |
 
 All write paths go through `careerai-pipeline` and inherit its
 safety invariants — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
@@ -43,7 +43,7 @@ parse, and validate?
 
 ```json
 {
-  "path": "/home/you/career-ai-data/profile/profile.yaml",
+  "path": "/home/kk/projects/career-ai/career-ai-data/profile/profile.yaml",
   "exists": true,
   "valid": true,
   "last_modified": "2026-04-29T18:42:11Z",
@@ -263,16 +263,41 @@ Show an application's row, state history, and rendered artifacts.
   "listing_source": "greenhouse",
   "state": "submitted",
   "events": [
-    {"from_state": null, "to_state": "discovered", "note": null,            "created_at": "2026-04-29T10:00:00Z"},
-    {"from_state": "discovered", "to_state": "shortlisted", "note": "score=0.087", "created_at": "2026-04-29T10:01:12Z"},
-    {"from_state": "shortlisted", "to_state": "tailored", "note": null,    "created_at": "2026-04-29T10:02:48Z"},
-    {"from_state": "tailored",    "to_state": "rendered", "note": null,    "created_at": "2026-04-29T10:03:11Z"},
-    {"from_state": "rendered",    "to_state": "submitted", "note": "remote=app_abc123", "created_at": "2026-04-29T10:04:02Z"}
+    {
+      "from_state": null,
+      "to_state": "discovered",
+      "note": null,
+      "created_at": "2026-04-29T10:00:00Z"
+    },
+    {
+      "from_state": "discovered",
+      "to_state": "shortlisted",
+      "note": "score=0.087",
+      "created_at": "2026-04-29T10:01:12Z"
+    },
+    {
+      "from_state": "shortlisted",
+      "to_state": "tailored",
+      "note": null,
+      "created_at": "2026-04-29T10:02:48Z"
+    },
+    {
+      "from_state": "tailored",
+      "to_state": "rendered",
+      "note": null,
+      "created_at": "2026-04-29T10:03:11Z"
+    },
+    {
+      "from_state": "rendered",
+      "to_state": "submitted",
+      "note": "remote=app_abc123",
+      "created_at": "2026-04-29T10:04:02Z"
+    }
   ],
   "artifacts": [
-    {"kind": "resume_docx", "path": "/.../resume.docx", "bytes": 24576},
-    {"kind": "resume_pdf",  "path": "/.../resume.pdf",  "bytes": 51200},
-    {"kind": "cover_docx",  "path": "/.../cover.docx",  "bytes": 18432}
+    { "kind": "resume_docx", "path": "/.../resume.docx", "bytes": 24576 },
+    { "kind": "resume_pdf", "path": "/.../resume.pdf", "bytes": 51200 },
+    { "kind": "cover_docx", "path": "/.../cover.docx", "bytes": 18432 }
   ]
 }
 ```
@@ -310,7 +335,7 @@ or a bare integer interpreted as hours.
   "submitted": 1,
   "failed": 0,
   "responded": 0,
-  "per_source": {"greenhouse": 25, "lever": 17},
+  "per_source": { "greenhouse": 25, "lever": 17 },
   "last_tick": "2026-04-29T18:42:00Z"
 }
 ```
@@ -327,11 +352,11 @@ the LLM render its own custom summary if preferred.
 
 The MCP server also exposes three resources (read-only):
 
-| URI | Description |
-|---|---|
-| `careerai://profile` | Current `profile/profile.yaml` body |
-| `careerai://shortlist/{date}` | **Currently returns the present-day shortlist regardless of `{date}`.** The path segment is parsed but ignored by `read_shortlist_resource`. Future work will honor it; until then, do not trust the URI as a historical slice — use it only as the live shortlist endpoint. |
-| `careerai://artifacts/{application_id}` | Index of artifacts attached to the application |
+| URI                                     | Description                                                                                                                                                                                                                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `careerai://profile`                    | Current `profile/profile.yaml` body                                                                                                                                                                                                                                          |
+| `careerai://shortlist/{date}`           | **Currently returns the present-day shortlist regardless of `{date}`.** The path segment is parsed but ignored by `read_shortlist_resource`. Future work will honor it; until then, do not trust the URI as a historical slice — use it only as the live shortlist endpoint. |
+| `careerai://artifacts/{application_id}` | Index of artifacts attached to the application                                                                                                                                                                                                                               |
 
 Resource bodies use a compact projection (`CompactListing` for
 shortlists) instead of the raw DB row to fit comfortably inside
@@ -340,12 +365,12 @@ and `raw_json` (full ATS payload) fields are not included.
 
 ## Behavior contracts that don't change between versions
 
-* `careerai_apply` defaults to dry-run forever. Removing this default
+- `careerai_apply` defaults to dry-run forever. Removing this default
   would be a breaking change.
-* `careerai_apply.confirm` literal value (`"I_UNDERSTAND_TOS_RISK"`) is
+- `careerai_apply.confirm` literal value (`"I_UNDERSTAND_TOS_RISK"`) is
   stable. If we ever need to gate live submission behind a different
   acknowledgement, it'll be a new field, not a renamed one.
-* Field names are snake_case across all schemas.
-* `Option<…>` fields are `null`-when-absent. Schemas use
+- Field names are snake_case across all schemas.
+- `Option<…>` fields are `null`-when-absent. Schemas use
   `#[serde(skip_serializing_if = "Option::is_none")]` so they're
   also absent in serialized output when None.
