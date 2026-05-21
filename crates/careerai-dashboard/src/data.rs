@@ -10,6 +10,10 @@ use sqlx::{Row, SqlitePool};
 use crate::error::Result;
 use crate::view::{FunnelColumn, KpiStrip, ListingCard, PipelineSnapshot, StateCounts};
 
+/// Max listings to show per funnel column. Set high enough to enable
+/// scroll-based browsing; the column body already has `overflow-y: auto`.
+const TOP_PER_COLUMN: i64 = 200;
+
 const FUNNEL_STATES: &[ListingState] = &[
     ListingState::Discovered,
     ListingState::Shortlisted,
@@ -18,8 +22,6 @@ const FUNNEL_STATES: &[ListingState] = &[
     ListingState::Submitted,
     ListingState::Responded,
 ];
-
-const TOP_PER_COLUMN: i64 = 3;
 
 pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
     let kpi = kpi_strip(pool).await?;

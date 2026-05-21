@@ -80,4 +80,5 @@ pub struct IndexView {
     pub columns: Vec<FunnelColumn>,
     pub next_steps: Vec<NextStep>,
     pub daemon_health: crate::daemon_health::DaemonHealth,
+    pub llm_health: crate::llm_health::LlmHealth,
 }
