@@ -30,6 +30,10 @@ ignore = [
     # `cargo tree -i rsa` confirms it isn't in the compiled graph. No
     # upstream fix exists yet.
     "RUSTSEC-2023-0071",
+    # RUSTSEC-2026-0141: lettre 0.11.21 TLS hostname verification bug with
+    # boring-tls backend. We use the default rustls backend, not boring-tls.
+    # Fix is in lettre >=0.11.22; ignore until upgraded.
+    "RUSTSEC-2026-0141",
 ]
 
 [licenses]

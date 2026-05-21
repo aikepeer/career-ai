@@ -29,8 +29,7 @@ pub enum LlmHealth {
 /// has a 500ms timeout so this caps at ~500ms worst case.
 pub async fn probe() -> LlmHealth {
     let api_fut = async {
-        std::env::var("ANTHROPIC_API_KEY").is_ok()
-            || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
+        std::env::var("ANTHROPIC_API_KEY").is_ok() || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
     };
     let cli_fut = async {
         tokio::time::timeout(
@@ -43,8 +42,7 @@ pub async fn probe() -> LlmHealth {
                 .status(),
         )
         .await
-        .map(|s| s.map_or(false, |st| st.success()))
-        .unwrap_or(false)
+        .is_ok_and(|s| s.is_ok_and(|st| st.success()))
     };
 
     let (has_api_key, has_claude_cli) = tokio::join!(api_fut, cli_fut);

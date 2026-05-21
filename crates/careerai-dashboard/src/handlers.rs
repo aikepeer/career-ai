@@ -37,12 +37,11 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
     // Probe the DB and the daemon-health concurrently — both are
     // independent and the daemon probe has its own 1.5s timeout, so
     // this caps total render latency at max(snapshot_ms, ~10ms).
-    let (snap_res, daemon_health, llm_health) =
-        tokio::join!(
-            data::snapshot(&state.pool),
-            crate::daemon_health::probe(),
-            crate::llm_health::probe(),
-        );
+    let (snap_res, daemon_health, llm_health) = tokio::join!(
+        data::snapshot(&state.pool),
+        crate::daemon_health::probe(),
+        crate::llm_health::probe(),
+    );
     let snap = snap_res?;
     let next_steps = next_steps::compute(&snap);
     let view = IndexView {

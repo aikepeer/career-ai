@@ -1,0 +1,112 @@
+name: DeepSeek Claude Code Agent
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  agent-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Secrets are not exposed to forked PRs, and running an AI agent on
+    # untrusted code could disclose secrets through prompt injection.
+    # Only run on branches from this repo, not forks.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if DeepSeek API key is configured
+        id: check-secret
+        env:
+          KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "DeepSeek API key not configured — skipping agent review"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        if: steps.check-secret.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install Claude Code
+        if: steps.check-secret.outputs.enabled == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Claude Code review with DeepSeek
+        if: steps.check-secret.outputs.enabled == 'true'
+        env:
+          ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic"
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_MODEL: "deepseek-v4-pro[1m]"
+          ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro[1m]"
+          ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro[1m]"
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"
+          CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"
+          CLAUDE_CODE_EFFORT_LEVEL: "max"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+          echo "=== Changed files in PR #$PR ==="
+          CHANGED=$(gh pr diff "$PR" --name-only 2>/dev/null | sort)
+          echo "$CHANGED"
+          echo ""
+
+          echo "=== Agent review ==="
+          REVIEW_FILE=$(mktemp)
+          claude -p "Review PR #$PR. Changed files:
+          $CHANGED
+
+          Audit each changed file for bugs, security issues, and code quality.
+
+          For each finding, output EXACTLY one line in this format:
+          FINDING|path|line|severity|description
+          Where severity is P1 (bug/security) or P2 (code quality).
+
+          Example:
+          FINDING|src/auth.go|42|P1|Missing nil check on user object
+          FINDING|src/db.go|15|P2|Unused import 'fmt'
+
+          Rules:
+          - Report only high-confidence findings (80%+ certainty)
+          - Skip style, formatting, or naming complaints
+          - If no issues found, output 'No issues found'
+          - Keep each description under 120 chars" \
+            --max-turns 12 \
+            2>&1 | tee "$REVIEW_FILE"
+
+          echo ""
+          echo "=== Posting review comments ==="
+          if grep -q 'No issues found' "$REVIEW_FILE"; then
+            gh pr comment "$PR" --body "## Claude Code Review
+
+          No issues found in this PR." || true
+          else
+            COMMENT_COUNT=0
+            grep '^FINDING|' "$REVIEW_FILE" | while IFS='|' read -r _ path line severity desc; do
+              if [ -n "$path" ] && [ -n "$line" ] && [ "$COMMENT_COUNT" -lt 10 ]; then
+                BADGE=""
+                case "$severity" in
+                  P1) BADGE="![P1](https://img.shields.io/badge/P1-orange?style=flat)" ;;
+                  P2) BADGE="![P2](https://img.shields.io/badge/P2-yellow?style=flat)" ;;
+                esac
+                gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/comments" \
+                  -f body="$BADGE $desc" \
+                  -f path="$path" \
+                  -f line="$line" \
+                  -f side="RIGHT" \
+                  -f commit_id="$(git rev-parse HEAD)" 2>/dev/null || true
+                COMMENT_COUNT=$((COMMENT_COUNT + 1))
+              fi
+            done
+            echo "Posted $COMMENT_COUNT inline review comments"
+          fi

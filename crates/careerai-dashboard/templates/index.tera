@@ -12,6 +12,9 @@
   if (theme) { document.documentElement.setAttribute('data-theme', theme); }
   function toggle() {
     var cur = document.documentElement.getAttribute('data-theme');
+    if (!cur) {
+      cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
     var next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('careerai-theme', next);

@@ -78,7 +78,10 @@ jobs:
       # driver is enabled. `cargo tree -i rsa` confirms it is absent from
       # the compiled graph. No upstream fix exists; safe to ignore until
       # sqlx prunes the unused dep.
-      - run: cargo audit --ignore RUSTSEC-2023-0071
+      # RUSTSEC-2026-0141: lettre 0.11.21 TLS hostname verification bug with
+      # boring-tls backend. We use the default rustls backend. Fix is in
+      # lettre >=0.11.22; ignore until upgraded.
+      - run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0141
 
   deny:
     name: cargo-deny
