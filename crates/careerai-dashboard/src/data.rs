@@ -19,8 +19,6 @@ const FUNNEL_STATES: &[ListingState] = &[
     ListingState::Responded,
 ];
 
-const TOP_PER_COLUMN: i64 = 3;
-
 pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
     let kpi = kpi_strip(pool).await?;
     let columns = funnel_columns(pool).await?;
@@ -70,7 +68,7 @@ async fn funnel_columns(pool: &SqlitePool) -> Result<Vec<FunnelColumn>> {
     let mut out = Vec::with_capacity(FUNNEL_STATES.len());
     for state in FUNNEL_STATES {
         let count = count_state(pool, *state).await?;
-        let top = top_listings(pool, *state, TOP_PER_COLUMN).await?;
+        let top = top_listings(pool, *state).await?;
         out.push(FunnelColumn {
             state: *state,
             label: label_for(*state),
@@ -123,18 +121,13 @@ async fn count_today_any_state(pool: &SqlitePool) -> Result<u64> {
     Ok(u64::try_from(n.max(0)).unwrap_or(0))
 }
 
-async fn top_listings(
-    pool: &SqlitePool,
-    state: ListingState,
-    limit: i64,
-) -> Result<Vec<ListingCard>> {
+async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<ListingCard>> {
     let rows = sqlx::query(
         "SELECT title, company, score, url, created_at \
          FROM listings WHERE state = ? \
-         ORDER BY score DESC NULLS LAST, created_at DESC LIMIT ?",
+         ORDER BY score DESC NULLS LAST, created_at DESC",
     )
     .bind(state.as_str())
-    .bind(limit)
     .fetch_all(pool)
     .await
     .map_err(careerai_db::error::DbError::from)?;

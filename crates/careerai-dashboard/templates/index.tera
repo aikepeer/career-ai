@@ -6,13 +6,33 @@
 <title>career-ai</title>
 {% if refresh_seconds and refresh_seconds > 0 %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
 <style>{{ css | safe }}</style>
+<script>
+(function() {
+  var theme = localStorage.getItem('careerai-theme');
+  if (theme) { document.documentElement.setAttribute('data-theme', theme); }
+  function toggle() {
+    var cur = document.documentElement.getAttribute('data-theme');
+    if (!cur) {
+      cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    var next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('careerai-theme', next);
+  }
+  window._toggleTheme = toggle;
+})();
+</script>
 </head>
 <body>
 <header>
   <div class="brand">career-ai</div>
   <div class="header-right">
+    <button class="theme-btn" onclick="window._toggleTheme()">theme</button>
     <span class="pill pill-{{ view.daemon_health }}">
       daemon: {{ view.daemon_health }}
+    </span>
+    <span class="pill pill-{{ view.llm_health }}">
+      llm: {{ view.llm_health }}
     </span>
     <span class="meta">read-only · refresh {{ refresh_seconds }}s</span>
   </div>
@@ -55,10 +75,6 @@
         </div>
       </article>
       {% endfor %}
-      {% set shown = col.top | length %}
-      {% if col.count > shown %}
-      <div class="card-overflow">+{{ col.count - shown }} more</div>
-      {% endif %}
     </div>
   </div>
   {% endfor %}

@@ -8,6 +8,7 @@ pub mod daemon_health;
 pub mod data;
 pub mod error;
 pub mod handlers;
+pub mod llm_health;
 pub mod next_steps;
 pub mod routes;
 pub mod view;

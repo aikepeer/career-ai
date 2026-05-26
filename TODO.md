@@ -59,6 +59,22 @@ none block the current release.
   `docs/MCP_TOOLS.md` (351 lines) with input/output schemas and
   error semantics.
 
+## Dashboard UI
+
+- [x] Make option in dashboard UI to have dark theme also.
+      (CSS custom properties + `data-theme` attribute + JS localStorage
+      toggle; dark is the default, light activates via button or
+      `prefers-color-scheme` media query.)
+- [x] In each pipeline-stage block (discovered, shortlisted, tailored,
+      rendered, applied, responded) have the option to browse all
+      items via scroll. (`TOP_PER_COLUMN=200` + `overflow-y: auto` on
+      `.col-body` + `max-height` on `.col`.)
+- [x] Claude is already logged in. Fix the program to use that
+      already. (Backend `Auto` choice prefers `claude` CLI when authed.
+      Dashboard `llm_health` probe checks `ANTHROPIC_API_KEY` /
+      `ANTHROPIC_AUTH_TOKEN` env + `claude` on PATH; status pill in
+      header alongside daemon health.)
+
 ## Out-of-scope ideas (parking lot)
 
 - BGE embedding-based scorer to replace `JaccardScorer`
