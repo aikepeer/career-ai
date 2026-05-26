@@ -81,6 +81,17 @@ pub async fn submit_application(
     };
 
     let source_lc = listing.source.to_ascii_lowercase();
+
+    // Check per-source enabled flag BEFORE constructing the submitter.
+    // Avoids a heap allocation when the source is disabled.
+    let per_source_enabled = cfg
+        .per_source
+        .get(source_lc.as_str())
+        .is_some_and(|s| s.enabled);
+    if !per_source_enabled {
+        return mark_skipped(pool, &application, &listing, "source disabled").await;
+    }
+
     let submitter: Box<dyn Submitter> = match source_lc.as_str() {
         "greenhouse" => Box::new(GreenhouseSubmitter::new()),
         "lever" => Box::new(LeverSubmitter::new()),
@@ -128,14 +139,6 @@ pub async fn submit_application(
         }
         other => return Err(SubmitError::UnknownSource(other.to_owned())),
     };
-
-    let per_source_enabled = cfg
-        .per_source
-        .get(source_lc.as_str())
-        .is_some_and(|s| s.enabled);
-    if !per_source_enabled {
-        return mark_skipped(pool, &application, &listing, "source disabled").await;
-    }
 
     let decision = if cfg.auto_submit {
         SubmitDecision::Live
@@ -214,7 +217,7 @@ async fn run_live(
                 "submission failed"
             );
             let note = format!("failed: {err}");
-            let _ = queries::transition_application_and_listing(
+            if let Err(transition_err) = queries::transition_application_and_listing(
                 pool,
                 &ctx.application.id,
                 &ctx.listing.id,
@@ -222,7 +225,15 @@ async fn run_live(
                 ListingState::Failed,
                 Some(&note),
             )
-            .await;
+            .await
+            {
+                warn!(
+                    target: "submit",
+                    application_id = %ctx.application.id,
+                    error = %transition_err,
+                    "failed to transition application to failed state after submission error"
+                );
+            }
             Err(err)
         }
     }

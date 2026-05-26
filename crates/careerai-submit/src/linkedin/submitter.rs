@@ -11,6 +11,7 @@ use crate::browser_session::{BrowserSession, BrowserSessionConfig};
 use crate::credentials::{self, Credential};
 use crate::error::{Result, SubmitError};
 use crate::rate_limiter::{RateLimiter, RatePermit};
+use tracing::warn;
 
 use super::config::LinkedinConfig;
 
@@ -47,13 +48,18 @@ impl LinkedinSubmitter {
     fn would_submit_for(&self, ctx: &SubmitContext<'_>) -> WouldSubmit {
         let safe_id = sanitize_external_id(&ctx.listing.external_id);
         let url = format!("{LINKEDIN_BASE}/jobs/view/{safe_id}/");
-        let preview = serde_json::to_string(&LinkedinPayloadPreview {
+        let preview = match serde_json::to_string(&LinkedinPayloadPreview {
             listing_id: &ctx.listing.id,
             listing_title: &ctx.listing.title,
             listing_company: &ctx.listing.company,
             artifact_kinds: ctx.artifacts.iter().map(|a| a.kind.as_str()).collect(),
-        })
-        .unwrap_or_default();
+        }) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, application_id = %ctx.application.id, "linkedin payload serialization failed; body_preview will be empty");
+                String::new()
+            }
+        };
         WouldSubmit {
             source: "linkedin",
             url,

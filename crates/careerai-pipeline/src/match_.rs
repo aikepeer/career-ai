@@ -1,6 +1,7 @@
 //! Match stage — filter rules + scoring against shortlisted listings.
 //! Extracted from `lib.rs` to keep that file under the 300-LOC cap.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -81,6 +82,12 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         }
     }
 
+    // Build a lookup map so scored listings can find their DB row
+    // in O(1) instead of scanning post_filter linearly (O(n²) before).
+    let lookup: HashMap<(String, String), &careerai_db::models::Listing> = post_filter
+        .iter()
+        .map(|(db, raw)| ((raw.source.clone(), raw.external_id.clone()), *db))
+        .collect();
     let profile_text = flatten_profile(&profile);
     let raws_only: Vec<RawListing> = post_filter.iter().map(|(_, r)| r.clone()).collect();
     let ranked = rank_all(&JaccardScorer, &profile_text, &raws_only);
@@ -113,12 +120,12 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
     let notify_threshold = cfg.matching.notify_threshold;
 
     for scored in &keep {
-        let db_row = post_filter
-            .iter()
-            .find(|(_, r)| {
-                r.source == scored.listing.source && r.external_id == scored.listing.external_id
-            })
-            .map(|(d, _)| d)
+        let db_row = lookup
+            .get(&(
+                scored.listing.source.clone(),
+                scored.listing.external_id.clone(),
+            ))
+            .copied()
             .context("bug: scored listing missing from post_filter map")?;
         queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
         queries::transition(
@@ -149,12 +156,12 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
     }
 
     for scored in &drop {
-        let db_row = post_filter
-            .iter()
-            .find(|(_, r)| {
-                r.source == scored.listing.source && r.external_id == scored.listing.external_id
-            })
-            .map(|(d, _)| d)
+        let db_row = lookup
+            .get(&(
+                scored.listing.source.clone(),
+                scored.listing.external_id.clone(),
+            ))
+            .copied()
             .context("bug: below-threshold listing missing")?;
         queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
         queries::transition(

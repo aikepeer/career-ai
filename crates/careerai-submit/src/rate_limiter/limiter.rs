@@ -5,6 +5,7 @@ use std::time::Duration;
 use chrono::Timelike;
 use rand::Rng;
 use tokio::sync::Mutex;
+use tracing::warn;
 
 use super::permit::RatePermit;
 use super::types::{
@@ -114,13 +115,24 @@ impl RateLimiter {
         Ok((entry.limiter.clone(), target_day))
     }
 
-    /// Refund a reservation made by `acquire`. Best-effort (try_lock).
+    /// Refund a reservation made by `acquire`. Best-effort; logs a
+    /// warning when the lock is contended so operators can detect
+    /// sustained rate-limit drift.
     pub(crate) fn refund(&self, source: &str, reserved_day: UtcDay) {
-        if let Ok(mut map) = self.inner.try_lock() {
-            if let Some(entry) = map.get_mut(source) {
-                if entry.day == reserved_day {
-                    entry.count_today = entry.count_today.saturating_sub(1);
+        match self.inner.try_lock() {
+            Ok(mut map) => {
+                if let Some(entry) = map.get_mut(source) {
+                    if entry.day == reserved_day {
+                        entry.count_today = entry.count_today.saturating_sub(1);
+                    }
                 }
+            }
+            Err(_) => {
+                warn!(
+                    target = "rate_limiter",
+                    source = %source,
+                    "rate-limit refund dropped: lock contended; day-cap counter may drift slightly"
+                );
             }
         }
     }

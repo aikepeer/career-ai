@@ -134,6 +134,77 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     out
 }
 
+/// Build a single source adapter by name. Used by `discover_one` to
+/// avoid constructing every configured adapter when the scheduler fires
+/// a per-source cron tick. Returns `None` when no enabled source
+/// matches `name` (caller should treat this as a no-op, not an error).
+fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
+    match name {
+        "greenhouse" => {
+            cfg.sources.greenhouse.companies.first().map(|company| {
+                Arc::new(GreenhouseSource::new(company.clone())) as Arc<dyn Source>
+            })
+        }
+        "lever" => cfg.sources.lever.companies.first().map(|company| {
+            Arc::new(LeverSource::new(company.clone())) as Arc<dyn Source>
+        }),
+        "ashby" => cfg.sources.ashby.companies.first().map(|company| {
+            Arc::new(careerai_sources::AshbySource::new(company.clone())) as Arc<dyn Source>
+        }),
+        "remotive" if cfg.sources.remotive.enabled => {
+            let mut s = RemotiveSource::new();
+            if let Some(cat) = &cfg.sources.remotive.category {
+                s = s.with_category(cat.clone());
+            }
+            Some(Arc::new(s))
+        }
+        "remoteok" if cfg.sources.remoteok.enabled => {
+            Some(Arc::new(RemoteOkSource::new()))
+        }
+        "naukri" if cfg.sources.naukri.enabled => {
+            let mut s = NaukriSource::new();
+            if !cfg.sources.naukri.keywords.is_empty() {
+                s = s.with_keywords(cfg.sources.naukri.keywords.clone());
+            }
+            if let Some(loc) = &cfg.sources.naukri.location {
+                s = s.with_location(loc.clone());
+            }
+            if let Some(n) = cfg.sources.naukri.max_results {
+                s = s.with_max_results(n);
+            }
+            Some(Arc::new(s))
+        }
+        "indeed_rss" if cfg.sources.indeed_rss.enabled => {
+            Some(Arc::new(IndeedRssSource::new(cfg.sources.indeed_rss.clone())))
+        }
+        #[cfg(feature = "browser")]
+        "linkedin_browser" if cfg.sources.linkedin_browser.enabled => {
+            Some(Arc::new(careerai_sources::LinkedinBrowserSource::new(
+                cfg.sources.linkedin_browser.clone(),
+            )))
+        }
+        #[cfg(not(feature = "browser"))]
+        "linkedin_browser" if cfg.sources.linkedin_browser.enabled => {
+            tracing::warn!(
+                "linkedin_browser source is enabled in config but `browser` feature is OFF; \
+                 rebuild with `cargo build --features browser` to activate it"
+            );
+            None
+        }
+        _ => {
+            // MCP sources are keyed by their configured name, not a fixed
+            // string. Fall back to scanning the mcp config list.
+            cfg.sources.mcp.iter().find_map(|mcp| {
+                if mcp.enabled && mcp.name == name {
+                    Some(Arc::new(McpJobsSource::new(mcp.clone())) as Arc<dyn Source>)
+                } else {
+                    None
+                }
+            })
+        }
+    }
+}
+
 pub async fn discover_all(
     root: &Path,
     cfg: &CoreConfig,
@@ -189,13 +260,48 @@ pub async fn discover_all(
 /// Run discovery for a single configured source. Used by the scheduler's
 /// per-source cron tick — each tick fires this for exactly one source.
 ///
-/// Internally delegates to `discover_all` with a one-element filter so the
-/// adapter-construction logic stays in one place. Returns an empty report
-/// (with no error) if `source` doesn't match any enabled adapter, matching
-/// the behavior of `discover_all` with an unmatched filter.
+/// Constructs only the requested source adapter via `build_one_source`,
+/// avoiding the full `build_sources()` allocation (every adapter, every
+/// tick). Returns an empty report (with no error) if `source` doesn't
+/// match any enabled adapter.
 pub async fn discover_one(root: &Path, cfg: &CoreConfig, source: &str) -> Result<DiscoveryReport> {
-    let filter = [source.to_owned()];
-    discover_all(root, cfg, &filter).await
+    let Some(source_adapter) = build_one_source(cfg, source) else {
+        return Ok(DiscoveryReport::default());
+    };
+    let pool = open_pool(root).await?;
+    let mut report = DiscoveryReport::default();
+    let name = source_adapter.name();
+    match source_adapter.discover().await {
+        Ok(listings) => {
+            info!(source = name, count = listings.len(), "discovered");
+            report.fetched += listings.len();
+            for raw in listings {
+                let new = NewListing {
+                    source: raw.source,
+                    external_id: raw.external_id,
+                    title: raw.title,
+                    company: raw.company,
+                    location: raw.location,
+                    url: raw.url,
+                    description: raw.description,
+                    raw_json: raw.raw_json,
+                };
+                match queries::insert_or_ignore(&pool, &new).await {
+                    Ok((_, true)) => report.new_rows += 1,
+                    Ok((_, false)) => report.duplicates += 1,
+                    Err(e) => {
+                        warn!(error = %e, "persist failed");
+                        report.errors += 1;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            warn!(source = name, error = %e, "source failed");
+            report.errors += 1;
+        }
+    }
+    Ok(report)
 }
 
 #[derive(Debug, Default)]
