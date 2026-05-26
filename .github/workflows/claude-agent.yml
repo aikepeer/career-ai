@@ -102,7 +102,7 @@ jobs:
           EFFORT: ${{ steps.diff_size.outputs.effort }}
           DIFF_LINES: ${{ steps.diff_size.outputs.lines }}
         run: |
-          set -eo pipefail
+          set -euo pipefail
 
           # ── Create temp files ─────────────────────────────────────────
           DIFF_FILE=$(mktemp)
