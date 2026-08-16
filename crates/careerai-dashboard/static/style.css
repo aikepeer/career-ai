@@ -544,14 +544,24 @@ header {
 /* TAB 3: CONFIG & SOURCES */
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+}
+@media (max-width: 900px) {
+  .config-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .config-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 20px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.config-card-full {
+  grid-column: 1 / -1;
 }
 .config-card-header {
   display: flex;
@@ -770,8 +780,8 @@ footer {
 }
 
 .config-form-card { grid-column: 1 / -1; }
-.config-form { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
+.config-form { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; width: 100%; box-sizing: border-box; }
+.form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-group label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
 .form-control {
   background: var(--bg-input);
@@ -780,9 +790,13 @@ footer {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   font-size: 13px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .form-control:focus { outline: none; border-color: var(--accent-indigo); }
-.form-actions { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.form-actions { display: flex; align-items: center; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
 .btn-primary {
   background: var(--accent-indigo);
   color: #ffffff;
@@ -792,6 +806,8 @@ footer {
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .btn-primary:hover { opacity: 0.9; }
 .save-status { font-size: 12px; font-weight: 600; color: var(--accent-emerald); }

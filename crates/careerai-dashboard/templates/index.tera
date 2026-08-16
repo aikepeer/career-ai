@@ -358,8 +358,8 @@
         </form>
       </div>
 
-      <!-- Profile Import + Editable Profile Card -->
-      <div class="config-card">
+      <!-- Profile Import + Editable Profile Card — FULL WIDTH -->
+      <div class="config-card config-card-full">
         <div class="config-card-header">
           <h3>👤 Candidate Profile</h3>
           <span class="pill pill-info">Upload &amp; Edit</span>
@@ -367,11 +367,11 @@
         <!-- Multi-file Upload (Resume + LinkedIn ZIP) -->
         <form id="profile-import-form" onsubmit="importProfile(event)" class="config-form" style="margin-bottom:16px;">
           <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
-            <div class="form-group" style="flex:1; min-width:200px;">
+            <div class="form-group" style="flex:1; min-width:220px;">
               <label for="profile-resume-file">📄 Resume (PDF / DOCX)</label>
               <input type="file" id="profile-resume-file" name="resume" class="form-control" accept=".pdf,.doc,.docx,.yaml,.json">
             </div>
-            <div class="form-group" style="flex:1; min-width:200px;">
+            <div class="form-group" style="flex:1; min-width:220px;">
               <label for="profile-linkedin-file">💼 LinkedIn Export ZIP</label>
               <input type="file" id="profile-linkedin-file" name="linkedin" class="form-control" accept=".zip,.pdf">
             </div>
@@ -384,7 +384,7 @@
         <!-- Inline Editable Profile Form -->
         <div id="profile-editor" style="border-top:1px solid var(--border); padding-top:16px;">
           <h4 style="margin-bottom:12px; color:var(--text-secondary); font-size:13px; font-weight:600;">PROFILE DETAILS</h4>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
             <div class="form-group">
               <label for="pf-name">Full Name</label>
               <input type="text" id="pf-name" class="form-control" value="{{ view.config.profile.name | default(value='') }}" placeholder="Your full name">
@@ -406,7 +406,7 @@
             <label for="pf-roles">Target Roles (comma-separated)</label>
             <input type="text" id="pf-roles" class="form-control" value="{{ view.config.profile.target_roles | default(value=[]) | join(sep=', ') }}" placeholder="Embedded Systems Engineer, Robotics SWE">
           </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:12px;">
             <div class="form-group">
               <label for="pf-languages">Languages / Stack (comma-separated)</label>
               <input type="text" id="pf-languages" class="form-control" value="{{ view.config.profile.languages | default(value=[]) | join(sep=', ') }}" placeholder="Rust, Python, C++">
@@ -415,10 +415,10 @@
               <label for="pf-frameworks">Frameworks &amp; Platforms</label>
               <input type="text" id="pf-frameworks" class="form-control" value="{{ view.config.profile.frameworks | default(value=[]) | join(sep=', ') }}" placeholder="ROS2, Linux, Yocto, PyTorch">
             </div>
-          </div>
-          <div class="form-group" style="margin-top:12px;">
-            <label for="pf-tools">Tools &amp; DevOps</label>
-            <input type="text" id="pf-tools" class="form-control" value="{{ view.config.profile.tools | default(value=[]) | join(sep=', ') }}" placeholder="Git, Docker, GDB, Jira">
+            <div class="form-group">
+              <label for="pf-tools">Tools &amp; DevOps</label>
+              <input type="text" id="pf-tools" class="form-control" value="{{ view.config.profile.tools | default(value=[]) | join(sep=', ') }}" placeholder="Git, Docker, GDB, Jira">
+            </div>
           </div>
           <div class="form-actions" style="margin-top:16px;">
             <button type="button" class="btn-primary" onclick="saveProfile()">💾 Save Profile</button>
@@ -427,15 +427,18 @@
         </div>
       </div>
 
-      <!-- LLM Config Prompt Chat Assistant -->
-      <div class="config-card" style="margin-top:16px;">
-        <h3>💬 Config Prompt Assistant</h3>
-        <p class="card-subtitle" style="margin-bottom:12px;">Describe your target jobs in plain language to get keyword suggestions for <code>config/local.yaml</code></p>
-        <div style="display:flex; gap:8px; margin-bottom:12px;">
-          <input type="text" id="config-chat-input" class="form-control" placeholder='e.g. "Focus on Remote Embedded Linux and Freelance AI jobs in India"' style="flex:1;">
-          <button onclick="sendConfigPrompt()" class="btn-primary" style="white-space:nowrap;">💡 Get Suggestions</button>
+      <!-- LLM Config Prompt Chat Assistant — FULL WIDTH -->
+      <div class="config-card config-card-full">
+        <div class="config-card-header">
+          <h3>💬 Config Prompt Assistant</h3>
+          <span class="pill pill-info">AI Suggestions</span>
         </div>
-        <div id="config-chat-response" style="background:var(--surface-2); border-radius:8px; padding:12px; font-family:monospace; font-size:0.82rem; white-space:pre-wrap; color:var(--text-muted); display:none;"></div>
+        <p class="card-subtitle" style="margin-bottom:12px; color:var(--text-secondary); font-size:13px;">Describe your target jobs in plain language to get keyword suggestions for <code>config/local.yaml</code></p>
+        <div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+          <input type="text" id="config-chat-input" class="form-control" placeholder='e.g. "Focus on Remote Embedded Linux and Freelance AI jobs in India"' style="flex:1; min-width:240px;">
+          <button onclick="sendConfigPrompt()" class="btn-primary" style="flex-shrink:0;">💡 Get Suggestions</button>
+        </div>
+        <div id="config-chat-response" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px; font-family:var(--mono); font-size:12px; white-space:pre-wrap; color:var(--text-secondary); display:none;"></div>
       </div>
     </div>
   </div>
