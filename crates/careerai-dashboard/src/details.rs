@@ -6,7 +6,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::error::Result;
 use crate::view::{
-    ActionItem, ApplicationDetail, ArtifactItem, ConfigSourceItem, ConfigView, EventLogItem,
+    ActionItem, ApplicationDetail, ArtifactItem, ConfigView, EventLogItem,
 };
 
 fn relative_time_label(ts: DateTime<Utc>) -> String {
