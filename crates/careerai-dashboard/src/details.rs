@@ -55,22 +55,22 @@ pub async fn fetch_discovered_explorer(
 ) -> Result<Vec<crate::view::DiscoveredExplorerItem>> {
     let rows = sqlx::query(
         "SELECT id, title, company, location, source, state, score, is_remote, url, created_at \
-         FROM listings WHERE state IN ('discovered', 'filtered_out') \
-         ORDER BY created_at DESC LIMIT ?",
+         FROM listings ORDER BY created_at DESC LIMIT ?",
     )
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(careerai_db::error::DbError::from)?;
+    .unwrap_or_default();
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let id: String = row.try_get("id").map_err(careerai_db::error::DbError::from)?;
-        let title: String = row.try_get("title").map_err(careerai_db::error::DbError::from)?;
-        let company: String = row.try_get("company").map_err(careerai_db::error::DbError::from)?;
+        let id: String = row.try_get("id").unwrap_or_default();
+        if id.is_empty() { continue; }
+        let title: String = row.try_get("title").unwrap_or_default();
+        let company: String = row.try_get("company").unwrap_or_default();
         let location: Option<String> = row.try_get("location").ok();
         let source: String = row.try_get("source").unwrap_or_else(|_| "unknown".to_string());
-        let state: String = row.try_get("state").map_err(careerai_db::error::DbError::from)?;
+        let state: String = row.try_get("state").unwrap_or_default();
         let score_f64: Option<f64> = row.try_get("score").ok();
         let score = score_f64.map(|s| s as f32);
         let is_remote_i64: Option<i64> = row.try_get("is_remote").ok();
