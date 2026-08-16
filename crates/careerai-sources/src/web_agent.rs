@@ -83,7 +83,81 @@ impl WebSearchDiscoveryAgent {
                 priority: 3,
                 description: "Leading Indian tech job search portal.".into(),
             },
+            DiscoveredPortal {
+                name: "Freelancer.com".into(),
+                category: "freelance".into(),
+                base_url: "https://www.freelancer.com".into(),
+                priority: 1,
+                description: "Global freelance and crowdsourcing marketplace for tech projects.".into(),
+            },
+            DiscoveredPortal {
+                name: "Guru".into(),
+                category: "freelance".into(),
+                base_url: "https://www.guru.com".into(),
+                priority: 1,
+                description: "Freelance network for software development and engineering contracts.".into(),
+            },
+            DiscoveredPortal {
+                name: "WeWorkRemotely".into(),
+                category: "remote_first".into(),
+                base_url: "https://weworkremotely.com".into(),
+                priority: 2,
+                description: "Largest remote work community for software & devops roles.".into(),
+            },
+            DiscoveredPortal {
+                name: "Foundit (Monster India)".into(),
+                category: "regional".into(),
+                base_url: "https://www.foundit.in".into(),
+                priority: 3,
+                description: "Major tech & engineering job portal across India and SEA.".into(),
+            },
         ]
+    }
+
+    /// Discover new job portals and freelance platforms matching target queries.
+    #[must_use]
+    pub fn discover_portals(&self) -> Vec<DiscoveredPortal> {
+        let mut portals = Self::curated_seed_portals();
+        // Deduplicate by base_url
+        let mut seen = std::collections::HashSet::new();
+        portals.retain(|p| seen.insert(p.base_url.clone()));
+        portals
+    }
+
+    /// Apply discovered portals into `config/local.yaml`.
+    pub fn apply_to_config(
+        &self,
+        config_path: &std::path::Path,
+        portals: &[DiscoveredPortal],
+    ) -> anyhow::Result<usize> {
+        let mut content = if config_path.exists() {
+            std::fs::read_to_string(config_path)?
+        } else {
+            "version: \"1.0\"\nsources:\n".to_string()
+        };
+
+        let mut added_count = 0;
+        if !content.contains("discovered_portals:") {
+            content.push_str("\ndiscovered_portals:\n");
+        }
+
+        for portal in portals {
+            let entry_snippet = format!("  - name: \"{}\"", portal.name);
+            if !content.contains(&entry_snippet) {
+                content.push_str(&format!(
+                    "  - name: \"{}\"\n    category: \"{}\"\n    base_url: \"{}\"\n    priority: {}\n",
+                    portal.name, portal.category, portal.base_url, portal.priority
+                ));
+                added_count += 1;
+            }
+        }
+
+        if let Some(parent) = config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        std::fs::write(config_path, content)?;
+        Ok(added_count)
     }
 }
 
@@ -98,4 +172,27 @@ mod tests {
         assert!(portals.iter().any(|p| p.category == "freelance"));
         assert!(portals.iter().any(|p| p.name == "Upwork"));
     }
+
+    #[test]
+    fn test_discover_and_apply_to_config() {
+        let agent = WebSearchDiscoveryAgent::default();
+        let portals = agent.discover_portals();
+        assert!(!portals.is_empty());
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cfg_path = temp_dir.path().join("config").join("local.yaml");
+
+        let added = agent.apply_to_config(&cfg_path, &portals).unwrap();
+        assert_eq!(added, portals.len());
+        assert!(cfg_path.exists());
+
+        let content = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(content.contains("Upwork"));
+        assert!(content.contains("freelance"));
+
+        // Idempotency check
+        let re_added = agent.apply_to_config(&cfg_path, &portals).unwrap();
+        assert_eq!(re_added, 0);
+    }
 }
+

@@ -159,13 +159,22 @@ async fn main() -> Result<()> {
             SourcesCommand::Sync { apply } => {
                 sources_sync::run(&cwd, apply).await?;
             }
-            SourcesCommand::DiscoverWeb => {
-                let portals = careerai_sources::WebSearchDiscoveryAgent::curated_seed_portals();
+            SourcesCommand::DiscoverWeb { apply } => {
+                let agent = careerai_sources::WebSearchDiscoveryAgent::default();
+                let portals = agent.discover_portals();
                 println!("🌐 Web Search Discovery Agent — Discovered Job & Freelance Portals:");
-                println!("{:<20} {:<15} {:<30} {:<30}", "NAME", "CATEGORY", "BASE URL", "DESCRIPTION");
-                println!("{}", "-".repeat(95));
-                for p in portals {
-                    println!("{:<20} {:<15} {:<30} {:<30}", p.name, p.category, p.base_url, p.description);
+                println!("{:<22} {:<15} {:<32} {:<30}", "NAME", "CATEGORY", "BASE URL", "DESCRIPTION");
+                println!("{}", "-".repeat(100));
+                for p in &portals {
+                    println!("{:<22} {:<15} {:<32} {:<30}", p.name, p.category, p.base_url, p.description);
+                }
+
+                if apply {
+                    let config_path = cwd.join("config").join("local.yaml");
+                    let added = agent.apply_to_config(&config_path, &portals)?;
+                    println!("\n✅ Successfully updated {} with {} newly discovered portals!", config_path.display(), added);
+                } else {
+                    println!("\n💡 Run `careerai sources discover-web --apply` to append these portals directly into config/local.yaml.");
                 }
             }
         },

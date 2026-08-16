@@ -126,7 +126,11 @@ pub enum SourcesCommand {
         apply: bool,
     },
     /// Discover new job portals and freelance platforms via Web Search Agent.
-    DiscoverWeb,
+    DiscoverWeb {
+        /// Write discovered job and freelance portals into config/local.yaml
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
