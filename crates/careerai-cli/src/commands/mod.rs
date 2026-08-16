@@ -10,6 +10,7 @@
 //! top-level `Command` enum without ballooning its line count.
 
 pub mod apply;
+pub mod config_cmd;
 pub mod discover;
 pub mod inspect;
 pub mod llm;
@@ -23,6 +24,15 @@ pub mod shortlist;
 pub mod tailor;
 
 use clap::Subcommand;
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigSubcommand {
+    /// Generate exhaustive `config/local.yaml` from candidate profile.
+    Generate {
+        #[arg(long)]
+        force: bool,
+    },
+}
 
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
@@ -115,6 +125,8 @@ pub enum SourcesCommand {
         #[arg(long)]
         apply: bool,
     },
+    /// Discover new job portals and freelance platforms via Web Search Agent.
+    DiscoverWeb,
 }
 
 #[derive(Debug, Subcommand)]

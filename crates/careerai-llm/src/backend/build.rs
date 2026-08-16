@@ -26,7 +26,7 @@ use crate::rig::{Provider, RigLlm};
 #[cfg(feature = "live-llm-cli")]
 use super::auth::probe_claude_auth;
 #[cfg(feature = "live-llm-api")]
-use super::key::{api_key_source, read_api_key};
+use super::key::{api_key_source, detect_provider, read_api_key};
 use super::{Backend, BackendError};
 
 pub(super) async fn resolve_auto(
@@ -44,7 +44,7 @@ pub(super) async fn resolve_auto(
                     binary = %bin.display(),
                     "auto-resolved backend: claude-cli"
                 );
-                let model = pick_default_model(cfg);
+                let model = pick_default_model(cfg, Provider::Anthropic);
                 return Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
                     bin,
                     model,
@@ -85,13 +85,42 @@ pub(super) async fn build_cli(
         return Err(BackendError::CliNotAuthenticated);
     }
 
-    let model = pick_default_model(cfg);
+    let model = pick_default_model(cfg, Provider::Anthropic);
     Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
         bin,
         model,
         cache,
         cfg.timeout_seconds.max(1),
     )))
+}
+
+#[cfg(feature = "live-llm-cli")]
+pub(super) async fn build_named_cli(
+    name: &str,
+    cfg: &LlmConfig,
+    cache: Arc<Cache>,
+) -> std::result::Result<Backend, BackendError> {
+    let bin = crate::claude_cli::locate_named_binary(name).map_err(|e| match e {
+        ClaudeCliError::NotInstalled => BackendError::CliMissing,
+        other => BackendError::Llm(crate::error::LlmError::from(other)),
+    })?;
+
+    let model = pick_default_model(cfg, Provider::Anthropic);
+    Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
+        bin,
+        model,
+        cache,
+        cfg.timeout_seconds.max(1),
+    )))
+}
+
+#[cfg(not(feature = "live-llm-cli"))]
+pub(super) async fn build_named_cli(
+    _name: &str,
+    _cfg: &LlmConfig,
+    _cache: Arc<Cache>,
+) -> std::result::Result<Backend, BackendError> {
+    Err(BackendError::FeatureDisabled("claude-cli"))
 }
 
 #[cfg(not(feature = "live-llm-cli"))]
@@ -108,9 +137,10 @@ pub(super) fn build_api(
     cache: Arc<Cache>,
 ) -> std::result::Result<Backend, BackendError> {
     let key = read_api_key().ok_or(BackendError::ApiKeyMissing)?;
-    let model = pick_default_model(cfg);
+    let provider = detect_provider();
+    let model = pick_default_model(cfg, provider);
     let llm = RigLlm::with_api_key(
-        Provider::Anthropic,
+        provider,
         key,
         model,
         cache,
@@ -119,7 +149,8 @@ pub(super) fn build_api(
     .map_err(BackendError::Llm)?;
     info!(
         target = "careerai_llm::backend",
-        "auto-resolved backend: anthropic-api"
+        ?provider,
+        "resolved API backend"
     );
     Ok(Backend::Api(llm))
 }
@@ -134,13 +165,23 @@ pub(super) fn build_api(
 
 /// Pick the default model for the resolved backend. Tailor model wins,
 /// then parse_resume_model, then a hard-coded sensible default.
-pub(super) fn pick_default_model(cfg: &LlmConfig) -> String {
-    let candidate = if !cfg.tailor_model.is_empty() {
+pub(super) fn pick_default_model(cfg: &LlmConfig, _provider: Provider) -> String {
+    if let Ok(m) = std::env::var("LLM_MODEL")
+        .or_else(|_| std::env::var("CAREERAI_LLM_MODEL"))
+        .or_else(|_| std::env::var("MODEL"))
+    {
+        if !m.trim().is_empty() {
+            return strip_provider_prefix(m.trim()).to_string();
+        }
+    }
+    let candidate = if !cfg.model.is_empty() {
+        cfg.model.as_str()
+    } else if !cfg.tailor_model.is_empty() {
         cfg.tailor_model.as_str()
     } else if !cfg.parse_resume_model.is_empty() {
         cfg.parse_resume_model.as_str()
     } else {
-        "sonnet"
+        ""
     };
     strip_provider_prefix(candidate).to_string()
 }

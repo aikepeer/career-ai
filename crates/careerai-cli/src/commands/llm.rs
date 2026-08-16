@@ -24,11 +24,11 @@ pub async fn run_probe(
 
         // Two lines when the operator forced something: their request
         // and what would actually resolve. One line otherwise.
-        if let Some(forced) = probe.forced {
-            println!("forced:           {}", forced.as_str());
-            println!("would-resolve-to: {}", probe.chosen.as_str());
+        if let Some(ref forced) = probe.forced {
+            println!("active backend:      {} (forced via --llm-backend)", forced.as_str());
+            println!("auto-detect default: {}", probe.chosen.as_str());
         } else {
-            println!("backend: {}", probe.chosen.as_str());
+            println!("active backend:      {} (auto-detected)", probe.chosen.as_str());
         }
 
         if let Some(bin) = &probe.claude_binary {
@@ -51,8 +51,8 @@ pub async fn run_probe(
             println!("  claude binary: not found on PATH");
         }
         match probe.api_key_source {
-            Some(src) => println!("  ANTHROPIC key: present ({src})"),
-            None => println!("  ANTHROPIC key: not set"),
+            Some(src) => println!("  API key:       present ({src})"),
+            None => println!("  API key:       not set"),
         }
 
         // Auto with nothing reachable is hard-fail (exit 1 via anyhow).
@@ -99,7 +99,7 @@ pub(crate) async fn probe_forced_resolve(
     let cache_root = tempfile::tempdir()
         .map_err(|e| careerai_llm::BackendError::Llm(careerai_llm::LlmError::Io(e)))?;
     let cache = Arc::new(careerai_llm::Cache::new(cache_root.path().to_path_buf()));
-    let res = careerai_llm::Backend::resolve(llm_cfg.backend, llm_cfg, cache)
+    let res = careerai_llm::Backend::resolve(llm_cfg.backend.clone(), llm_cfg, cache)
         .await
         .map(|_| ());
     drop(cache_root);

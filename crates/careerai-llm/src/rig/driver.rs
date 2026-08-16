@@ -63,6 +63,8 @@ enum Http {
 /// Real provider impl of [`Llm`]. Only available under `--features live-llm-api`.
 pub struct RigLlm {
     http: Http,
+    api_key: String,
+    api_base_url: Option<String>,
     model: String,
     /// Carried for future on-disk cache plumbing. The trait's
     /// [`LlmResponse::cache_hit`] field is wired through the `Cache` type,
@@ -81,6 +83,7 @@ impl std::fmt::Debug for RigLlm {
         f.debug_struct("RigLlm")
             .field("provider", &self.provider())
             .field("model", &self.model)
+            .field("base_url", &self.api_base_url)
             .field("cache", &"<cache>")
             .field("timeout", &self.timeout)
             .finish_non_exhaustive()
@@ -138,17 +141,37 @@ impl RigLlm {
         cache: Arc<Cache>,
         timeout_seconds: u64,
     ) -> Result<Self> {
+        let base_url = std::env::var("LLM_API_BASE_URL")
+            .or_else(|_| std::env::var("LLM_BASE_URL"))
+            .or_else(|_| std::env::var("CAREERAI_LLM_API_BASE_URL"))
+            .or_else(|_| std::env::var("DEEPSEEK_API_BASE_URL"))
+            .or_else(|_| std::env::var("OPENAI_API_BASE_URL"))
+            .or_else(|_| std::env::var("OPENROUTER_API_BASE_URL"))
+            .or_else(|_| std::env::var("OLLAMA_API_BASE_URL"))
+            .or_else(|_| std::env::var("ANTHROPIC_BASE_URL"))
+            .ok();
+
         let http = match provider {
             Provider::Anthropic => {
-                let client = anthropic::client::ClientBuilder::new(&api_key)
-                    .anthropic_beta(ANTHROPIC_PROMPT_CACHE_BETA)
-                    .build();
-                Http::Anthropic(client)
+                let mut builder = anthropic::client::ClientBuilder::new(&api_key)
+                    .anthropic_beta(ANTHROPIC_PROMPT_CACHE_BETA);
+                if let Some(ref url) = base_url {
+                    builder = builder.base_url(url);
+                }
+                Http::Anthropic(builder.build())
             }
-            Provider::OpenAI => Http::OpenAi(openai::Client::new(&api_key)),
+            Provider::OpenAI => {
+                let client = match base_url {
+                    Some(ref url) => openai::Client::from_url(&api_key, url),
+                    None => openai::Client::new(&api_key),
+                };
+                Http::OpenAi(client)
+            }
         };
         Ok(Self {
             http,
+            api_key,
+            api_base_url: base_url,
             model: model.into(),
             cache,
             timeout: Duration::from_secs(timeout_seconds),
@@ -234,17 +257,17 @@ impl RigLlm {
                     .map_err(reqwest_to_llm_err)?;
                 parse_anthropic_response(resp).await
             }
-            Http::OpenAi(client) => {
+            Http::OpenAi(_client) => {
                 let body = self.openai_body(req);
-                // `openai::Client::post` is crate-private, so drive the
-                // request through rig's public surface instead.
-                let _ = client; // reserved for future use (streaming etc.)
-                let api_key = std::env::var("OPENAI_API_KEY")
-                    .map_err(|_| LlmError::Upstream("OPENAI_API_KEY unset at call time".into()))?;
+                let endpoint_url = match &self.api_base_url {
+                    Some(base) => join_chat_completions_url(base),
+                    None => "https://api.openai.com/v1/chat/completions".to_string(),
+                };
+
                 let http = reqwest::Client::new();
                 let resp = http
-                    .post("https://api.openai.com/v1/chat/completions")
-                    .bearer_auth(api_key)
+                    .post(&endpoint_url)
+                    .bearer_auth(&self.api_key)
                     .json(&body)
                     .send()
                     .await
@@ -291,5 +314,45 @@ impl Llm for RigLlm {
         );
 
         Ok(response)
+    }
+}
+
+pub(crate) fn join_chat_completions_url(base: &str) -> String {
+    let trimmed = base.trim().trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else if trimmed.ends_with("/v1") {
+        format!("{trimmed}/chat/completions")
+    } else {
+        format!("{trimmed}/v1/chat/completions")
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::join_chat_completions_url;
+
+    #[test]
+    fn test_join_chat_completions_url() {
+        assert_eq!(
+            join_chat_completions_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            join_chat_completions_url("https://api.deepseek.com/"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            join_chat_completions_url("https://api.deepseek.com/v1"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            join_chat_completions_url("https://api.deepseek.com/v1/"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            join_chat_completions_url("https://api.deepseek.com/v1/chat/completions"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
     }
 }

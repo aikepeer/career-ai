@@ -19,6 +19,9 @@ pub mod naukri;
 pub mod remoteok;
 pub mod remotive;
 pub mod util;
+pub mod web_agent;
+
+pub use web_agent::{DiscoveredPortal, WebSearchDiscoveryAgent};
 
 pub use ashby::AshbySource;
 pub use base::{RawListing, Source, SourceError};

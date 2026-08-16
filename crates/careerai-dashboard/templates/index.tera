@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>career-ai</title>
+<title>career-ai · Dashboard</title>
 {% if refresh_seconds and refresh_seconds > 0 %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
 <style>{{ css | safe }}</style>
 <script>
 (function() {
   var theme = localStorage.getItem('careerai-theme');
   if (theme) { document.documentElement.setAttribute('data-theme', theme); }
-  function toggle() {
+  window._toggleTheme = function() {
     var cur = document.documentElement.getAttribute('data-theme');
     if (!cur) {
       cur = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
@@ -18,83 +18,733 @@
     var next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('careerai-theme', next);
-  }
-  window._toggleTheme = toggle;
+  };
 })();
 </script>
 </head>
 <body>
 <header>
-  <div class="brand">career-ai</div>
+  <div class="brand-container">
+    <div class="brand-glow"></div>
+    <span class="brand">career-ai</span>
+    <span class="brand-sub">MVP Dashboard</span>
+  </div>
+
+  <nav class="tab-nav">
+    <button class="nav-btn active" id="tab-btn-funnel" onclick="switchTab('funnel')">
+      <span class="nav-icon">📊</span> Pipeline & Funnel
+    </button>
+    <button class="nav-btn" id="tab-btn-events" onclick="switchTab('events')">
+      <span class="nav-icon">⚡</span> Audit Events
+      {% if view.recent_events | length > 0 %}
+      <span class="tab-badge">{{ view.recent_events | length }}</span>
+      {% endif %}
+    </button>
+    <button class="nav-btn" id="tab-btn-config" onclick="switchTab('config')">
+      <span class="nav-icon">⚙️</span> Config & Sources
+    </button>
+    <button class="nav-btn" id="tab-btn-actions" onclick="switchTab('actions')">
+      <span class="nav-icon">🎯</span> Action Center
+      {% if view.action_items | length > 0 %}
+      <span class="tab-badge badge-accent">{{ view.action_items | length }}</span>
+      {% endif %}
+    </button>
+    <button class="nav-btn" id="tab-btn-explorer" onclick="switchTab('explorer')">
+      <span class="nav-icon">🔍</span> Discovered Explorer
+      {% if view.discovered_explorer | length > 0 %}
+      <span class="tab-badge">{{ view.discovered_explorer | length }}</span>
+      {% endif %}
+    </button>
+  </nav>
+
   <div class="header-right">
-    <button class="theme-btn" onclick="window._toggleTheme()">theme</button>
+    <div class="timer-pill" title="Auto-refresh countdown">
+      <span class="timer-dot"></span>
+      <span id="countdown-text">{{ refresh_seconds }}s</span>
+    </div>
     <span class="pill pill-{{ view.daemon_health }}">
       daemon: {{ view.daemon_health }}
     </span>
     <span class="pill pill-{{ view.llm_health }}">
       llm: {{ view.llm_health }}
     </span>
-    <span class="meta">read-only · refresh {{ refresh_seconds }}s</span>
+    <button class="theme-btn" onclick="window._toggleTheme()">theme</button>
   </div>
 </header>
 
-<section class="kpi-strip" role="kpi-strip">
-  <div class="kpi">
-    <div class="kpi-num">{{ view.kpi.today_discovered }}</div>
-    <div class="kpi-label">discovered today</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-num">{{ view.kpi.shortlisted_active }}</div>
-    <div class="kpi-label">shortlisted</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-num">{{ view.kpi.applied_lifetime }}</div>
-    <div class="kpi-label">applied (lifetime)</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-num">{{ view.kpi.response_rate_label }}</div>
-    <div class="kpi-label">response rate</div>
-  </div>
-</section>
+<main class="main-content">
+  <!-- TAB 1: PIPELINE & FUNNEL -->
+  <div id="tab-funnel" class="tab-panel active">
+    <section class="kpi-strip" role="kpi-strip">
+      <div class="kpi">
+        <div class="kpi-num">{{ view.kpi.today_discovered }}</div>
+        <div class="kpi-label">Discovered Today</div>
+        <div class="kpi-sub">Across active job sources</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-num accent-amber">{{ view.kpi.shortlisted_active }}</div>
+        <div class="kpi-label">Shortlisted Active</div>
+        <div class="kpi-sub">Ready for LLM tailoring</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-num accent-indigo">{{ view.kpi.applied_lifetime }}</div>
+        <div class="kpi-label">Applied Lifetime</div>
+        <div class="kpi-sub">Submitted & responded</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-num accent-emerald">{{ view.kpi.response_rate_label }}</div>
+        <div class="kpi-label">Response Rate</div>
+        <div class="kpi-sub">Interview & callback ratio</div>
+      </div>
+    </section>
 
-<section class="funnel" role="funnel">
-  {% for col in view.columns %}
-  <div class="col">
-    <div class="col-head">
-      <span class="col-label">{{ col.label }}</span>
-      <span class="col-count">{{ col.count }}</span>
+    <div class="filter-bar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="funnel-search" placeholder="Search by title, company..." oninput="filterFunnelCards(this.value)">
+      </div>
+      <div class="filter-pills">
+        <span class="filter-pill active" onclick="filterFunnelStage('all', this)">All Stages</span>
+        <span class="filter-pill" onclick="filterFunnelStage('discovered', this)">Discovered</span>
+        <span class="filter-pill" onclick="filterFunnelStage('shortlisted', this)">Shortlisted</span>
+        <span class="filter-pill" onclick="filterFunnelStage('tailored', this)">Tailored</span>
+        <span class="filter-pill" onclick="filterFunnelStage('submitted', this)">Applied</span>
+      </div>
     </div>
-    <div class="col-body">
-      {% for card in col.top %}
-      <article class="card">
-        {% if card.url %}<a href="{{ card.url }}" target="_blank" rel="noopener" class="card-title">{{ card.title }}</a>
-        {% else %}<div class="card-title">{{ card.title }}</div>{% endif %}
-        <div class="card-meta">
-          <span>{{ card.company }}</span>
-          {% if card.score %}<span class="score">{{ card.score | round(method="floor", precision=3) }}</span>{% endif %}
+
+    <section class="funnel" role="funnel">
+      {% for col in view.columns %}
+      <div class="col" data-stage="{{ col.state }}">
+        <div class="col-head">
+          <div class="col-head-left">
+            <span class="stage-dot stage-{{ col.state }}"></span>
+            <span class="col-label">{{ col.label }}</span>
+          </div>
+          <span class="col-count">{{ col.count }}</span>
         </div>
-      </article>
+        <div class="col-body">
+          {% if col.top | length == 0 %}
+          <div class="col-empty">No items</div>
+          {% else %}
+          {% for card in col.top %}
+          <article class="card" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id }}')">
+            <div class="card-header">
+              <span class="card-title">{{ card.title }}</span>
+              {% if card.score %}
+              <span class="score-badge {% if card.score >= 0.8 %}score-high{% elif card.score >= 0.7 %}score-mid{% else %}score-low{% endif %}">
+                {{ (card.score * 100) | round(method="floor") }}%
+              </span>
+              {% endif %}
+            </div>
+            <div class="card-meta">
+              <span class="card-company">🏢 {{ card.company }}</span>
+              <button class="detail-link-btn">Inspect →</button>
+            </div>
+          </article>
+          {% endfor %}
+          {% endif %}
+        </div>
+      </div>
       {% endfor %}
+    </section>
+
+    <section class="next-steps" role="next-steps">
+      <div class="section-title">
+        <span>⚡ System Recommendations & Next Steps</span>
+      </div>
+      {% if view.next_steps | length == 0 %}
+      <p class="empty">All automated pipeline steps caught up.</p>
+      {% else %}
+      <div class="steps-grid">
+        {% for step in view.next_steps %}
+        <div class="step-card urgency-{{ step.urgency }}">
+          <span class="step-urgency-badge">{{ step.urgency }}</span>
+          <span class="step-label">{{ step.label }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <!-- TAB 2: SYSTEM AUDIT EVENTS -->
+  <div id="tab-events" class="tab-panel">
+    <div class="panel-header">
+      <h2>System Audit Event Log</h2>
+      <p class="panel-desc">Real-time state transitions and system audit history from SQLite database</p>
+    </div>
+
+    <div class="filter-bar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="event-search" placeholder="Search event notes, listing ID..." oninput="filterEvents()">
+      </div>
+      <div class="filter-pills">
+        <span class="filter-pill active" onclick="filterEventsSeverity('all', this)">All Severities</span>
+        <span class="filter-pill" onclick="filterEventsSeverity('info', this)">Info</span>
+        <span class="filter-pill" onclick="filterEventsSeverity('warn', this)">Warning</span>
+        <span class="filter-pill" onclick="filterEventsSeverity('error', this)">Error</span>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <table class="audit-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Severity</th>
+            <th>Listing ID</th>
+            <th>Transition</th>
+            <th>Note & Payload</th>
+          </tr>
+        </thead>
+        <tbody id="events-tbody">
+          {% if view.recent_events | length == 0 %}
+          <tr>
+            <td colspan="5" class="empty-cell">No recent system events recorded.</td>
+          </tr>
+          {% else %}
+          {% for ev in view.recent_events %}
+          <tr class="event-row" data-severity="{{ ev.severity }}" data-search="{% if ev.listing_id %}{{ ev.listing_id | lower }}{% endif %} {% if ev.note %}{{ ev.note | lower }}{% endif %}">
+            <td class="time-cell" title="{{ ev.timestamp }}">
+              <span class="rel-time">{{ ev.relative_time }}</span>
+            </td>
+            <td>
+              <span class="sev-badge sev-{{ ev.severity }}">{{ ev.severity }}</span>
+            </td>
+            <td>
+              <span class="code-link" onclick="openAppModal('{{ ev.listing_id }}')">{{ ev.listing_id }}</span>
+            </td>
+            <td>
+              <span class="transition-pill">
+                {% if ev.from_state %}{{ ev.from_state }}{% else %}start{% endif %} → <strong>{{ ev.to_state }}</strong>
+              </span>
+            </td>
+            <td class="note-cell">
+              {{ ev.note | default(value="State transition executed") }}
+            </td>
+          </tr>
+          {% endfor %}
+          {% endif %}
+        </tbody>
+      </table>
     </div>
   </div>
-  {% endfor %}
-</section>
 
-<section class="next-steps" role="next-steps">
-  <h2>Next steps</h2>
-  {% if view.next_steps | length == 0 %}
-  <p class="empty">All caught up.</p>
-  {% else %}
-  <ul>
-    {% for step in view.next_steps %}
-    <li class="step urgency-{{ step.urgency }}">{{ step.label }}</li>
-    {% endfor %}
-  </ul>
-  {% endif %}
-</section>
+  <!-- TAB 3: CONFIG & SOURCES INSPECTOR -->
+  <div id="tab-config" class="tab-panel">
+    <div class="panel-header">
+      <h2>Configuration & Job Sources Inspector</h2>
+      <p class="panel-desc">Active job scraper adapters, ATS feeds, score thresholds, and LLM settings</p>
+    </div>
+
+    <div class="config-grid">
+      <!-- Active Sources Card -->
+      <div class="config-card">
+        <div class="config-card-header">
+          <h3>📥 Active Job Sources</h3>
+          <span class="badge">{{ view.config.sources | length }} configured</span>
+        </div>
+        <div class="sources-list">
+          {% for src in view.config.sources %}
+          <div class="source-item">
+            <div class="source-main">
+              <span class="source-name">{{ src.name }}</span>
+              <span class="source-kind">{{ src.kind }}</span>
+            </div>
+            <div class="source-stats">
+              <span class="source-count">{{ src.listing_count }} listings</span>
+              <span class="status-pill status-{{ src.status }}">{{ src.status }}</span>
+            </div>
+          </div>
+          {% endfor %}
+          {% if view.config.sources | length == 0 %}
+          <div class="empty">No active sources indexed yet.</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Matcher & Filter Rules Card -->
+      <div class="config-card">
+        <div class="config-card-header">
+          <h3>🎯 Matcher Engine Rules</h3>
+        </div>
+        <div class="config-details">
+          <div class="config-row">
+            <span class="config-label">Score Threshold</span>
+            <span class="config-value accent-emerald">≥ {{ view.config.score_threshold }}</span>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Must Include Skills</span>
+            <div class="skills-wrap">
+              {% for skill in view.config.must_include_skills %}
+              <span class="skill-tag">{{ skill }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Filter Out Keywords</span>
+            <span class="config-value text-muted">Unpaid, Internship (Non-Tech)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- LLM Engine Card -->
+      <div class="config-card">
+        <div class="config-card-header">
+          <h3>🤖 LLM Tailoring Engine</h3>
+          <span class="pill pill-{{ view.llm_health }}">{{ view.llm_health }}</span>
+        </div>
+        <div class="config-details">
+          <div class="config-row">
+            <span class="config-label">Provider</span>
+            <span class="config-value">{{ view.config.llm_provider }}</span>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Model</span>
+            <span class="config-value accent-indigo">{{ view.config.llm_model }}</span>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Prompt Version</span>
+            <span class="config-value">{{ view.config.prompt_version }}</span>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Rate Limit</span>
+            <span class="config-value">{{ view.config.rate_limit_per_min }} req/min</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive LLM Configuration Form Card -->
+      <div class="config-card config-form-card">
+        <div class="config-card-header">
+          <h3>⚙️ Configure LLM Backend & API</h3>
+          <span class="pill pill-info">Live Setup</span>
+        </div>
+        <form id="llm-config-form" onsubmit="saveLlmSettings(event)" class="config-form">
+          <div class="form-group">
+            <label for="cfg-backend">LLM Backend / Agentic Tool</label>
+            <select id="cfg-backend" class="form-control">
+              <option value="auto">auto (Auto-detect)</option>
+              <option value="claude-cli">claude-cli (Claude Code CLI)</option>
+              <option value="agy">agy (Google Antigravity CLI)</option>
+              <option value="goose">goose (Goose AI Agent)</option>
+              <option value="aider">aider (Aider Pair Programmer)</option>
+              <option value="codex">codex (OpenAI Codex CLI)</option>
+              <option value="pi">pi (PI Agent CLI)</option>
+              <option value="grok">grok (Grok / xAI CLI)</option>
+              <option value="llama-cpp">llama-cpp (Llama.cpp Local)</option>
+              <option value="api">api (Custom HTTP API / DeepSeek / OpenAI / OpenRouter)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="cfg-model">Model Name / Identifier (Optional)</label>
+            <input type="text" id="cfg-model" class="form-control" placeholder="deepseek-chat, gpt-4o-mini, claude-3-5-sonnet">
+          </div>
+          <div class="form-group">
+            <label for="cfg-api-base">Custom API Base URL (Optional)</label>
+            <input type="text" id="cfg-api-base" class="form-control" placeholder="https://api.deepseek.com/v1 or http://localhost:11434/v1">
+          </div>
+          <div class="form-group">
+            <label for="cfg-api-key">API Key (Optional)</label>
+            <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-deepseek-... or sk-ant-api...">
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">💾 Save LLM Settings</button>
+            <button type="button" class="btn-primary" onclick="generateConfig()">⚙️ Generate Config from Profile</button>
+            <span id="save-status-msg" class="save-status"></span>
+          </div>
+        </form>
+      </div>
+
+      <!-- LLM Profile Import Card -->
+      <div class="config-card">
+        <div class="config-card-header">
+          <h3>👤 Import Resume Profile</h3>
+        </div>
+        <form id="profile-import-form" onsubmit="importProfile(event)" class="config-form">
+          <div class="form-group">
+            <label for="profile-file">Resume/Profile File</label>
+            <input type="file" id="profile-file" class="form-control" accept=".pdf,.doc,.docx,.yaml,.json">
+          </div>
+          <button type="submit" class="btn-primary">
+            📥 Import Profile
+          </button>
+        </form>
+      </div>
+
+      <!-- LLM Config Prompt Chat Assistant -->
+      <div class="config-card" style="margin-top:16px;">
+        <h3>💬 Config Prompt Assistant</h3>
+        <p class="card-subtitle" style="margin-bottom:12px;">Describe your target jobs in plain language to get keyword suggestions for <code>config/local.yaml</code></p>
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <input type="text" id="config-chat-input" class="form-control" placeholder='e.g. "Focus on Remote Embedded Linux and Freelance AI jobs in India"' style="flex:1;">
+          <button onclick="sendConfigPrompt()" class="btn-primary" style="white-space:nowrap;">💡 Get Suggestions</button>
+        </div>
+        <div id="config-chat-response" style="background:var(--surface-2); border-radius:8px; padding:12px; font-family:monospace; font-size:0.82rem; white-space:pre-wrap; color:var(--text-muted); display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: ACTION & INTERVIEW CENTER -->
+  <div id="tab-actions" class="tab-panel">
+    <div class="panel-header">
+      <h2>Action & Interview Center</h2>
+      <p class="panel-desc">Pending human review approvals, interview prep sheets, and system maintenance alerts</p>
+    </div>
+
+    <div class="actions-container">
+      <div class="actions-section">
+        <h3>📝 Drafted Applications Awaiting Approval</h3>
+        {% if view.action_items | length == 0 %}
+        <div class="empty-card">
+          <span>✨ No pending drafted applications requiring manual review right now.</span>
+        </div>
+        {% else %}
+        <div class="actions-grid">
+          {% for item in view.action_items %}
+          <div class="action-card action-kind-{{ item.action_type }}">
+            <div class="action-card-header">
+              <div>
+                <h4 class="action-title">{{ item.title }}</h4>
+                <span class="action-company">🏢 {{ item.company }}</span>
+              </div>
+              {% if item.score %}
+              <span class="score-badge score-high">{{ (item.score * 100) | round(method="floor") }}%</span>
+              {% endif %}
+            </div>
+            <div class="action-card-footer">
+              <span class="action-state-pill">{{ item.state }}</span>
+              {% if item.action_url %}
+              <a href="{{ item.action_url }}" target="_blank" rel="noopener" class="action-btn">{{ item.action_label }} ↗</a>
+              {% else %}
+              <button class="action-btn" onclick="openAppModal('{{ item.id }}')">{{ item.action_label }} →</button>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: DISCOVERED & FILTERED EXPLORER -->
+  <div id="tab-explorer" class="tab-panel">
+    <div class="panel-header">
+      <h2>🔍 Discovered & Filtered Job Explorer</h2>
+      <p class="panel-desc">Browse, search, and filter all 557+ discovered postings before and after matching</p>
+    </div>
+
+    <div class="explorer-toolbar" style="display:flex; gap:12px; margin-bottom:16px;">
+      <input type="text" id="explorer-search-input" class="form-control" placeholder="Search 557+ jobs by title, company, skills..." onkeyup="filterExplorerTable()" style="flex:1;">
+      <select id="explorer-type-filter" class="form-control" onchange="filterExplorerTable()" style="width:200px;">
+        <option value="all">All Postings & Types</option>
+        <option value="remote">Remote Only</option>
+        <option value="filtered_out">Filtered Out Only</option>
+        <option value="discovered">Discovered Only</option>
+      </select>
+    </div>
+
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Job Title</th>
+            <th>Company</th>
+            <th>Location</th>
+            <th>Source</th>
+            <th>State</th>
+            <th>Score</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="explorer-tbody">
+          {% if view.discovered_explorer | length == 0 %}
+          <tr>
+            <td colspan="7" class="empty-cell">No discovered jobs found in database. Run <code>careerai discover</code> to populate listings.</td>
+          </tr>
+          {% else %}
+          {% for item in view.discovered_explorer %}
+          <tr class="explorer-row" data-search="{% if item.title %}{{ item.title | lower }}{% endif %} {% if item.company %}{{ item.company | lower }}{% endif %} {% if item.location %}{{ item.location | lower }}{% endif %}" data-remote="{{ item.is_remote }}" data-state="{{ item.state }}">
+            <td><a href="{{ item.url }}" target="_blank" class="title-link">{% if item.title %}{{ item.title }}{% else %}Listing {{ item.id }}{% endif %}</a></td>
+            <td>🏢 {% if item.company %}{{ item.company }}{% else %}Unspecified{% endif %}</td>
+            <td>📍 {% if item.location %}{{ item.location }}{% else %}Remote / Unspecified{% endif %}</td>
+            <td><span class="pill pill-info">{{ item.source }}</span></td>
+            <td><span class="sev-badge sev-{% if item.state == 'discovered' %}info{% else %}warn{% endif %}">{{ item.state }}</span></td>
+            <td>{% if item.score %}{{ (item.score * 100) | round(method="floor") }}%{% else %}—{% endif %}</td>
+            <td>
+              <button class="detail-link-btn" onclick="openAppModal('{{ item.id }}')">Inspect →</button>
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist('{{ item.id }}')">⚡ Shortlist</button>
+            </td>
+          </tr>
+          {% endfor %}
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- APPLICATION DETAIL POPOVER MODAL -->
+<div id="app-modal" class="modal-backdrop" onclick="if(event.target===this) closeAppModal()">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <h2 id="modal-title">Loading Application Details...</h2>
+        <div class="modal-subtitle">
+          <span id="modal-company"></span> · <span id="modal-location"></span> · Source: <span id="modal-source"></span>
+        </div>
+      </div>
+      <div class="modal-header-right">
+        <span id="modal-score" class="score-badge score-high"></span>
+        <button class="close-btn" onclick="closeAppModal()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-info-bar">
+        <span>State: <strong id="modal-state"></strong></span>
+        <span>ID: <code id="modal-id"></code></span>
+        <span>Model: <code id="modal-model"></code></span>
+        <span>Prompt: <code id="modal-prompt"></code></span>
+      </div>
+
+      <div class="modal-section">
+        <h3>📄 Tailored Cover Letter / Summary</h3>
+        <pre id="modal-cover-letter" class="code-preview">No tailored letter available.</pre>
+      </div>
+
+      <div class="modal-section">
+        <h3>📋 Job Description Overview</h3>
+        <div id="modal-description" class="desc-box">Loading description...</div>
+      </div>
+
+      <div class="modal-section">
+        <h3>📁 Rendered Artifacts</h3>
+        <ul id="modal-artifacts" class="artifacts-list">
+          <li class="empty-item">No disk artifacts registered.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <a id="modal-external-link" href="#" target="_blank" rel="noopener" class="action-btn">Open Original Posting ↗</a>
+      <button class="close-btn-secondary" onclick="closeAppModal()">Close</button>
+    </div>
+  </div>
+</div>
 
 <footer>
-  <span>career-ai · {{ build_version }}</span>
+  <span>career-ai · Modern Dark Obsidian MVP Dashboard · {{ build_version }}</span>
 </footer>
+
+<script>
+function switchTab(tabId) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  
+  var btn = document.getElementById('tab-btn-' + tabId);
+  var panel = document.getElementById('tab-' + tabId);
+  if (btn) btn.classList.add('active');
+  if (panel) panel.classList.add('active');
+}
+
+function filterFunnelCards(query) {
+  var q = (query || '').toLowerCase().trim();
+  document.querySelectorAll('.card').forEach(function(card) {
+    var title = card.getAttribute('data-title') || '';
+    var company = card.getAttribute('data-company') || '';
+    if (!q || title.indexOf(q) !== -1 || company.indexOf(q) !== -1) {
+      card.style.display = 'block';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function filterFunnelStage(stage, pillEl) {
+  if (pillEl) {
+    pillEl.parentElement.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    pillEl.classList.add('active');
+  }
+  document.querySelectorAll('.col').forEach(function(col) {
+    var colStage = col.getAttribute('data-stage');
+    if (stage === 'all' || colStage === stage) {
+      col.style.display = 'flex';
+    } else {
+      col.style.display = 'none';
+    }
+  });
+}
+
+function filterEvents() {
+  var q = (document.getElementById('event-search').value || '').toLowerCase().trim();
+  document.querySelectorAll('.event-row').forEach(function(row) {
+    var searchStr = row.getAttribute('data-search') || '';
+    if (!q || searchStr.indexOf(q) !== -1) {
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+  });
+}
+
+function filterEventsSeverity(sev, pillEl) {
+  if (pillEl) {
+    pillEl.parentElement.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+    pillEl.classList.add('active');
+  }
+  document.querySelectorAll('.event-row').forEach(function(row) {
+    var rowSev = row.getAttribute('data-severity');
+    if (sev === 'all' || rowSev === sev) {
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+  });
+}
+
+function openAppModal(id) {
+  var modal = document.getElementById('app-modal');
+  modal.classList.add('active');
+  document.getElementById('modal-title').innerText = 'Loading...';
+  
+  fetch('/api/v1/applications/' + encodeURIComponent(id))
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data.error) {
+        document.getElementById('modal-title').innerText = 'Error Loading Application';
+        document.getElementById('modal-description').innerText = data.error;
+        return;
+      }
+      document.getElementById('modal-title').innerText = data.title || 'Untitled Listing';
+      document.getElementById('modal-company').innerText = data.company || '—';
+      document.getElementById('modal-location').innerText = data.location || 'Remote';
+      document.getElementById('modal-source').innerText = data.source || '—';
+      document.getElementById('modal-state').innerText = data.state || 'discovered';
+      document.getElementById('modal-id').innerText = data.id || id;
+      document.getElementById('modal-model').innerText = data.llm_model || '—';
+      document.getElementById('modal-prompt').innerText = data.prompt_version || '—';
+      document.getElementById('modal-score').innerText = data.score ? Math.floor(data.score * 100) + '%' : '—';
+      document.getElementById('modal-cover-letter').innerText = data.cover_letter_text || 'No tailored cover letter generated yet.';
+      document.getElementById('modal-description').innerText = data.description || 'No description body recorded.';
+      document.getElementById('modal-external-link').href = data.url || '#';
+
+      var artifactsUl = document.getElementById('modal-artifacts');
+      artifactsUl.innerHTML = '';
+      if (data.artifacts && data.artifacts.length > 0) {
+        data.artifacts.forEach(function(art) {
+          var li = document.createElement('li');
+          li.className = 'artifact-item';
+          li.innerText = '📄 [' + art.kind + '] ' + art.path + ' (' + art.bytes + ' bytes)';
+          artifactsUl.appendChild(li);
+        });
+      } else {
+        artifactsUl.innerHTML = '<li class="empty-item">No disk artifacts registered.</li>';
+      }
+    })
+    .catch(function(err) {
+      document.getElementById('modal-title').innerText = 'Failed to fetch details';
+      document.getElementById('modal-description').innerText = String(err);
+    });
+}
+
+function closeAppModal() {
+  document.getElementById('app-modal').classList.remove('active');
+}
+
+function saveLlmSettings(e) {
+  e.preventDefault();
+  var backend = document.getElementById('cfg-backend').value;
+  var model = document.getElementById('cfg-model').value;
+  var apiBase = document.getElementById('cfg-api-base').value;
+  var apiKey = document.getElementById('cfg-api-key').value;
+  var msgEl = document.getElementById('save-status-msg');
+  msgEl.innerText = 'Saving...';
+  fetch('/api/v1/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      backend: backend,
+      model: model || null,
+      api_base_url: apiBase || null,
+      api_key: apiKey || null
+    })
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    msgEl.innerText = '✅ Settings Saved!';
+    setTimeout(function() { location.reload(); }, 1200);
+  })
+  .catch(function(err) {
+    msgEl.innerText = '❌ Failed: ' + err;
+  });
+}
+
+function filterExplorerTable() {
+  var searchVal = (document.getElementById('explorer-search-input').value || '').toLowerCase();
+  var typeVal = document.getElementById('explorer-type-filter').value;
+  var rows = document.querySelectorAll('.explorer-row');
+  rows.forEach(function(row) {
+    var text = row.getAttribute('data-search') || '';
+    var isRemote = row.getAttribute('data-remote') === 'true';
+    var state = row.getAttribute('data-state') || '';
+
+    var matchesSearch = !searchVal || text.indexOf(searchVal) !== -1;
+    var matchesType = true;
+    if (typeVal === 'remote') matchesType = isRemote;
+    else if (typeVal === 'filtered_out') matchesType = (state === 'filtered_out');
+    else if (typeVal === 'discovered') matchesType = (state === 'discovered');
+
+    if (matchesSearch && matchesType) {
+      row.style.display = '';
+    } else {
+      row.style.display = 'none';
+    }
+  });
+}
+
+function forceShortlist(id) {
+  fetch('/api/v1/listings/' + encodeURIComponent(id) + '/shortlist', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function() { location.reload(); })
+    .catch(function(err) { alert('Failed to shortlist: ' + err); });
+}
+
+function sendConfigPrompt() {
+  var input = document.getElementById('config-chat-input');
+  var responseEl = document.getElementById('config-chat-response');
+  var prompt = (input.value || '').trim();
+  if (!prompt) return;
+  responseEl.style.display = 'block';
+  responseEl.innerText = 'Analyzing prompt...';
+  fetch('/api/v1/config/prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: prompt })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    responseEl.innerText = data.response || JSON.stringify(data, null, 2);
+  })
+  .catch(function(err) {
+    responseEl.innerText = 'Error: ' + err;
+  });
+}
+
+// Countdown timer script
+(function() {
+  var sec = parseInt("{{ refresh_seconds }}", 10) || 60;
+  if (sec <= 0) return;
+  var count = sec;
+  var el = document.getElementById('countdown-text');
+  setInterval(function() {
+    count--;
+    if (el) el.innerText = count + 's';
+    if (count <= 0) {
+      location.reload();
+    }
+  }, 1000);
+})();
+</script>
 </body>
 </html>

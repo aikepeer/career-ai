@@ -45,7 +45,7 @@ name = "cache"
 harness = false
 
 [features]
-default = ["live-llm-cli"]
+default = ["live-llm-cli", "live-llm-api"]
 # claude CLI subprocess backend — reuses the user's logged-in Claude
 # Code session. No ANTHROPIC_API_KEY required.
 live-llm-cli = ["dep:which", "dep:tempfile"]

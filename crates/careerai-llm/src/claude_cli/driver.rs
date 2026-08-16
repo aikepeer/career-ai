@@ -95,12 +95,24 @@ impl ClaudeCliLlm {
         // here.
         let model = model_raw.split_once('/').map_or(model_raw, |(_, r)| r);
 
+        let bin_str = self.binary.to_string_lossy().to_lowercase();
         let mut cmd = Command::new(&self.binary);
-        cmd.arg("--print")
-            .arg("--output-format")
-            .arg("json")
-            .arg("--model")
-            .arg(model);
+
+        if bin_str.contains("claude") {
+            cmd.arg("--print")
+                .arg("--output-format")
+                .arg("json")
+                .arg("--model")
+                .arg(model);
+        } else if bin_str.contains("agy") {
+            cmd.arg("-p").arg("--print");
+        } else if bin_str.contains("goose") {
+            cmd.arg("run");
+        } else if bin_str.contains("aider") {
+            cmd.arg("--message");
+        } else {
+            cmd.arg("--print");
+        }
 
         // SECURITY: the system prompt + profile block can carry PII
         // (rendered profile YAML). Passing them via argv would expose

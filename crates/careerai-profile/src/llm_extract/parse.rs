@@ -14,19 +14,20 @@ use super::types::{ExtractError, ExtractOptions, LlmCaller};
 #[must_use]
 pub fn strip_code_fences(text: &str) -> String {
     let t = text.trim();
-    let inner = if let Some(stripped) = t.strip_prefix("```json") {
-        stripped
-    } else if let Some(stripped) = t.strip_prefix("```") {
-        stripped
+    let unboxed = if let Some(first_brace) = t.find('{') {
+        if let Some(last_brace) = t.rfind('}') {
+            if last_brace >= first_brace {
+                &t[first_brace..=last_brace]
+            } else {
+                t
+            }
+        } else {
+            t
+        }
     } else {
-        return t.to_string();
+        t
     };
-    let inner = inner.trim_start_matches('\n');
-    if let Some(stripped) = inner.strip_suffix("```") {
-        stripped.trim_end_matches('\n').to_string()
-    } else {
-        inner.to_string()
-    }
+    unboxed.trim().to_string()
 }
 
 /// Parse the LLM response text into a [`Profile`] and validate.
@@ -58,7 +59,7 @@ pub async fn extract_profile_from_text(
 
     let first_text = llm.call(&req).await.map_err(ExtractError::LlmCall)?;
 
-    match parse_and_validate(&first_text) {
+    let first_err = match parse_and_validate(&first_text) {
         Ok(profile) => {
             debug!(target: "profile.llm_extract", "first attempt succeeded");
             return Ok(profile);
@@ -75,8 +76,9 @@ pub async fn extract_profile_from_text(
                  prose, no markdown fences.",
                 req.user, e
             );
+            e
         }
-    }
+    };
 
     let second_text = match llm.call(&req).await {
         Ok(t) => t,
@@ -90,7 +92,9 @@ pub async fn extract_profile_from_text(
         Ok(profile) => Ok(profile),
         Err(e) => {
             warn!(target: "profile.llm_extract", error = %e, "retry parse failed");
-            Err(ExtractError::MaxRetries)
+            Err(ExtractError::SchemaValidate(format!(
+                "attempt 1 failed ({first_err}); attempt 2 failed ({e})"
+            )))
         }
     }
 }

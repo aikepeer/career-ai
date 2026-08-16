@@ -58,7 +58,7 @@ fn import(
     let live_compiled = cfg!(any(feature = "live-llm-cli", feature = "live-llm-api"));
     let want_llm = match use_llm {
         Some(v) => v,
-        None => live_compiled && super::profile_llm::backend_maybe_available(),
+        None => live_compiled && super::profile_llm::backend_maybe_available(backend_override.as_ref()),
     };
 
     let profile = if want_llm {
@@ -74,12 +74,11 @@ fn import(
                 tracing::warn!(
                     target = "profile",
                     error = %format_args!("{e:#}"),
-                    "LLM extraction failed; falling back to heuristic parser \
-                     (run `claude login` or set ANTHROPIC_API_KEY to re-enable LLM)"
+                    "LLM extraction failed; falling back to heuristic parser"
                 );
                 eprintln!(
-                    "warning: LLM extraction failed ({e}); falling back to heuristic \
-                     parser. Run `claude login` or set ANTHROPIC_API_KEY for better results."
+                    "warning: LLM extraction failed ({e}); falling back to heuristic parser.\n\
+                     hint: Run `careerai llm probe` to verify your LLM backend, or export DEEPSEEK_API_KEY / ANTHROPIC_API_KEY."
                 );
                 careerai_profile::import_paths(&refs).context("parsing profile sources")?
             }

@@ -15,6 +15,10 @@ pub use web::{IndeedRssSourceConfig, NaukriSourceConfig, RemotiveSourceConfig};
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourcesConfig {
     #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub locations: Vec<String>,
+    #[serde(default)]
     pub greenhouse: CompaniesSource,
     #[serde(default)]
     pub lever: CompaniesSource,
@@ -51,7 +55,16 @@ pub struct SourcesConfig {
     /// `config/local.yaml`.
     #[serde(default)]
     pub mcp: Vec<McpSourceConfig>,
+    /// Structured priority keyword groups (P1: AI/ML/Embedded/Robotics,
+    /// P2: Fullstack/Software, P3: STEM/Telecom). Used by the config
+    /// generator and match scorer to weight discovery queries.
+    #[serde(default)]
+    pub priority_keywords: PriorityKeywords,
+    /// Job-type and location filters applied globally across all sources.
+    #[serde(default)]
+    pub filter: FilterConfig,
 }
+
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompaniesSource {
@@ -73,4 +86,45 @@ impl Default for ToggleSource {
 
 pub(super) fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PriorityKeywords {
+    #[serde(default)]
+    pub p1_ai_embedded_robotics: Vec<String>,
+    #[serde(default)]
+    pub p2_fullstack_software: Vec<String>,
+    #[serde(default)]
+    pub p3_stem_telecom: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterConfig {
+    #[serde(default = "default_remote_pref")]
+    pub remote_preference: String,
+    #[serde(default = "default_contract_type")]
+    pub contract_type: String,
+    #[serde(default)]
+    pub locations: Vec<String>,
+    #[serde(default)]
+    pub excluded_companies: Vec<String>,
+}
+
+impl Default for FilterConfig {
+    fn default() -> Self {
+        Self {
+            remote_preference: default_remote_pref(),
+            contract_type: default_contract_type(),
+            locations: Vec::new(),
+            excluded_companies: Vec::new(),
+        }
+    }
+}
+
+pub(super) fn default_remote_pref() -> String {
+    "remote_first".to_string()
+}
+
+pub(super) fn default_contract_type() -> String {
+    "all".to_string()
 }

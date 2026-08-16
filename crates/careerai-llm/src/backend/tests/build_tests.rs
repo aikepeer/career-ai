@@ -18,13 +18,13 @@ fn pick_default_model_prefers_tailor() {
     let mut c = cfg();
     c.tailor_model = "anthropic/claude-sonnet-4-6".into();
     c.parse_resume_model = "anthropic/claude-haiku".into();
-    assert_eq!(pick_default_model(&c), "claude-sonnet-4-6");
+    assert_eq!(pick_default_model(&c, crate::rig::Provider::Anthropic), "claude-sonnet-4-6");
 }
 
 #[test]
-fn pick_default_model_falls_back_to_sonnet() {
+fn pick_default_model_falls_back_to_empty() {
     let c = cfg();
-    assert_eq!(pick_default_model(&c), "sonnet");
+    assert_eq!(pick_default_model(&c, crate::rig::Provider::Anthropic), "");
 }
 
 #[test]

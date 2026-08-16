@@ -6,8 +6,8 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    CookiesCommand, LlmCommand, McpCommand, NotifyCommand, ProfileCommand, ServiceCommand,
-    ShortlistCommand, SourcesCommand, StatusCommand,
+    ConfigSubcommand, CookiesCommand, LlmCommand, McpCommand, NotifyCommand, ProfileCommand,
+    ServiceCommand, ShortlistCommand, SourcesCommand, StatusCommand,
 };
 
 #[derive(Debug, Parser)]
@@ -25,19 +25,24 @@ pub(crate) struct Cli {
     #[arg(long, global = true, value_name = "LEVEL")]
     pub log: Option<String>,
 
-    /// Override the LLM backend selection. `auto` (default) prefers the
-    /// `claude` CLI when reachable, else falls back to the rig-core
-    /// Anthropic API. Force `claude-cli` or `api` to skip detection.
+    /// Override the LLM backend selection (`auto`, `claude-cli`, `api`, `agy`,
+    /// `codex`, `pi`, `goose`, `grok`, `aider`, `copilot`, `llama-cpp`, or
+    /// custom binary path like `~/.local/bin/agy`).
     #[arg(
         long = "llm-backend",
         global = true,
-        value_name = "auto|claude-cli|api"
+        value_name = "auto|claude-cli|api|agy|codex|pi|goose|grok|aider|copilot|<path>"
     )]
     pub llm_backend: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Generate or update configuration file `config/local.yaml`.
+    Config {
+        #[command(subcommand)]
+        command: ConfigSubcommand,
+    },
     /// Scaffold `config/`, `profile/`, and `.env` in the current directory.
     Init {
         #[arg(long)]

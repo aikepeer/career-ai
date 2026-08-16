@@ -151,6 +151,7 @@ impl Backend {
             BackendChoice::Auto => build::resolve_auto(cfg, cache).await,
             BackendChoice::ClaudeCli => build::build_cli(cfg, cache).await,
             BackendChoice::Api => build::build_api(cfg, cache),
+            other => build::build_named_cli(other.as_str(), cfg, cache).await,
         }
     }
 
@@ -205,8 +206,8 @@ impl Backend {
         // would actually resolve, and `forced` records what the operator
         // asked for. The CLI prints both so the operator can see when
         // their override is unusable.
-        if matches!(cfg.backend, BackendChoice::ClaudeCli | BackendChoice::Api) {
-            probe.forced = Some(cfg.backend);
+        if cfg.backend != BackendChoice::Auto {
+            probe.forced = Some(cfg.backend.clone());
         }
 
         probe

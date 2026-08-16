@@ -6,6 +6,7 @@ use tera::Tera;
 
 pub mod daemon_health;
 pub mod data;
+pub mod details;
 pub mod error;
 pub mod handlers;
 pub mod llm_health;

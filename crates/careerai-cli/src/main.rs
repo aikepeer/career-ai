@@ -51,6 +51,11 @@ async fn main() -> Result<()> {
         };
 
     match cli.command {
+        Command::Config { command } => match command {
+            commands::ConfigSubcommand::Generate { force } => {
+                commands::config_cmd::run_generate(force)?;
+            }
+        },
         Command::Init { force } => {
             careerai_core::init::scaffold(&cwd, force)?;
         }
@@ -153,6 +158,15 @@ async fn main() -> Result<()> {
         Command::Sources { command } => match command {
             SourcesCommand::Sync { apply } => {
                 sources_sync::run(&cwd, apply).await?;
+            }
+            SourcesCommand::DiscoverWeb => {
+                let portals = careerai_sources::WebSearchDiscoveryAgent::curated_seed_portals();
+                println!("🌐 Web Search Discovery Agent — Discovered Job & Freelance Portals:");
+                println!("{:<20} {:<15} {:<30} {:<30}", "NAME", "CATEGORY", "BASE URL", "DESCRIPTION");
+                println!("{}", "-".repeat(95));
+                for p in portals {
+                    println!("{:<20} {:<15} {:<30} {:<30}", p.name, p.category, p.base_url, p.description);
+                }
             }
         },
         Command::Inspect { application_id } => {

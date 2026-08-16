@@ -101,7 +101,7 @@ pub async fn tailor_one(
                 }
             };
             let cache = Arc::new(careerai_llm::Cache::new(cache_root));
-            match careerai_llm::Backend::resolve(cfg.llm.backend, &cfg.llm, cache).await {
+            match careerai_llm::Backend::resolve(cfg.llm.backend.clone(), &cfg.llm, cache).await {
                 Ok(backend) => {
                     let outcome =
                         tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm)

@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ProfileError {
+    #[error("file not found: {0}")]
+    FileNotFound(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 

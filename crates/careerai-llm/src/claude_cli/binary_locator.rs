@@ -11,13 +11,33 @@ use std::path::PathBuf;
 use super::error::ClaudeCliError;
 
 pub(crate) fn locate_claude_binary() -> std::result::Result<PathBuf, ClaudeCliError> {
+    locate_named_binary("claude")
+}
+
+pub(crate) fn locate_named_binary(name: &str) -> std::result::Result<PathBuf, ClaudeCliError> {
     if let Ok(p) = std::env::var("CAREERAI_CLAUDE_BIN") {
         if !p.is_empty() {
             let path = PathBuf::from(&p);
             return validate_claude_binary(path);
         }
     }
-    let resolved = which::which("claude").map_err(|_| ClaudeCliError::NotInstalled)?;
+
+    let expanded = if let Some(stripped) = name.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            format!("{home}/{stripped}")
+        } else {
+            name.to_string()
+        }
+    } else {
+        name.to_string()
+    };
+
+    let p = PathBuf::from(&expanded);
+    if p.is_absolute() || expanded.contains('/') {
+        return validate_claude_binary(p);
+    }
+
+    let resolved = which::which(name).map_err(|_| ClaudeCliError::NotInstalled)?;
     validate_claude_binary(resolved)
 }
 

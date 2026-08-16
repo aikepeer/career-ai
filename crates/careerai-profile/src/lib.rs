@@ -4,6 +4,7 @@
 //! `profile.yaml` validated against the schema in [`schema`]. Parsers are
 //! best-effort seeds — the produced YAML is expected to be hand-edited.
 
+pub mod config_gen;
 pub mod dates;
 pub mod docx;
 pub mod error;
@@ -18,6 +19,7 @@ use std::path::Path;
 
 use tracing::{info, warn};
 
+pub use crate::config_gen::generate_config_yaml;
 pub use crate::error::{ProfileError, Result};
 pub use crate::llm_extract::{
     extract_profile_from_text, ExtractError, ExtractOptions, ExtractRequest, LlmCaller,
@@ -96,6 +98,9 @@ impl<'a> LlmExtractContext<'a> {
 }
 
 fn parse_one(path: &Path, llm: Option<&LlmExtractContext<'_>>) -> Result<Profile> {
+    if !path.exists() {
+        return Err(ProfileError::FileNotFound(path.display().to_string()));
+    }
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -173,15 +178,13 @@ fn parse_text_with_optional_llm(
 
     match result {
         Ok(profile) => Ok(profile),
-        Err(e) => Ok(llm_fallback(text, &e)),
+        Err(e) => {
+            warn!(
+                target: "profile.llm_extract",
+                error = %e,
+                "LLM extraction failed"
+            );
+            Err(ProfileError::Validation(format!("LLM extraction failed: {e}")))
+        }
     }
-}
-
-fn llm_fallback(text: &str, err: &ExtractError) -> Profile {
-    warn!(
-        target: "profile.llm_extract",
-        error = %err,
-        "LLM extraction failed; falling back to heuristic parser",
-    );
-    heuristic::parse(text)
 }

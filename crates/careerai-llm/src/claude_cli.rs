@@ -30,7 +30,7 @@ mod response;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use binary_locator::locate_claude_binary;
+pub(crate) use binary_locator::{locate_claude_binary, locate_named_binary};
 pub use driver::ClaudeCliLlm;
 #[cfg(test)]
 pub(crate) use error::classify_error_payload;

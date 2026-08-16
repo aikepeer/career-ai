@@ -39,9 +39,6 @@ pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
 }
 
 async fn kpi_strip(pool: &SqlitePool) -> Result<KpiStrip> {
-    // Counts every listing created today regardless of current state, so
-    // automation that quickly advances rows past `discovered` doesn't
-    // hide them from the daily-throughput KPI.
     let today_discovered = count_today_any_state(pool).await?;
     let shortlisted_active = count_state(pool, ListingState::Shortlisted).await?;
     let submitted = count_state(pool, ListingState::Submitted).await?;
@@ -123,7 +120,7 @@ async fn count_today_any_state(pool: &SqlitePool) -> Result<u64> {
 
 async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<ListingCard>> {
     let rows = sqlx::query(
-        "SELECT title, company, score, url, created_at \
+        "SELECT id, title, company, score, url, created_at \
          FROM listings WHERE state = ? \
          ORDER BY score DESC NULLS LAST, created_at DESC",
     )
@@ -133,6 +130,9 @@ async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<List
     .map_err(careerai_db::error::DbError::from)?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
+        let id: String = row
+            .try_get("id")
+            .map_err(careerai_db::error::DbError::from)?;
         let title: String = row
             .try_get("title")
             .map_err(careerai_db::error::DbError::from)?;
@@ -146,6 +146,7 @@ async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<List
             .map_err(careerai_db::error::DbError::from)?;
         let posted_at: Option<DateTime<Utc>> = row.try_get("created_at").ok();
         out.push(ListingCard {
+            id,
             title,
             company,
             score,
