@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>career-ai · Dashboard</title>
-{% if refresh_seconds and refresh_seconds > 0 %}<meta http-equiv="refresh" content="{{ refresh_seconds }}">{% endif %}
 <style>{{ css | safe }}</style>
 <script>
 (function() {
@@ -508,6 +507,7 @@
         <button class="chip-btn" onclick="usePromptChip('Analyze my current job match pipeline statistics')">📊 Match Stats</button>
         <button class="chip-btn" onclick="usePromptChip('Give me technical interview preparation advice for Rust Embedded positions')">📝 Interview Prep</button>
         <button class="chip-btn" onclick="usePromptChip('How do I switch LLM backend to DeepSeek or Claude Web?')">⚙️ LLM Setup</button>
+        <button class="chip-btn" onclick="clearChatHistory()" style="margin-left:auto;">🗑️ Clear Chat</button>
       </div>
 
       <!-- Chat Messages Scroll Container -->
@@ -595,6 +595,7 @@ function switchTab(tabId) {
   var panel = document.getElementById('tab-' + tabId);
   if (btn) btn.classList.add('active');
   if (panel) panel.classList.add('active');
+  try { localStorage.setItem('careerai-active-tab', tabId); } catch(e) {}
 }
 
 function filterFunnelCards(query) {
@@ -790,6 +791,24 @@ function usePromptChip(text) {
   }
 }
 
+function saveChatHistory() {
+  var container = document.getElementById('chat-messages');
+  if (container) {
+    try { localStorage.setItem('careerai-chat-history', container.innerHTML); } catch(e) {}
+  }
+}
+
+function clearChatHistory() {
+  try {
+    localStorage.removeItem('careerai-chat-history');
+    sessionStorage.removeItem('careerai-chat-draft');
+  } catch(e) {}
+  var container = document.getElementById('chat-messages');
+  if (container) {
+    container.innerHTML = '<div class="chat-msg msg-assistant"><div class="msg-avatar">🤖</div><div class="msg-content"><div class="msg-header"><span class="msg-author">Career-AI Assistant</span><span class="msg-time">Just now</span></div><div class="msg-text">Hello! Chat history cleared. How can I help you?</div></div></div>';
+  }
+}
+
 function sendChatMessage(event) {
   if (event) event.preventDefault();
   var input = document.getElementById('chat-input');
@@ -808,7 +827,9 @@ function sendChatMessage(event) {
   container.appendChild(userDiv);
   
   input.value = '';
+  try { sessionStorage.removeItem('careerai-chat-draft'); } catch(e) {}
   container.scrollTop = container.scrollHeight;
+  saveChatHistory();
 
   var aiDiv = document.createElement('div');
   aiDiv.className = 'chat-msg msg-assistant';
@@ -842,6 +863,7 @@ function sendChatMessage(event) {
       }
     }
     container.scrollTop = container.scrollHeight;
+    saveChatHistory();
   })
   .catch(function(err) {
     var textEl = aiDiv.querySelector('.msg-text');
@@ -849,6 +871,7 @@ function sendChatMessage(event) {
       textEl.classList.remove('msg-loading');
       textEl.innerText = 'Error connecting to assistant: ' + err;
     }
+    saveChatHistory();
   });
 }
 
@@ -864,14 +887,70 @@ function formatMarkdownResponse(md) {
     .replace(/\n/g, '<br>');
 }
 
+// State Restoration & Event Handlers on Page Load
+document.addEventListener('DOMContentLoaded', function() {
+  // Restore Active Tab
+  try {
+    var savedTab = localStorage.getItem('careerai-active-tab');
+    if (savedTab) switchTab(savedTab);
+  } catch(e) {}
 
-// Countdown timer script
+  // Restore Chat History
+  try {
+    var savedChat = localStorage.getItem('careerai-chat-history');
+    if (savedChat) {
+      var container = document.getElementById('chat-messages');
+      if (container) container.innerHTML = savedChat;
+    }
+  } catch(e) {}
+
+  // Restore Chat Input Draft
+  try {
+    var draftInput = sessionStorage.getItem('careerai-chat-draft');
+    if (draftInput) {
+      var input = document.getElementById('chat-input');
+      if (input) input.value = draftInput;
+    }
+  } catch(e) {}
+
+  // Draft Event Listeners
+  document.getElementById('chat-input')?.addEventListener('input', function(e) {
+    try { sessionStorage.setItem('careerai-chat-draft', e.target.value); } catch(err) {}
+  });
+
+  document.getElementById('config-chat-input')?.addEventListener('input', function(e) {
+    try { sessionStorage.setItem('careerai-cfg-prompt', e.target.value); } catch(err) {}
+  });
+
+  document.getElementById('explorer-search-input')?.addEventListener('input', function(e) {
+    try { sessionStorage.setItem('careerai-exp-search', e.target.value); } catch(err) {}
+    filterExplorerTable();
+  });
+
+  document.getElementById('explorer-type-filter')?.addEventListener('change', function(e) {
+    try { sessionStorage.setItem('careerai-exp-type', e.target.value); } catch(err) {}
+    filterExplorerTable();
+  });
+});
+
+// Smart Countdown Timer Script (Auto-pauses when user is typing or AI is thinking)
 (function() {
   var sec = parseInt("{{ refresh_seconds }}", 10) || 60;
   if (sec <= 0) return;
   var count = sec;
   var el = document.getElementById('countdown-text');
   setInterval(function() {
+    var chatInput = document.getElementById('chat-input');
+    var cfgInput = document.getElementById('config-chat-input');
+    var isTyping = (chatInput && (document.activeElement === chatInput || (chatInput.value || '').length > 0)) ||
+                   (cfgInput && (document.activeElement === cfgInput || (cfgInput.value || '').length > 0));
+    var isThinking = document.querySelector('.msg-loading');
+    
+    if (isTyping || isThinking) {
+      if (el) el.innerText = 'Paused';
+      return; // Defer countdown refresh while active
+    }
+
     count--;
     if (el) el.innerText = count + 's';
     if (count <= 0) {
