@@ -25,6 +25,8 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/api/v1/profile/import", post(handlers::api_profile_import))
         .route("/api/v1/profile/save", post(crate::profile_handler::api_profile_save))
         .route("/api/v1/config/keywords", post(crate::profile_handler::api_config_keywords))
+        .route("/api/v1/pipeline/discover", post(crate::profile_handler::api_pipeline_discover))
+        .route("/api/v1/pipeline/match", post(crate::profile_handler::api_pipeline_match))
         .route("/api/v1/listings/:id/shortlist", post(handlers::api_force_shortlist))
         .route("/api/v1/chat", post(crate::chat::api_chat_agent))
         .with_state(state)

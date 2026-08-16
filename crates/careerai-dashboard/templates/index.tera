@@ -246,7 +246,11 @@
       <div class="config-card" style="grid-column: 1 / -1;">
         <div class="config-card-header">
           <h3>🎯 Target Discovery Keywords</h3>
-          <span class="pill pill-info">{{ view.config.keywords | length }} keywords — Click to remove · Type to add</span>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="btn-primary" onclick="runPipelineCmd('discover', this)" style="padding:4px 10px; font-size:11px;" title="Execute careerai discover">⚡ Run Discover</button>
+            <button type="button" class="btn-primary" onclick="runPipelineCmd('match', this)" style="padding:4px 10px; font-size:11px; background:hsl(160 84% 39%);" title="Execute careerai match">🎯 Run Matcher</button>
+            <span class="pill pill-info">{{ view.config.keywords | length }} keywords — Click to remove · Type to add</span>
+          </div>
         </div>
         <div id="keywords-container" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:12px;">
           {% for kw in view.config.keywords | sort(attribute="name") %}
@@ -265,7 +269,10 @@
       <div class="config-card">
         <div class="config-card-header">
           <h3>📥 Active Job Sources</h3>
-          <span class="badge">{{ view.config.sources | length }} sources — Click to inspect</span>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="btn-primary" onclick="runPipelineCmd('discover', this)" style="padding:4px 10px; font-size:11px;" title="Run discovery on all sources">⚡ Run Discover</button>
+            <span class="badge">{{ view.config.sources | length }} sources</span>
+          </div>
         </div>
         <div class="sources-list" style="max-height: 440px; overflow-y: auto; padding-right: 4px;">
           {% for src in view.config.sources %}
@@ -521,8 +528,10 @@
       </div>
     </div>
 
-    <div class="explorer-toolbar" style="display:flex; gap:12px; margin-bottom:16px;">
+    <div class="explorer-toolbar" style="display:flex; gap:10px; margin-bottom:16px; align-items:center;">
       <input type="text" id="explorer-search-input" class="form-control" placeholder="Search postings by job title, company, or skills..." oninput="filterExplorerTable()" style="flex:1;">
+      <button type="button" class="btn-primary" onclick="runPipelineCmd('discover', this)" style="padding:8px 14px; font-size:12px;">⚡ Run Discover</button>
+      <button type="button" class="btn-primary" onclick="runPipelineCmd('match', this)" style="padding:8px 14px; font-size:12px; background:hsl(160 84% 39%);">🎯 Run Matcher</button>
     </div>
 
     <div class="table-container">
@@ -1031,6 +1040,38 @@ function filterExplorerBySource(srcName) {
     try { sessionStorage.setItem('careerai-exp-search', srcName); } catch(e) {}
   }
   filterExplorerTable();
+}
+
+function runPipelineCmd(cmd, btn) {
+  var originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Running...';
+  fetch('/api/v1/pipeline/' + cmd, { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'success') {
+        btn.innerHTML = '✅ Done!';
+        setTimeout(function() {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          refreshExplorerListings();
+          if (cmd === 'match') location.reload();
+        }, 1500);
+      } else {
+        btn.innerHTML = '❌ ' + (d.error || 'Failed');
+        setTimeout(function() {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }, 3000);
+      }
+    })
+    .catch(function(err) {
+      btn.innerHTML = '❌ Error';
+      setTimeout(function() {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }, 3000);
+    });
 }
 
 function forceShortlist(id) {

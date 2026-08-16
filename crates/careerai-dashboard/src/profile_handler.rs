@@ -291,3 +291,47 @@ pub fn build_sources_list(
 
     sources
 }
+
+pub async fn api_pipeline_discover() -> impl IntoResponse {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("careerai"));
+    match tokio::process::Command::new(&exe).arg("discover").output().await {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let out_text = format!("{stdout}\n{stderr}").trim().to_string();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": if out.status.success() { "success" } else { "failed" },
+                    "message": out_text,
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "error": e.to_string() })),
+        ),
+    }
+}
+
+pub async fn api_pipeline_match() -> impl IntoResponse {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("careerai"));
+    match tokio::process::Command::new(&exe).arg("match").output().await {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let out_text = format!("{stdout}\n{stderr}").trim().to_string();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "status": if out.status.success() { "success" } else { "failed" },
+                    "message": out_text,
+                })),
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "status": "error", "error": e.to_string() })),
+        ),
+    }
+}
