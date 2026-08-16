@@ -214,3 +214,80 @@ pub fn load_keywords_from_config(
         })
         .collect()
 }
+
+pub fn build_sources_list(
+    db_rows: Vec<(String, i64, Option<chrono::DateTime<chrono::Utc>>)>,
+) -> Vec<crate::view::ConfigSourceItem> {
+    let known_sources = [
+        ("greenhouse", "ATS Direct Feed", "https://boards.greenhouse.io"),
+        ("lever", "ATS Direct Feed", "https://jobs.lever.co"),
+        ("ashby", "ATS Direct Feed", "https://jobs.ashbyhq.com"),
+        ("workday", "ATS Direct Feed", "https://myworkdayjobs.com"),
+        ("smartrecruiters", "ATS Direct Feed", "https://careers.smartrecruiters.com"),
+        ("linkedin", "Web Scraper / CDP", "https://www.linkedin.com/jobs"),
+        ("indeed", "Job Board", "https://www.indeed.com"),
+        ("naukri", "India Job Portal", "https://www.naukri.com"),
+        ("remotive", "Remote Jobs API", "https://remotive.com"),
+        ("wellfound", "Startup Tech Jobs", "https://wellfound.com/jobs"),
+        ("weworkremotely", "Remote Community", "https://weworkremotely.com"),
+        ("ycombinator", "YC Startups", "https://www.workatastartup.com"),
+        ("upwork", "Freelance Platform", "https://www.upwork.com"),
+        ("freelancer", "Freelance Platform", "https://www.freelancer.com"),
+        ("toptal", "Elite Freelance", "https://www.toptal.com"),
+        ("remoteok", "Remote Tech Board", "https://remoteok.com"),
+        ("otta", "Curated Tech Jobs", "https://otta.com"),
+    ];
+
+    let mut db_map = std::collections::HashMap::new();
+    for (name, count, last_sync) in db_rows {
+        if !name.is_empty() {
+            db_map.insert(name.to_lowercase(), (count, last_sync));
+        }
+    }
+
+    let mut sources = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for (s_name, s_kind, s_url) in known_sources {
+        let name_lower = s_name.to_lowercase();
+        seen.insert(name_lower.clone());
+        let (count_i, last_sync) = db_map.get(&name_lower).copied().unwrap_or((0, None));
+        let sync_label = last_sync.map_or_else(|| "Ready".into(), |ts| {
+            let delta = chrono::Utc::now().signed_duration_since(ts);
+            if delta.num_hours() < 1 {
+                "just now".into()
+            } else if delta.num_hours() < 24 {
+                format!("{}h ago", delta.num_hours())
+            } else {
+                format!("{}d ago", delta.num_days())
+            }
+        });
+        let status = if count_i > 0 { "active" } else { "ready" }.to_string();
+
+        sources.push(crate::view::ConfigSourceItem {
+            name: s_name.to_string(),
+            kind: s_kind.to_string(),
+            listing_count: u64::try_from(count_i.max(0)).unwrap_or(0),
+            last_sync,
+            last_sync_label: sync_label,
+            status,
+            url: Some(s_url.to_string()),
+        });
+    }
+
+    for (name, (count_i, last_sync)) in db_map {
+        if !seen.contains(&name) {
+            sources.push(crate::view::ConfigSourceItem {
+                name: name.clone(),
+                kind: "Custom Portal".into(),
+                listing_count: u64::try_from(count_i.max(0)).unwrap_or(0),
+                last_sync,
+                last_sync_label: "active".into(),
+                status: "active".into(),
+                url: None,
+            });
+        }
+    }
+
+    sources
+}

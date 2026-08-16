@@ -95,6 +95,7 @@ pub struct ConfigSourceItem {
     pub last_sync: Option<DateTime<Utc>>,
     pub last_sync_label: String,
     pub status: String,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

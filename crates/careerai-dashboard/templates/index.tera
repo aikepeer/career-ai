@@ -265,17 +265,20 @@
       <div class="config-card">
         <div class="config-card-header">
           <h3>📥 Active Job Sources</h3>
-          <span class="badge">{{ view.config.sources | length }} configured</span>
+          <span class="badge">{{ view.config.sources | length }} sources — Click to inspect</span>
         </div>
-        <div class="sources-list">
+        <div class="sources-list" style="max-height: 440px; overflow-y: auto; padding-right: 4px;">
           {% for src in view.config.sources %}
-          <div class="source-item">
+          <div class="source-item" style="cursor: pointer; transition: background 0.15s ease;" onclick="filterExplorerBySource('{{ src.name }}')" title="Click to view all {{ src.name }} jobs in Explorer">
             <div class="source-main">
-              <span class="source-name">{{ src.name }}</span>
+              <span class="source-name">⚡ {{ src.name }}</span>
               <span class="source-kind">{{ src.kind }}</span>
             </div>
             <div class="source-stats">
-              <span class="source-count">{{ src.listing_count }} listings</span>
+              <span class="source-count">{{ src.listing_count }} jobs</span>
+              {% if src.url %}
+              <a href="{{ src.url }}" target="_blank" onclick="event.stopPropagation();" class="pill pill-info" style="text-decoration:none; font-size:11px; padding:2px 8px;" title="Open {{ src.name }} portal">🌐 Portal ↗</a>
+              {% endif %}
               <span class="status-pill status-{{ src.status }}">{{ src.status }}</span>
             </div>
           </div>
@@ -1018,6 +1021,16 @@ function addCustomKeyword() {
     }
   })
   .catch(function(err) { console.warn('Add keyword failed:', err); });
+}
+
+function filterExplorerBySource(srcName) {
+  switchTab('tab-explorer');
+  var inp = document.getElementById('explorer-search-input');
+  if (inp) {
+    inp.value = srcName;
+    try { sessionStorage.setItem('careerai-exp-search', srcName); } catch(e) {}
+  }
+  filterExplorerTable();
 }
 
 function forceShortlist(id) {

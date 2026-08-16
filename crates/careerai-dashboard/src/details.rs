@@ -100,44 +100,16 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
     )
     .fetch_all(pool)
     .await
-    .map_err(careerai_db::error::DbError::from)?;
+    .unwrap_or_default();
 
-    let now = Utc::now();
-    let mut sources = Vec::new();
+    let mut db_rows = Vec::new();
     for row in rows {
-        let name: String = row
-            .try_get("source")
-            .map_err(careerai_db::error::DbError::from)?;
-        let count_i: i64 = row
-            .try_get("n")
-            .map_err(careerai_db::error::DbError::from)?;
+        let name: String = row.try_get("source").unwrap_or_default();
+        let count_i: i64 = row.try_get("n").unwrap_or(0);
         let last_sync: Option<DateTime<Utc>> = row.try_get("last_sync").ok();
-        let (sync_label, status) = match last_sync {
-            Some(ts) => {
-                let hours = now.signed_duration_since(ts).num_hours();
-                let label = relative_time_label(ts);
-                let st = if hours > 48 { "stale" } else { "active" };
-                (label, st.to_string())
-            }
-            None => ("Never".to_string(), "inactive".to_string()),
-        };
-        let kind = match name.as_str() {
-            "greenhouse" | "lever" | "ashby" => "ATS Direct Feed",
-            "linkedin" => "Web Scraper",
-            "naukri" => "Browser Extension",
-            _ => "Custom Board",
-        }
-        .to_string();
-
-        sources.push(ConfigSourceItem {
-            name,
-            kind,
-            listing_count: u64::try_from(count_i.max(0)).unwrap_or(0),
-            last_sync,
-            last_sync_label: sync_label,
-            status,
-        });
+        db_rows.push((name, count_i, last_sync));
     }
+    let sources = crate::profile_handler::build_sources_list(db_rows);
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let core_cfg = careerai_core::config::CoreConfig::load(&cwd).ok();
