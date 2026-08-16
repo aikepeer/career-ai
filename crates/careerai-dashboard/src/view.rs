@@ -127,6 +127,10 @@ pub struct ConfigView {
     pub rate_limit_per_min: u32,
     pub prompt_version: String,
     pub profile: Option<ProfileView>,
+    pub llm_backend: String,
+    pub llm_api_base: Option<String>,
+    pub llm_api_key: Option<String>,
+    pub llm_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

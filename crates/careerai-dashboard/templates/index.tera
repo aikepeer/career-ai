@@ -322,33 +322,33 @@
           <div class="form-group">
             <label for="cfg-backend">LLM Backend / Agentic Tool</label>
             <select id="cfg-backend" class="form-control">
-              <option value="auto">auto (Auto-detect)</option>
-              <option value="claude-cli">claude-cli (Claude Code CLI)</option>
-              <option value="agy">agy (Google Antigravity CLI)</option>
-              <option value="goose">goose (Goose AI Agent)</option>
-              <option value="aider">aider (Aider Pair Programmer)</option>
-              <option value="codex">codex (OpenAI Codex CLI)</option>
-              <option value="pi">pi (PI Agent CLI)</option>
-              <option value="grok">grok (Grok / xAI CLI)</option>
-              <option value="llama-cpp">llama-cpp (Llama.cpp Local)</option>
-              <option value="api">api (Custom HTTP API / DeepSeek / OpenAI / OpenRouter)</option>
+              <option value="auto" {% if view.config.llm_backend == "auto" %}selected{% endif %}>auto (Auto-detect)</option>
+              <option value="claude-cli" {% if view.config.llm_backend == "claude-cli" %}selected{% endif %}>claude-cli (Claude Code CLI)</option>
+              <option value="agy" {% if view.config.llm_backend == "agy" %}selected{% endif %}>agy (Google Antigravity CLI)</option>
+              <option value="goose" {% if view.config.llm_backend == "goose" %}selected{% endif %}>goose (Goose AI Agent)</option>
+              <option value="aider" {% if view.config.llm_backend == "aider" %}selected{% endif %}>aider (Aider Pair Programmer)</option>
+              <option value="codex" {% if view.config.llm_backend == "codex" %}selected{% endif %}>codex (OpenAI Codex CLI)</option>
+              <option value="pi" {% if view.config.llm_backend == "pi" %}selected{% endif %}>pi (PI Agent CLI)</option>
+              <option value="grok" {% if view.config.llm_backend == "grok" %}selected{% endif %}>grok (Grok / xAI CLI)</option>
+              <option value="llama-cpp" {% if view.config.llm_backend == "llama-cpp" %}selected{% endif %}>llama-cpp (Llama.cpp Local)</option>
+              <option value="api" {% if view.config.llm_backend == "api" %}selected{% endif %}>api (Custom HTTP API / DeepSeek / OpenAI / OpenRouter)</option>
             </select>
           </div>
           <div class="form-group">
             <label for="cfg-model">Model Name / Identifier (Optional)</label>
-            <input type="text" id="cfg-model" class="form-control" placeholder="deepseek-chat, gpt-4o-mini, claude-3-5-sonnet">
+            <input type="text" id="cfg-model" class="form-control" placeholder="deepseek-chat, gpt-4o-mini, claude-3-5-sonnet" value="{{ view.config.llm_model }}">
           </div>
           <div class="form-group">
             <label for="cfg-api-base">Custom API Base URL (Optional)</label>
-            <input type="text" id="cfg-api-base" class="form-control" placeholder="https://api.deepseek.com/v1 or http://localhost:11434/v1">
+            <input type="text" id="cfg-api-base" class="form-control" placeholder="https://api.deepseek.com/v1 or http://localhost:11434/v1" value="{{ view.config.llm_api_base | default(value='') }}">
           </div>
           <div class="form-group">
-            <label for="cfg-api-key">API Key (Optional)</label>
-            <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-deepseek-... or sk-ant-api...">
+            <label for="cfg-api-key">API Key / Token (Saved in config/local.yaml)</label>
+            <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-deepseek-... or sk-ant-api..." value="{{ view.config.llm_api_key | default(value='') }}">
           </div>
           <div class="form-group">
             <label for="cfg-timeout">LLM Request Timeout in Seconds (Default: 300s / 5 mins for long prompts)</label>
-            <input type="number" id="cfg-timeout" class="form-control" placeholder="300" value="300" min="10" max="3600">
+            <input type="number" id="cfg-timeout" class="form-control" placeholder="300" value="{{ view.config.llm_timeout_seconds }}" min="10" max="3600">
           </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">💾 Save LLM Settings</button>
@@ -1210,13 +1210,26 @@ document.addEventListener('DOMContentLoaded', function() {
     try { sessionStorage.setItem('careerai-cfg-prompt', e.target.value); } catch(err) {}
   });
 
-  document.getElementById('explorer-search-input')?.addEventListener('input', function(e) {
-    try { sessionStorage.setItem('careerai-exp-search', e.target.value); } catch(err) {}
-    filterExplorerTable();
+  // Auto-save LLM form inputs to localStorage as user types
+  ['cfg-backend', 'cfg-model', 'cfg-api-base', 'cfg-api-key', 'cfg-timeout'].forEach(function(id) {
+    var el = document.getElementById(id);
+    el?.addEventListener('input', function(e) {
+      try { localStorage.setItem('careerai-' + id, e.target.value); } catch(err) {}
+    });
+    el?.addEventListener('change', function(e) {
+      try { localStorage.setItem('careerai-' + id, e.target.value); } catch(err) {}
+    });
   });
 
-  document.getElementById('explorer-type-filter')?.addEventListener('change', function(e) {
-    try { sessionStorage.setItem('careerai-exp-type', e.target.value); } catch(err) {}
+  // Auto-save Profile form inputs to localStorage as user types
+  ['name', 'email', 'phone', 'location', 'roles', 'languages', 'frameworks', 'tools'].forEach(function(f) {
+    document.getElementById('pf-' + f)?.addEventListener('input', function(e) {
+      try { localStorage.setItem('careerai-pf-' + f, e.target.value); } catch(err) {}
+    });
+  });
+
+  document.getElementById('explorer-search-input')?.addEventListener('input', function(e) {
+    try { sessionStorage.setItem('careerai-exp-search', e.target.value); } catch(err) {}
     filterExplorerTable();
   });
 });

@@ -51,14 +51,13 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
     let config = config_res.unwrap_or_else(|_| view::ConfigView {
         score_threshold: 0.70,
         must_include_skills: vec!["Rust".into(), "Python".into()],
-        keywords: Vec::new(),
-        sources: Vec::new(),
+        keywords: Vec::new(), sources: Vec::new(),
         llm_provider: "Anthropic / Claude Web".into(),
         llm_model: "claude-3-5-sonnet".into(),
-        llm_status: "healthy".into(),
-        rate_limit_per_min: 60,
-        prompt_version: "v1.2.0".into(),
-        profile: None,
+        llm_status: "healthy".into(), rate_limit_per_min: 60,
+        prompt_version: "v1.2.0".into(), profile: None,
+        llm_backend: "auto".into(), llm_api_base: None,
+        llm_api_key: None, llm_timeout_seconds: 300,
     });
     let action_items = actions_res.unwrap_or_default();
     let discovered_explorer = explorer_res.unwrap_or_default();

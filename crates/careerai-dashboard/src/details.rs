@@ -165,6 +165,24 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         .map(|c| c.llm.prompt_version.clone())
         .unwrap_or_else(|| "v1.2.0".to_string());
 
+    let llm_backend = core_cfg
+        .as_ref()
+        .map(|c| c.llm.backend.as_str().to_string())
+        .unwrap_or_else(|| "auto".to_string());
+
+    let llm_api_base = core_cfg
+        .as_ref()
+        .and_then(|c| c.llm.api_base_url.clone());
+
+    let llm_api_key = core_cfg
+        .as_ref()
+        .and_then(|c| c.llm.api_key.clone());
+
+    let llm_timeout_seconds = core_cfg
+        .as_ref()
+        .map(|c| c.llm.timeout_seconds)
+        .unwrap_or(300);
+
     let profile = crate::profile_handler::load_profile_view();
     let keywords = crate::profile_handler::load_keywords_from_config(core_cfg.as_ref());
 
@@ -184,6 +202,10 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         rate_limit_per_min: 60,
         prompt_version: prompt_ver,
         profile,
+        llm_backend,
+        llm_api_base,
+        llm_api_key,
+        llm_timeout_seconds,
     })
 }
 
