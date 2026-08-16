@@ -98,15 +98,35 @@ pub struct ConfigSourceItem {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct KeywordStatus {
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ProfileView {
+    pub name: String,
+    pub email: String,
+    pub phone: String,
+    pub location: String,
+    pub target_roles: Vec<String>,
+    pub languages: Vec<String>,
+    pub frameworks: Vec<String>,
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ConfigView {
     pub score_threshold: f32,
     pub must_include_skills: Vec<String>,
+    pub keywords: Vec<KeywordStatus>,
     pub sources: Vec<ConfigSourceItem>,
     pub llm_provider: String,
     pub llm_model: String,
     pub llm_status: String,
     pub rate_limit_per_min: u32,
     pub prompt_version: String,
+    pub profile: Option<ProfileView>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

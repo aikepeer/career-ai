@@ -249,50 +249,46 @@ pub async fn api_profile_import(
     State(_state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    // Create temporary upload directory
     let upload_dir = std::env::temp_dir().join("careerai_uploads");
     let _ = std::fs::create_dir_all(&upload_dir);
+    let mut saved_paths = Vec::new();
 
-    // Process multipart fields
     while let Some(field) = multipart.next_field().await.unwrap_or(None) {
-        let name = field.name().unwrap_or("").to_owned();
-        if name == "file" {
-            let filename = field
-                .file_name()
-                .unwrap_or("upload")
-                .to_owned();
-            let data = field.bytes().await.unwrap_or_else(|_| bytes::Bytes::new());
-            let path = upload_dir.join(&filename);
-            if let Err(e) = std::fs::write(&path, &data) {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("write error: {e}") })),
-                )
-                    .into_response();
-            }
-            match careerai_profile::import_paths(&[path.as_path()]) {
-                Ok(profile) => {
-                    return (
-                        StatusCode::OK,
-                        Json(serde_json::json!({ "status": "success", "profile": profile })),
-                    )
-                        .into_response();
-                }
-                Err(e) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({ "error": e.to_string() })),
-                    )
-                        .into_response();
-                }
-            }
+        let filename = field.file_name().unwrap_or("upload").to_owned();
+        if filename.is_empty() {
+            continue;
+        }
+        let data = field.bytes().await.unwrap_or_else(|_| bytes::Bytes::new());
+        if data.is_empty() {
+            continue;
+        }
+        let path = upload_dir.join(&filename);
+        if std::fs::write(&path, &data).is_ok() {
+            saved_paths.push(path);
         }
     }
-    (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({ "error": "No file uploaded" })),
-    )
-        .into_response()
+
+    if saved_paths.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No files uploaded" })),
+        )
+            .into_response();
+    }
+
+    let refs: Vec<&std::path::Path> = saved_paths.iter().map(|p| p.as_path()).collect();
+    match careerai_profile::import_paths(&refs) {
+        Ok(profile) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "success", "profile": profile })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 

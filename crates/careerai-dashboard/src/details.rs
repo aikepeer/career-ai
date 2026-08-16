@@ -165,6 +165,9 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         .map(|c| c.llm.prompt_version.clone())
         .unwrap_or_else(|| "v1.2.0".to_string());
 
+    let profile = crate::profile_handler::load_profile_view();
+    let keywords = crate::profile_handler::load_keywords_from_config(core_cfg.as_ref());
+
     Ok(ConfigView {
         score_threshold: 0.70,
         must_include_skills: vec![
@@ -173,12 +176,14 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
             "System Architecture".into(),
             "AI/ML".into(),
         ],
+        keywords,
         sources,
         llm_provider,
         llm_model,
         llm_status: "healthy".into(),
         rate_limit_per_min: 60,
         prompt_version: prompt_ver,
+        profile,
     })
 }
 

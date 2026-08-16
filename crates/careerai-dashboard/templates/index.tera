@@ -270,7 +270,8 @@
       <!-- Matcher & Filter Rules Card -->
       <div class="config-card">
         <div class="config-card-header">
-          <h3>🎯 Matcher Engine Rules</h3>
+          <h3>🎯 Matcher Engine Rules & Target Keywords</h3>
+          <span class="pill pill-info">Interactive</span>
         </div>
         <div class="config-details">
           <div class="config-row">
@@ -278,16 +279,18 @@
             <span class="config-value accent-emerald">≥ {{ view.config.score_threshold }}</span>
           </div>
           <div class="config-row">
-            <span class="config-label">Must Include Skills</span>
-            <div class="skills-wrap">
-              {% for skill in view.config.must_include_skills %}
-              <span class="skill-tag">{{ skill }}</span>
+            <span class="config-label">Target Discovery Keywords</span>
+            <div class="skills-wrap" id="keywords-container">
+              {% for kw in view.config.keywords %}
+              <span class="skill-tag" style="cursor:pointer;" onclick="toggleKeyword('{{ kw.name }}')" title="Click to remove keyword">
+                ✓ {{ kw.name }} <span style="margin-left:4px; opacity:0.7;">✕</span>
+              </span>
               {% endfor %}
             </div>
           </div>
-          <div class="config-row">
-            <span class="config-label">Filter Out Keywords</span>
-            <span class="config-value text-muted">Unpaid, Internship (Non-Tech)</span>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <input type="text" id="new-kw-input" class="form-control" placeholder="Add target keyword (e.g. Yocto, RTOS, PyTorch)" style="flex:1;">
+            <button type="button" class="btn-primary btn-sm" onclick="addCustomKeyword()">+ Add</button>
           </div>
         </div>
       </div>
@@ -364,20 +367,73 @@
         </form>
       </div>
 
-      <!-- LLM Profile Import Card -->
+      <!-- Profile Import + Editable Profile Card -->
       <div class="config-card">
         <div class="config-card-header">
-          <h3>👤 Import Resume Profile</h3>
+          <h3>👤 Candidate Profile</h3>
+          <span class="pill pill-info">Upload &amp; Edit</span>
         </div>
-        <form id="profile-import-form" onsubmit="importProfile(event)" class="config-form">
-          <div class="form-group">
-            <label for="profile-file">Resume/Profile File</label>
-            <input type="file" id="profile-file" class="form-control" accept=".pdf,.doc,.docx,.yaml,.json">
+        <!-- Multi-file Upload (Resume + LinkedIn ZIP) -->
+        <form id="profile-import-form" onsubmit="importProfile(event)" class="config-form" style="margin-bottom:16px;">
+          <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+            <div class="form-group" style="flex:1; min-width:200px;">
+              <label for="profile-resume-file">📄 Resume (PDF / DOCX)</label>
+              <input type="file" id="profile-resume-file" name="resume" class="form-control" accept=".pdf,.doc,.docx,.yaml,.json">
+            </div>
+            <div class="form-group" style="flex:1; min-width:200px;">
+              <label for="profile-linkedin-file">💼 LinkedIn Export ZIP</label>
+              <input type="file" id="profile-linkedin-file" name="linkedin" class="form-control" accept=".zip,.pdf">
+            </div>
           </div>
-          <button type="submit" class="btn-primary">
-            📥 Import Profile
-          </button>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">📥 Import &amp; Extract Profile</button>
+            <span id="import-status" class="save-status"></span>
+          </div>
         </form>
+        <!-- Inline Editable Profile Form -->
+        <div id="profile-editor" style="border-top:1px solid var(--border); padding-top:16px;">
+          <h4 style="margin-bottom:12px; color:var(--text-secondary); font-size:13px; font-weight:600;">PROFILE DETAILS</h4>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+            <div class="form-group">
+              <label for="pf-name">Full Name</label>
+              <input type="text" id="pf-name" class="form-control" value="{{ view.config.profile.name | default(value='') }}" placeholder="Your full name">
+            </div>
+            <div class="form-group">
+              <label for="pf-email">Email</label>
+              <input type="email" id="pf-email" class="form-control" value="{{ view.config.profile.email | default(value='') }}" placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+              <label for="pf-phone">Phone</label>
+              <input type="text" id="pf-phone" class="form-control" value="{{ view.config.profile.phone | default(value='') }}" placeholder="+91-XXXXXXXXXX">
+            </div>
+            <div class="form-group">
+              <label for="pf-location">Location</label>
+              <input type="text" id="pf-location" class="form-control" value="{{ view.config.profile.location | default(value='') }}" placeholder="Gurugram, India">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="pf-roles">Target Roles (comma-separated)</label>
+            <input type="text" id="pf-roles" class="form-control" value="{{ view.config.profile.target_roles | default(value=[]) | join(sep=', ') }}" placeholder="Embedded Systems Engineer, Robotics SWE">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+            <div class="form-group">
+              <label for="pf-languages">Languages / Stack (comma-separated)</label>
+              <input type="text" id="pf-languages" class="form-control" value="{{ view.config.profile.languages | default(value=[]) | join(sep=', ') }}" placeholder="Rust, Python, C++">
+            </div>
+            <div class="form-group">
+              <label for="pf-frameworks">Frameworks &amp; Platforms</label>
+              <input type="text" id="pf-frameworks" class="form-control" value="{{ view.config.profile.frameworks | default(value=[]) | join(sep=', ') }}" placeholder="ROS2, Linux, Yocto, PyTorch">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label for="pf-tools">Tools &amp; DevOps</label>
+            <input type="text" id="pf-tools" class="form-control" value="{{ view.config.profile.tools | default(value=[]) | join(sep=', ') }}" placeholder="Git, Docker, GDB, Jira">
+          </div>
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="button" class="btn-primary" onclick="saveProfile()">💾 Save Profile</button>
+            <span id="profile-save-status" class="save-status"></span>
+          </div>
+        </div>
       </div>
 
       <!-- LLM Config Prompt Chat Assistant -->
@@ -443,14 +499,33 @@
       <p class="panel-desc">Browse, search, and filter all 557+ discovered postings before and after matching</p>
     </div>
 
+    <!-- E-Commerce Shopping-Style Multi-Select Filter Panel -->
+    <div class="filter-panel-card" style="margin-bottom:16px;">
+      <div class="filter-group-row">
+        <span class="filter-group-title">📍 Location & Mode:</span>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-remote" onchange="filterExplorerTable()"> 🌐 Remote Only</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-india" onchange="filterExplorerTable()"> 🇮🇳 India / Gurugram</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-abroad" onchange="filterExplorerTable()"> ✈️ International / Abroad</label>
+      </div>
+
+      <div class="filter-group-row" style="margin-top:10px;">
+        <span class="filter-group-title">💻 Tech Stack & Domain:</span>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-embedded" onchange="filterExplorerTable()"> 🔌 Embedded / Systems / Linux</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-ai" onchange="filterExplorerTable()"> 🤖 AI / ML / Robotics</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-software" onchange="filterExplorerTable()"> 💻 Fullstack / Web / Software</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-stem" onchange="filterExplorerTable()"> 🔬 STEM / Telecom / Physics</label>
+      </div>
+
+      <div class="filter-group-row" style="margin-top:10px;">
+        <span class="filter-group-title">⚡ Listing Status:</span>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-state-discovered" onchange="filterExplorerTable()" checked> ✨ Discovered</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-state-filtered" onchange="filterExplorerTable()" checked> 🚫 Filtered Out</label>
+        <button class="chip-btn" onclick="resetExplorerFilters()" style="margin-left:auto;">🔄 Reset All Filters</button>
+      </div>
+    </div>
+
     <div class="explorer-toolbar" style="display:flex; gap:12px; margin-bottom:16px;">
-      <input type="text" id="explorer-search-input" class="form-control" placeholder="Search 557+ jobs by title, company, skills..." onkeyup="filterExplorerTable()" style="flex:1;">
-      <select id="explorer-type-filter" class="form-control" onchange="filterExplorerTable()" style="width:200px;">
-        <option value="all">All Postings & Types</option>
-        <option value="remote">Remote Only</option>
-        <option value="filtered_out">Filtered Out Only</option>
-        <option value="discovered">Discovered Only</option>
-      </select>
+      <input type="text" id="explorer-search-input" class="form-control" placeholder="Search postings by job title, company, or skills..." oninput="filterExplorerTable()" style="flex:1;">
     </div>
 
     <div class="table-container">
@@ -732,27 +807,189 @@ function saveLlmSettings(e) {
   });
 }
 
+function importProfile(e) {
+  e.preventDefault();
+  var statusEl = document.getElementById('import-status');
+  statusEl.innerText = 'Uploading...';
+  var formData = new FormData();
+  var resumeFile = document.getElementById('profile-resume-file').files[0];
+  var linkedinFile = document.getElementById('profile-linkedin-file').files[0];
+  if (!resumeFile && !linkedinFile) {
+    statusEl.innerText = '❌ Please select at least one file.'; return;
+  }
+  if (resumeFile) formData.append('resume', resumeFile, resumeFile.name);
+  if (linkedinFile) formData.append('linkedin', linkedinFile, linkedinFile.name);
+  fetch('/api/v1/profile/import', { method: 'POST', body: formData })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      statusEl.innerText = '✅ Profile imported!';
+      var p = d.profile;
+      if (p) {
+        if (p.personal) {
+          document.getElementById('pf-name').value = p.personal.name || '';
+          document.getElementById('pf-email').value = p.personal.email || '';
+          document.getElementById('pf-phone').value = p.personal.phone || '';
+          document.getElementById('pf-location').value = p.personal.location || '';
+        }
+        if (p.target_roles) document.getElementById('pf-roles').value = p.target_roles.join(', ');
+        if (p.skills) {
+          document.getElementById('pf-languages').value = (p.skills.languages || []).join(', ');
+          document.getElementById('pf-frameworks').value = (p.skills.frameworks || []).join(', ');
+          document.getElementById('pf-tools').value = (p.skills.tools || []).join(', ');
+        }
+      }
+    } else {
+      statusEl.innerText = '❌ ' + (d.error || 'Import failed');
+    }
+  })
+  .catch(function(err) { statusEl.innerText = '❌ ' + err; });
+}
+
 function filterExplorerTable() {
   var searchVal = (document.getElementById('explorer-search-input').value || '').toLowerCase();
-  var typeVal = document.getElementById('explorer-type-filter').value;
+
+  // Location/mode facets
+  var wantRemote = document.getElementById('flt-remote').checked;
+  var wantIndia = document.getElementById('flt-india').checked;
+  var wantAbroad = document.getElementById('flt-abroad').checked;
+  var anyLocation = !wantRemote && !wantIndia && !wantAbroad;
+
+  // Domain facets
+  var wantEmbedded = document.getElementById('flt-embedded').checked;
+  var wantAi = document.getElementById('flt-ai').checked;
+  var wantSoftware = document.getElementById('flt-software').checked;
+  var wantStem = document.getElementById('flt-stem').checked;
+  var anyDomain = !wantEmbedded && !wantAi && !wantSoftware && !wantStem;
+
+  // Status facets
+  var wantDiscovered = document.getElementById('flt-state-discovered').checked;
+  var wantFiltered = document.getElementById('flt-state-filtered').checked;
+
   var rows = document.querySelectorAll('.explorer-row');
   rows.forEach(function(row) {
-    var text = row.getAttribute('data-search') || '';
+    var text = (row.getAttribute('data-search') || '').toLowerCase();
     var isRemote = row.getAttribute('data-remote') === 'true';
     var state = row.getAttribute('data-state') || '';
 
-    var matchesSearch = !searchVal || text.indexOf(searchVal) !== -1;
-    var matchesType = true;
-    if (typeVal === 'remote') matchesType = isRemote;
-    else if (typeVal === 'filtered_out') matchesType = (state === 'filtered_out');
-    else if (typeVal === 'discovered') matchesType = (state === 'discovered');
-
-    if (matchesSearch && matchesType) {
-      row.style.display = '';
-    } else {
-      row.style.display = 'none';
+    // Text search
+    if (searchVal && text.indexOf(searchVal) === -1) {
+      row.style.display = 'none'; return;
     }
+
+    // Status
+    var stateOk = false;
+    if (wantDiscovered && state !== 'filtered_out') stateOk = true;
+    if (wantFiltered && state === 'filtered_out') stateOk = true;
+    if (!wantDiscovered && !wantFiltered) stateOk = true;
+    if (!stateOk) { row.style.display = 'none'; return; }
+
+    // Location/mode
+    if (!anyLocation) {
+      var locOk = false;
+      if (wantRemote && isRemote) locOk = true;
+      if (wantIndia && text.indexOf('india') !== -1) locOk = true;
+      if (wantAbroad && !isRemote && text.indexOf('india') === -1) locOk = true;
+      if (!locOk) { row.style.display = 'none'; return; }
+    }
+
+    // Domain
+    if (!anyDomain) {
+      var domOk = false;
+      if (wantEmbedded && /embedded|firmware|rtos|yocto|linux|kernel|fpga|driver/.test(text)) domOk = true;
+      if (wantAi && /\bai\b|machine.learning|deep.learning|robotics|nlp|computer.vision|pytorch|tensorflow/.test(text)) domOk = true;
+      if (wantSoftware && /fullstack|frontend|backend|web|react|node|django|spring|devops/.test(text)) domOk = true;
+      if (wantStem && /research|science|physics|telecom|signal|rf|matlab|simulation/.test(text)) domOk = true;
+      if (!domOk) { row.style.display = 'none'; return; }
+    }
+
+    row.style.display = '';
   });
+}
+
+function resetExplorerFilters() {
+  ['flt-remote','flt-india','flt-abroad','flt-embedded','flt-ai','flt-software','flt-stem'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.checked = false;
+  });
+  ['flt-state-discovered','flt-state-filtered'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.checked = true;
+  });
+  document.getElementById('explorer-search-input').value = '';
+  filterExplorerTable();
+}
+
+function saveProfile() {
+  var statusEl = document.getElementById('profile-save-status');
+  statusEl.innerText = 'Saving...';
+  var splitCsv = function(s) {
+    return (s || '').split(',').map(function(x) { return x.trim(); }).filter(Boolean);
+  };
+  var payload = {
+    name: document.getElementById('pf-name').value.trim(),
+    email: document.getElementById('pf-email').value.trim(),
+    phone: document.getElementById('pf-phone').value.trim(),
+    location: document.getElementById('pf-location').value.trim(),
+    target_roles: splitCsv(document.getElementById('pf-roles').value),
+    languages: splitCsv(document.getElementById('pf-languages').value),
+    frameworks: splitCsv(document.getElementById('pf-frameworks').value),
+    tools: splitCsv(document.getElementById('pf-tools').value),
+  };
+  fetch('/api/v1/profile/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    statusEl.innerText = d.status === 'success' ? '✅ Profile Saved!' : '❌ ' + (d.error || 'Unknown error');
+    setTimeout(function() { statusEl.innerText = ''; }, 3000);
+  })
+  .catch(function(err) { statusEl.innerText = '❌ ' + err; });
+}
+
+function toggleKeyword(kw) {
+  fetch('/api/v1/config/keywords', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyword: kw, action: 'remove' })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      document.querySelectorAll('#keywords-container .skill-tag').forEach(function(el) {
+        if (el.textContent.includes(kw)) el.remove();
+      });
+    }
+  })
+  .catch(function(err) { console.warn('Toggle keyword failed:', err); });
+}
+
+function addCustomKeyword() {
+  var inp = document.getElementById('new-kw-input');
+  var kw = (inp.value || '').trim();
+  if (!kw) return;
+  fetch('/api/v1/config/keywords', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keyword: kw, action: 'add' })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      inp.value = '';
+      var container = document.getElementById('keywords-container');
+      var span = document.createElement('span');
+      span.className = 'skill-tag';
+      span.style.cursor = 'pointer';
+      span.title = 'Click to remove keyword';
+      span.setAttribute('onclick', "toggleKeyword('" + kw.replace(/'/g, "\\'") + "')");
+      span.innerHTML = '✓ ' + escapeHtml(kw) + ' <span style="margin-left:4px;opacity:0.7;">✕</span>';
+      container.appendChild(span);
+    }
+  })
+  .catch(function(err) { console.warn('Add keyword failed:', err); });
 }
 
 function forceShortlist(id) {

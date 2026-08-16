@@ -12,6 +12,7 @@ pub mod error;
 pub mod handlers;
 pub mod llm_health;
 pub mod next_steps;
+pub mod profile_handler;
 pub mod routes;
 pub mod view;
 

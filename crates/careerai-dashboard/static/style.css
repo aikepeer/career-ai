@@ -916,3 +916,44 @@ footer {
   white-space: nowrap;
 }
 
+/* E-COMMERCE SHOPPING-STYLE MULTI-SELECT FILTERS */
+.filter-panel-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+.filter-group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.filter-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 140px;
+}
+.checkbox-pill {
+  font-size: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+.checkbox-pill:hover {
+  border-color: var(--accent-indigo);
+}
+.checkbox-pill input[type="checkbox"] {
+  accent-color: var(--accent-indigo);
+  cursor: pointer;
+}
+
+
