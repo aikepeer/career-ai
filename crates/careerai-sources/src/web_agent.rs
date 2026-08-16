@@ -129,7 +129,7 @@ impl WebSearchDiscoveryAgent {
         &self,
         config_path: &std::path::Path,
         portals: &[DiscoveredPortal],
-    ) -> anyhow::Result<usize> {
+    ) -> std::io::Result<usize> {
         let mut content = if config_path.exists() {
             std::fs::read_to_string(config_path)?
         } else {
