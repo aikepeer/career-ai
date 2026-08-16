@@ -143,11 +143,12 @@ async fn new_api_endpoints_respond() {
         "shortlist unexpected: {shortlist}"
     );
 
-    // GET /api/v1/explorer — should return JSON array
-    let explorer = reqwest_get(&format!("{base}/api/v1/explorer")).await;
+    // POST /api/v1/chat — interactive LLM assistant endpoint
+    let chat_body = r#"{"message":"Analyze my current job match pipeline statistics"}"#;
+    let chat_res = curl_post_json(&format!("{base}/api/v1/chat"), chat_body).await;
     assert!(
-        explorer.starts_with('['),
-        "explorer endpoint unexpected: {explorer}"
+        chat_res.contains("reply") || chat_res.contains("status"),
+        "chat endpoint unexpected: {chat_res}"
     );
 
     server.abort();

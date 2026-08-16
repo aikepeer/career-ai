@@ -22,7 +22,8 @@ pub fn build(state: Arc<AppState>) -> Router {
         .route("/api/v1/explorer", get(handlers::api_explorer))
         .route("/api/v1/config/generate", post(handlers::api_config_generate))
             .route("/api/v1/config/prompt", post(handlers::api_config_prompt))
-    .route("/api/v1/profile/import", post(handlers::api_profile_import))
+        .route("/api/v1/profile/import", post(handlers::api_profile_import))
         .route("/api/v1/listings/:id/shortlist", post(handlers::api_force_shortlist))
+        .route("/api/v1/chat", post(crate::chat::api_chat_agent))
         .with_state(state)
 }

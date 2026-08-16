@@ -55,6 +55,10 @@
       <span class="tab-badge">{{ view.discovered_explorer | length }}</span>
       {% endif %}
     </button>
+    <button class="nav-btn" id="tab-btn-chat" onclick="switchTab('chat')">
+      <span class="nav-icon">🤖</span> AI Assistant
+      <span class="tab-badge badge-accent">AI</span>
+    </button>
   </nav>
 
   <div class="header-right">
@@ -484,6 +488,47 @@
       </table>
     </div>
   </div>
+
+  <!-- TAB 6: AI CHAT ASSISTANT -->
+  <div id="tab-chat" class="tab-panel">
+    <div class="panel-header">
+      <h2>🤖 Interactive AI Career & Pipeline Assistant</h2>
+      <p class="panel-desc">Ask questions, tune discovery keywords, analyze match scores, or get tailored interview advice</p>
+    </div>
+
+    <div class="chat-wrapper">
+      <!-- Quick Prompt Suggestion Chips -->
+      <div class="prompt-chips-bar">
+        <span class="chips-label">💡 Suggested Prompts:</span>
+        <button class="chip-btn" onclick="usePromptChip('Suggest priority keywords for Remote Embedded AI & Robotics')">🎯 Target Keywords</button>
+        <button class="chip-btn" onclick="usePromptChip('Analyze my current job match pipeline statistics')">📊 Match Stats</button>
+        <button class="chip-btn" onclick="usePromptChip('Give me technical interview preparation advice for Rust Embedded positions')">📝 Interview Prep</button>
+        <button class="chip-btn" onclick="usePromptChip('How do I switch LLM backend to DeepSeek or Claude Web?')">⚙️ LLM Setup</button>
+      </div>
+
+      <!-- Chat Messages Scroll Container -->
+      <div id="chat-messages" class="chat-messages-container">
+        <div class="chat-msg msg-assistant">
+          <div class="msg-avatar">🤖</div>
+          <div class="msg-content">
+            <div class="msg-header">
+              <span class="msg-author">Career-AI Assistant</span>
+              <span class="msg-time">Just now</span>
+            </div>
+            <div class="msg-text">Hello! I'm your <strong>Career-AI Interactive Assistant</strong>. I can analyze your candidate profile, suggest domain keywords for <code>config/local.yaml</code>, review match scores, or help prep for technical interviews.<br><br>How can I help you optimize your job pipeline today?</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input Bar -->
+      <form id="chat-form" onsubmit="sendChatMessage(event)" class="chat-input-container">
+        <input type="text" id="chat-input" class="form-control chat-input-field" placeholder="Ask Career-AI anything about your jobs, config, or interview prep..." autocomplete="off">
+        <button type="submit" id="chat-send-btn" class="btn-primary chat-send-btn">
+          <span>📤 Send</span>
+        </button>
+      </form>
+    </div>
+  </div>
 </main>
 
 <!-- APPLICATION DETAIL POPOVER MODAL -->
@@ -730,6 +775,89 @@ function sendConfigPrompt() {
     responseEl.innerText = 'Error: ' + err;
   });
 }
+
+function usePromptChip(text) {
+  var input = document.getElementById('chat-input');
+  if (input) {
+    input.value = text;
+    input.focus();
+  }
+}
+
+function sendChatMessage(event) {
+  if (event) event.preventDefault();
+  var input = document.getElementById('chat-input');
+  var text = (input.value || '').trim();
+  if (!text) return;
+
+  var container = document.getElementById('chat-messages');
+  
+  var userDiv = document.createElement('div');
+  userDiv.className = 'chat-msg msg-user';
+  userDiv.innerHTML = '<div class="msg-avatar">👤</div>' +
+    '<div class="msg-content">' +
+      '<div class="msg-header"><span class="msg-author">You</span><span class="msg-time">Just now</span></div>' +
+      '<div class="msg-text">' + escapeHtml(text) + '</div>' +
+    '</div>';
+  container.appendChild(userDiv);
+  
+  input.value = '';
+  container.scrollTop = container.scrollHeight;
+
+  var aiDiv = document.createElement('div');
+  aiDiv.className = 'chat-msg msg-assistant';
+  aiDiv.innerHTML = '<div class="msg-avatar">🤖</div>' +
+    '<div class="msg-content">' +
+      '<div class="msg-header"><span class="msg-author">Career-AI Assistant</span><span class="msg-time">Thinking...</span></div>' +
+      '<div class="msg-text msg-loading">Thinking...</div>' +
+    '</div>';
+  container.appendChild(aiDiv);
+  container.scrollTop = container.scrollHeight;
+
+  fetch('/api/v1/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var textEl = aiDiv.querySelector('.msg-text');
+    var timeEl = aiDiv.querySelector('.msg-time');
+    if (timeEl) timeEl.innerText = 'Just now';
+    if (data.reply) {
+      if (textEl) {
+        textEl.classList.remove('msg-loading');
+        textEl.innerHTML = formatMarkdownResponse(data.reply);
+      }
+    } else {
+      if (textEl) {
+        textEl.classList.remove('msg-loading');
+        textEl.innerText = data.error || 'No response from assistant.';
+      }
+    }
+    container.scrollTop = container.scrollHeight;
+  })
+  .catch(function(err) {
+    var textEl = aiDiv.querySelector('.msg-text');
+    if (textEl) {
+      textEl.classList.remove('msg-loading');
+      textEl.innerText = 'Error connecting to assistant: ' + err;
+    }
+  });
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function formatMarkdownResponse(md) {
+  return md
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
 
 // Countdown timer script
 (function() {
