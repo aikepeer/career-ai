@@ -70,10 +70,10 @@ pub async fn api_chat_agent(
         )
     } else if lower.contains("match") || lower.contains("score") || lower.contains("listing") || lower.contains("job") {
         let snap = data::snapshot(&state.pool).await.ok();
-        let total = snap.as_ref().map(|s| s.kpi.total_discovered).unwrap_or(0);
-        let shortlisted = snap.as_ref().map(|s| s.kpi.shortlisted).unwrap_or(0);
+        let total = snap.as_ref().map(|s| s.kpi.today_discovered).unwrap_or(0);
+        let shortlisted = snap.as_ref().map(|s| s.kpi.shortlisted_active).unwrap_or(0);
         format!(
-            "📊 **Pipeline Matching Analysis**\n\nCurrently, your pipeline has ingested **{total} total jobs**, with **{shortlisted} shortlisted** top matches (Score ≥ 0.70).\n\n**Recommendations to increase high-scoring matches:**\n1. Ensure your `profile/profile.yaml` lists all core skills (C, C++, Rust, Python, RTOS, Yocto).\n2. Lower `min_score_threshold` in `config/local.yaml` if you want a wider net.\n3. Explore the **Discovered & Filtered Explorer** tab to manually force-shortlist any filtered job."
+            "📊 **Pipeline Matching Analysis**\n\nCurrently, your pipeline has ingested **{total} discovered jobs today**, with **{shortlisted} active shortlisted** top matches (Score ≥ 0.70).\n\n**Recommendations to increase high-scoring matches:**\n1. Ensure your `profile/profile.yaml` lists all core skills (C, C++, Rust, Python, RTOS, Yocto).\n2. Lower `min_score_threshold` in `config/local.yaml` if you want a wider net.\n3. Explore the **Discovered & Filtered Explorer** tab to manually force-shortlist any filtered job."
         )
     } else if lower.contains("prep") || lower.contains("interview") || lower.contains("question") {
         format!(
