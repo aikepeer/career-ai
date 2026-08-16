@@ -195,16 +195,17 @@ pub fn load_profile_view() -> Option<crate::view::ProfileView> {
 pub fn load_keywords_from_config(
     cfg: Option<&careerai_core::config::CoreConfig>,
 ) -> Vec<crate::view::KeywordStatus> {
-    let keywords = cfg
+    let mut keywords = cfg
         .map(|c| c.sources.keywords.clone())
         .unwrap_or_else(|| {
             vec![
-                "Embedded Systems".into(),
-                "Rust".into(),
                 "AI/ML".into(),
+                "Embedded Systems".into(),
                 "Robotics".into(),
+                "Rust".into(),
             ]
         });
+    keywords.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
     keywords
         .into_iter()
         .map(|k| crate::view::KeywordStatus {

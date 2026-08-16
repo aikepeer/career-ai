@@ -956,4 +956,34 @@ footer {
   cursor: pointer;
 }
 
-
+/* KEYWORD CHIP — 3-column grid (falls back to 2 on narrow screens) */
+.kw-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kw-chip:hover {
+  border-color: var(--accent-indigo);
+  background: hsl(240 18% 20%);
+}
+@media (max-width: 900px) {
+  #keywords-container {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+@media (max-width: 560px) {
+  #keywords-container {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -242,6 +242,25 @@
     </div>
 
     <div class="config-grid">
+      <!-- Target Discovery Keywords Card — FULL WIDTH, TOP PRIORITY -->
+      <div class="config-card" style="grid-column: 1 / -1;">
+        <div class="config-card-header">
+          <h3>🎯 Target Discovery Keywords</h3>
+          <span class="pill pill-info">{{ view.config.keywords | length }} keywords — Click to remove · Type to add</span>
+        </div>
+        <div id="keywords-container" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:12px;">
+          {% for kw in view.config.keywords | sort(attribute="name") %}
+          <span class="skill-tag kw-chip" style="cursor:pointer; justify-content:space-between;" onclick="toggleKeyword('{{ kw.name }}')" title="Click to remove">
+            <span>✓ {{ kw.name }}</span><span style="opacity:0.6; margin-left:6px;">✕</span>
+          </span>
+          {% endfor %}
+        </div>
+        <div style="display:flex; gap:8px; margin-top:4px;">
+          <input type="text" id="new-kw-input" class="form-control" placeholder="Add keyword (e.g. Yocto, RTOS, PyTorch, ROS2)..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomKeyword();}">
+          <button type="button" class="btn-primary" onclick="addCustomKeyword()">+ Add Keyword</button>
+        </div>
+      </div>
+
       <!-- Active Sources Card -->
       <div class="config-card">
         <div class="config-card-header">
@@ -264,34 +283,6 @@
           {% if view.config.sources | length == 0 %}
           <div class="empty">No active sources indexed yet.</div>
           {% endif %}
-        </div>
-      </div>
-
-      <!-- Matcher & Filter Rules Card -->
-      <div class="config-card">
-        <div class="config-card-header">
-          <h3>🎯 Matcher Engine Rules & Target Keywords</h3>
-          <span class="pill pill-info">Interactive</span>
-        </div>
-        <div class="config-details">
-          <div class="config-row">
-            <span class="config-label">Score Threshold</span>
-            <span class="config-value accent-emerald">≥ {{ view.config.score_threshold }}</span>
-          </div>
-          <div class="config-row">
-            <span class="config-label">Target Discovery Keywords</span>
-            <div class="skills-wrap" id="keywords-container">
-              {% for kw in view.config.keywords %}
-              <span class="skill-tag" style="cursor:pointer;" onclick="toggleKeyword('{{ kw.name }}')" title="Click to remove keyword">
-                ✓ {{ kw.name }} <span style="margin-left:4px; opacity:0.7;">✕</span>
-              </span>
-              {% endfor %}
-            </div>
-          </div>
-          <div style="display:flex; gap:8px; margin-top:8px;">
-            <input type="text" id="new-kw-input" class="form-control" placeholder="Add target keyword (e.g. Yocto, RTOS, PyTorch)" style="flex:1;">
-            <button type="button" class="btn-primary btn-sm" onclick="addCustomKeyword()">+ Add</button>
-          </div>
         </div>
       </div>
 
@@ -786,6 +777,16 @@ function saveLlmSettings(e) {
   var timeoutSec = parseInt(document.getElementById('cfg-timeout').value, 10) || 300;
   var msgEl = document.getElementById('save-status-msg');
   msgEl.innerText = 'Saving...';
+
+  // Persist to localStorage immediately so fields survive reloads
+  try {
+    localStorage.setItem('careerai-cfg-backend', backend);
+    localStorage.setItem('careerai-cfg-model', model);
+    localStorage.setItem('careerai-cfg-api-base', apiBase);
+    localStorage.setItem('careerai-cfg-api-key', apiKey);
+    localStorage.setItem('careerai-cfg-timeout', String(timeoutSec));
+  } catch(lsErr) {}
+
   fetch('/api/v1/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -800,7 +801,7 @@ function saveLlmSettings(e) {
   .then(function(res) { return res.json(); })
   .then(function(data) {
     msgEl.innerText = '✅ Settings Saved!';
-    setTimeout(function() { location.reload(); }, 1200);
+    setTimeout(function() { msgEl.innerText = ''; }, 2500);
   })
   .catch(function(err) {
     msgEl.innerText = '❌ Failed: ' + err;
@@ -936,6 +937,18 @@ function saveProfile() {
     frameworks: splitCsv(document.getElementById('pf-frameworks').value),
     tools: splitCsv(document.getElementById('pf-tools').value),
   };
+
+  try {
+    localStorage.setItem('careerai-pf-name', payload.name);
+    localStorage.setItem('careerai-pf-email', payload.email);
+    localStorage.setItem('careerai-pf-phone', payload.phone);
+    localStorage.setItem('careerai-pf-location', payload.location);
+    localStorage.setItem('careerai-pf-roles', document.getElementById('pf-roles').value);
+    localStorage.setItem('careerai-pf-languages', document.getElementById('pf-languages').value);
+    localStorage.setItem('careerai-pf-frameworks', document.getElementById('pf-frameworks').value);
+    localStorage.setItem('careerai-pf-tools', document.getElementById('pf-tools').value);
+  } catch(e) {}
+
   fetch('/api/v1/profile/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -958,12 +971,22 @@ function toggleKeyword(kw) {
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.status === 'success') {
-      document.querySelectorAll('#keywords-container .skill-tag').forEach(function(el) {
+      document.querySelectorAll('#keywords-container .kw-chip').forEach(function(el) {
         if (el.textContent.includes(kw)) el.remove();
       });
     }
   })
   .catch(function(err) { console.warn('Toggle keyword failed:', err); });
+}
+
+function sortKeywordsContainer() {
+  var container = document.getElementById('keywords-container');
+  if (!container) return;
+  var chips = Array.from(container.querySelectorAll('.kw-chip'));
+  chips.sort(function(a, b) {
+    return a.textContent.trim().toLowerCase().localeCompare(b.textContent.trim().toLowerCase());
+  });
+  chips.forEach(function(c) { container.appendChild(c); });
 }
 
 function addCustomKeyword() {
@@ -981,12 +1004,14 @@ function addCustomKeyword() {
       inp.value = '';
       var container = document.getElementById('keywords-container');
       var span = document.createElement('span');
-      span.className = 'skill-tag';
+      span.className = 'skill-tag kw-chip';
       span.style.cursor = 'pointer';
-      span.title = 'Click to remove keyword';
+      span.style.justifyContent = 'space-between';
+      span.title = 'Click to remove';
       span.setAttribute('onclick', "toggleKeyword('" + kw.replace(/'/g, "\\'") + "')");
-      span.innerHTML = '✓ ' + escapeHtml(kw) + ' <span style="margin-left:4px;opacity:0.7;">✕</span>';
+      span.innerHTML = '<span>✓ ' + escapeHtml(kw) + '</span><span style="opacity:0.6; margin-left:6px;">✕</span>';
       container.appendChild(span);
+      sortKeywordsContainer();
     }
   })
   .catch(function(err) { console.warn('Add keyword failed:', err); });
@@ -1130,6 +1155,29 @@ document.addEventListener('DOMContentLoaded', function() {
   try {
     var savedTab = localStorage.getItem('careerai-active-tab');
     if (savedTab) switchTab(savedTab);
+  } catch(e) {}
+
+  // Restore LLM Form Settings (Backend, Model, Base URL, API Key, Timeout)
+  try {
+    var savedBackend = localStorage.getItem('careerai-cfg-backend');
+    if (savedBackend && document.getElementById('cfg-backend')) document.getElementById('cfg-backend').value = savedBackend;
+    var savedModel = localStorage.getItem('careerai-cfg-model');
+    if (savedModel && document.getElementById('cfg-model')) document.getElementById('cfg-model').value = savedModel;
+    var savedApiBase = localStorage.getItem('careerai-cfg-api-base');
+    if (savedApiBase && document.getElementById('cfg-api-base')) document.getElementById('cfg-api-base').value = savedApiBase;
+    var savedApiKey = localStorage.getItem('careerai-cfg-api-key');
+    if (savedApiKey && document.getElementById('cfg-api-key')) document.getElementById('cfg-api-key').value = savedApiKey;
+    var savedTimeout = localStorage.getItem('careerai-cfg-timeout');
+    if (savedTimeout && document.getElementById('cfg-timeout')) document.getElementById('cfg-timeout').value = savedTimeout;
+  } catch(e) {}
+
+  // Restore Candidate Profile Fields
+  try {
+    ['name', 'email', 'phone', 'location', 'roles', 'languages', 'frameworks', 'tools'].forEach(function(f) {
+      var val = localStorage.getItem('careerai-pf-' + f);
+      var el = document.getElementById('pf-' + f);
+      if (val && el && !el.value) el.value = val;
+    });
   } catch(e) {}
 
   // Restore Chat History
