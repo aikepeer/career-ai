@@ -80,7 +80,7 @@ llm:
   api_key: "sk-deepseekapi"
   parse_resume_model: "deepseek-chat"
   tailor_model: "deepseek-chat"
-  timeout_seconds: 60
+  timeout_seconds: 300
 
 sources:
   keywords:

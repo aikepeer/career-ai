@@ -353,6 +353,10 @@
             <label for="cfg-api-key">API Key (Optional)</label>
             <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-deepseek-... or sk-ant-api...">
           </div>
+          <div class="form-group">
+            <label for="cfg-timeout">LLM Request Timeout in Seconds (Default: 300s / 5 mins for long prompts)</label>
+            <input type="number" id="cfg-timeout" class="form-control" placeholder="300" value="300" min="10" max="3600">
+          </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">💾 Save LLM Settings</button>
             <button type="button" class="btn-primary" onclick="generateConfig()">⚙️ Generate Config from Profile</button>
@@ -703,6 +707,7 @@ function saveLlmSettings(e) {
   var model = document.getElementById('cfg-model').value;
   var apiBase = document.getElementById('cfg-api-base').value;
   var apiKey = document.getElementById('cfg-api-key').value;
+  var timeoutSec = parseInt(document.getElementById('cfg-timeout').value, 10) || 300;
   var msgEl = document.getElementById('save-status-msg');
   msgEl.innerText = 'Saving...';
   fetch('/api/v1/config', {
@@ -712,7 +717,8 @@ function saveLlmSettings(e) {
       backend: backend,
       model: model || null,
       api_base_url: apiBase || null,
-      api_key: apiKey || null
+      api_key: apiKey || null,
+      timeout_seconds: timeoutSec
     })
   })
   .then(function(res) { return res.json(); })

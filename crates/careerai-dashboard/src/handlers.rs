@@ -121,6 +121,7 @@ pub struct SaveConfigRequest {
     pub model: Option<String>,
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
+    pub timeout_seconds: Option<u64>,
 }
 
 pub async fn api_save_config(
@@ -154,6 +155,13 @@ pub async fn api_save_config(
         if !provider.trim().is_empty() {
             std::env::set_var("LLM_PROVIDER", provider.trim());
             std::env::set_var("CAREERAI_LLM_PROVIDER", provider.trim());
+        }
+    }
+    if let Some(timeout) = payload.timeout_seconds {
+        if timeout > 0 {
+            let s = timeout.to_string();
+            std::env::set_var("LLM_TIMEOUT_SECONDS", &s);
+            std::env::set_var("CAREERAI_LLM_TIMEOUT", &s);
         }
     }
     if !payload.backend.trim().is_empty() {

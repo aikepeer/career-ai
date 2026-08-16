@@ -136,7 +136,12 @@ fn default_max_retries() -> u32 {
     3
 }
 fn default_timeout_seconds() -> u64 {
-    120
+    if let Ok(val) = std::env::var("LLM_TIMEOUT_SECONDS").or_else(|_| std::env::var("CAREERAI_LLM_TIMEOUT")) {
+        if let Ok(parsed) = val.parse::<u64>() {
+            return parsed;
+        }
+    }
+    300
 }
 fn default_prompt_version() -> String {
     "tailor.v1".to_string()
