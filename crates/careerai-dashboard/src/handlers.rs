@@ -44,7 +44,7 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
         details::fetch_recent_events(&state.pool, 50),
         details::fetch_config_view(&state.pool),
         details::fetch_action_center(&state.pool),
-        details::fetch_discovered_explorer(&state.pool, 200),
+        details::fetch_discovered_explorer(&state.pool, 10000),
     );
     let snap = snap_res?;
     let recent_events = events_res.unwrap_or_default();
@@ -206,7 +206,7 @@ pub async fn healthz() -> &'static str {
 }
 
 pub async fn api_explorer(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match details::fetch_discovered_explorer(&state.pool, 500).await {
+    match details::fetch_discovered_explorer(&state.pool, 10000).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,

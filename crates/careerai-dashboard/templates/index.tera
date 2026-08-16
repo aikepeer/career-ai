@@ -933,6 +933,68 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 });
 
+function refreshExplorerListings() {
+  fetch('/api/v1/explorer')
+    .then(function(r) { return r.json(); })
+    .then(function(items) {
+      if (!Array.isArray(items)) return;
+      var tbody = document.getElementById('explorer-tbody');
+      if (!tbody) return;
+
+      var existingIds = new Set();
+      tbody.querySelectorAll('.explorer-row').forEach(function(row) {
+        var btn = row.querySelector('.detail-link-btn');
+        if (btn) {
+          var onclick = btn.getAttribute('onclick') || '';
+          var m = onclick.match(/openAppModal\('([^']+)'\)/);
+          if (m) existingIds.add(m[1]);
+        }
+      });
+
+      var newItems = items.filter(function(it) { return !existingIds.has(it.id); });
+      if (newItems.length === 0) return;
+
+      var fragment = document.createDocumentFragment();
+      newItems.forEach(function(item) {
+        var tr = document.createElement('tr');
+        tr.className = 'explorer-row';
+        var titleLower = (item.title || '').toLowerCase();
+        var compLower = (item.company || '').toLowerCase();
+        var locLower = (item.location || '').toLowerCase();
+        tr.setAttribute('data-search', titleLower + ' ' + compLower + ' ' + locLower);
+        tr.setAttribute('data-remote', item.is_remote ? 'true' : 'false');
+        tr.setAttribute('data-state', item.state || '');
+
+        var titleStr = item.title || ('Listing ' + item.id);
+        var companyStr = item.company ? ('🏢 ' + item.company) : '🏢 Unspecified';
+        var locStr = item.location ? ('📍 ' + item.location) : '📍 Remote / Unspecified';
+        var scoreStr = item.score ? Math.floor(item.score * 100) + '%' : '—';
+        var sevClass = item.state === 'discovered' ? 'sev-info' : 'sev-warn';
+
+        tr.innerHTML = '<td><a href="' + escapeHtml(item.url || '#') + '" target="_blank" class="title-link">' + escapeHtml(titleStr) + '</a></td>' +
+          '<td>' + escapeHtml(companyStr) + '</td>' +
+          '<td>' + escapeHtml(locStr) + '</td>' +
+          '<td><span class="pill pill-info">' + escapeHtml(item.source || 'unknown') + '</span></td>' +
+          '<td><span class="sev-badge ' + sevClass + '">' + escapeHtml(item.state || '') + '</span></td>' +
+          '<td>' + scoreStr + '</td>' +
+          '<td><button class="detail-link-btn" onclick="openAppModal(\'' + escapeHtml(item.id) + '\')">Inspect →</button><button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist(\'' + escapeHtml(item.id) + '\')">⚡ Shortlist</button></td>';
+
+        fragment.appendChild(tr);
+      });
+
+      if (tbody.firstChild) {
+        tbody.insertBefore(fragment, tbody.firstChild);
+      } else {
+        tbody.appendChild(fragment);
+      }
+
+      filterExplorerTable();
+    })
+    .catch(function(err) {
+      console.warn('Failed to refresh explorer listings:', err);
+    });
+}
+
 // Smart Countdown Timer Script (Auto-pauses when user is typing or AI is thinking)
 (function() {
   var sec = parseInt("{{ refresh_seconds }}", 10) || 60;
@@ -954,7 +1016,8 @@ document.addEventListener('DOMContentLoaded', function() {
     count--;
     if (el) el.innerText = count + 's';
     if (count <= 0) {
-      location.reload();
+      count = sec;
+      refreshExplorerListings();
     }
   }, 1000);
 })();
