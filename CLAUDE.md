@@ -21,7 +21,7 @@ Common commands:
 ```bash
 # Build + check
 cargo build                                    # dev build all workspace crates
-cargo build --release                          # release binary
+cargo build --release --workspace              # release profile — always build alongside dev commands
 cargo check --workspace                        # fast type-check, no codegen
 
 # Tests
@@ -149,6 +149,7 @@ Match the layer to what you're testing:
 - Logging: structured via `tracing`; no `println!` outside the CLI crate's user-facing output.
 - SQL: `sqlx` with compile-time-checked queries (`query!`/`query_as!`). Set `DATABASE_URL` and run `cargo sqlx prepare` before commits that change queries.
 - Workspace-level lints in `.cargo/config.toml`; clippy must be clean with `-D warnings`.
+- Build the release profile with every change: run `cargo build --release --workspace` alongside `cargo build`, `cargo test`, and `cargo clippy`. Release-only `cfg` branches, `debug_assertions`, and overflow-check differences must not ship unverified.
 
 ## Global rules inherited from `~/.claude/CLAUDE.md`
 
