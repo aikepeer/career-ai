@@ -1,0 +1,46 @@
+sources:
+  keywords:
+  - Embedded Software Engineer
+  - Embedded Systems
+  - Device Driver
+  - Linux Kernel
+  - Yocto
+  - RTOS
+  - ROS / ROS2
+  - Robotics
+  - Drone Flight Controller
+  - Computer Vision / Camera
+  - Video Streaming / H.264 / RTSP
+  - Radio / WiFi / Bluetooth / BLE
+  - AI / ML Engineer
+  - Deep Learning / PyTorch
+  - Edge AI / TensorRT / ONNX
+  - DSP / Signal Processing
+  - Software Engineer
+  - Fullstack Developer
+  - Backend Developer
+  - Rust Developer
+  - Python Engineer
+  - C/C++ Developer
+  - Web Developer / React / Node.js
+  - REST API / Microservices
+  - Electronics & Telecommunications
+  - RF Engineering
+  - Wireless Communications
+  - Mathematics & Physics Algorithms
+  - Control Systems
+  locations:
+  - Remote
+  - Gurugram
+  - India
+filter:
+  remote_preference: remote_first
+  contract_type: all
+  min_score_threshold: 0.04
+scheduler:
+  cadence:
+    greenhouse: 0 0 */1 * * *
+    lever: 0 0 */1 * * *
+    remotive: 0 0 */2 * * *
+    naukri: 0 15 */3 * * *
+    indeed_rss: 0 30 */4 * * *
