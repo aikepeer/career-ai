@@ -28,6 +28,18 @@ pub struct SubmitConfig {
 pub struct SubmitSource {
     #[serde(default)]
     pub enabled: bool,
+    /// ATS HTTP rate policy, aligned with the per-source submit blocks.
+    /// When every rate field is left at its default (`0`/`None`), the
+    /// submit boundary falls back to the legacy `rates.<source>` /
+    /// `rates.ats_http` entries for backward compatibility.
+    #[serde(default)]
+    pub max_per_day: u32,
+    #[serde(default)]
+    pub min_seconds_between: u32,
+    #[serde(default)]
+    pub jitter_seconds: u32,
+    #[serde(default)]
+    pub quiet_hours_utc: Option<(u32, u32)>,
 }
 
 /// LinkedIn-specific browser submitter configuration. Loaded from

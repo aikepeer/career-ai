@@ -90,11 +90,15 @@ mod tests {
 
     fn fixture_cfg() -> LlmConfig {
         LlmConfig {
+            provider: String::new(),
+            model: String::new(),
             tailor_model: "claude".into(),
             cover_letter_model: "claude".into(),
             filter_model: String::new(),
             parse_resume_model: String::new(),
             cache_dir: String::new(),
+            api_base_url: None,
+            api_key: None,
             max_retries: 3,
             timeout_seconds: 120,
             prompt_version: "tailor.v1".into(),

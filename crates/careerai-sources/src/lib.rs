@@ -18,6 +18,7 @@ pub mod mcp_jobs;
 pub mod naukri;
 pub mod remoteok;
 pub mod remotive;
+pub mod teamtailor;
 pub mod util;
 pub mod web_agent;
 
@@ -38,3 +39,4 @@ pub use mcp_jobs::{probe as probe_mcp_source, McpJobsSource, ProbeReport};
 pub use naukri::NaukriSource;
 pub use remoteok::RemoteOkSource;
 pub use remotive::RemotiveSource;
+pub use teamtailor::TeamtailorSource;

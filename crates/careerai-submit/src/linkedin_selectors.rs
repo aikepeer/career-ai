@@ -14,3 +14,9 @@
 /// on which A/B bucket the account is in. A class rename should not
 /// break us silently.
 pub const EASY_APPLY_SELECTOR: &str = "button.jobs-apply-button, button[aria-label*='Easy Apply']";
+
+/// CSS selector for the final "Submit application" button inside the
+/// Easy Apply modal. Matches the aria-label LinkedIn uses on the primary
+/// submit CTA, with a fallback for a bare "Submit" label.
+pub const SUBMIT_APPLICATION_SELECTOR: &str =
+    "button[aria-label='Submit application'], button[aria-label='Submit']";

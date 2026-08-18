@@ -103,7 +103,10 @@ async fn linkedin_apply_with_interactive_only_transitions_to_drafted() {
     cfg.submit.auto_submit = true;
     cfg.submit.per_source.insert(
         "linkedin".into(),
-        careerai_core::config::SubmitSource { enabled: true },
+        careerai_core::config::SubmitSource {
+            enabled: true,
+            ..Default::default()
+        },
     );
     // Default is true, but be explicit about the contract under test.
     cfg.submit.linkedin.interactive_only = true;
@@ -233,11 +236,20 @@ async fn submit_application_accepts_drafted_state() {
     cfg.submit.auto_submit = false;
     cfg.submit.per_source.insert(
         "linkedin".into(),
-        careerai_core::config::SubmitSource { enabled: true },
+        careerai_core::config::SubmitSource {
+            enabled: true,
+            ..Default::default()
+        },
     );
 
-    let result =
-        careerai_submit::submit_application(&pool, &cfg.submit, tmp.path(), &application_id).await;
+    let result = careerai_submit::submit_application(
+        &pool,
+        &cfg.submit,
+        &cfg.rates,
+        tmp.path(),
+        &application_id,
+    )
+    .await;
 
     // The state guard must not reject Drafted. Any other error variant
     // (Db, Io, etc.) means the guard let us through, which is the P0

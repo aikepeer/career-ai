@@ -73,6 +73,7 @@ pub struct StateCounts {
     pub shortlisted: u64,
     pub tailored: u64,
     pub rendered: u64,
+    pub drafted: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -96,6 +97,15 @@ pub struct ConfigSourceItem {
     pub last_sync_label: String,
     pub status: String,
     pub url: Option<String>,
+    /// Whether live submission is enabled for this source
+    /// (`submit.per_source.<source>.enabled`).
+    pub submit_enabled: bool,
+    /// ATS HTTP rate cap. `0` means "use the default" (shown as "—").
+    pub max_per_day: u32,
+    /// ATS HTTP minimum interval between submissions (seconds).
+    pub min_seconds_between: u32,
+    /// ATS HTTP quiet-hours window, if any.
+    pub quiet_hours_utc: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -130,7 +140,6 @@ pub struct ConfigView {
     pub profile: Option<ProfileView>,
     pub llm_backend: String,
     pub llm_api_base: Option<String>,
-    pub llm_api_key: Option<String>,
     pub llm_timeout_seconds: u64,
 }
 
@@ -176,6 +185,9 @@ pub struct ApplicationDetail {
     pub artifacts: Vec<ArtifactItem>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Audit trail for this listing, oldest → newest, for the modal's
+    /// pipeline timeline.
+    pub timeline: Vec<EventLogItem>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -189,6 +201,7 @@ pub struct DiscoveredExplorerItem {
     pub score: Option<f32>,
     pub is_remote: bool,
     pub url: String,
+    pub application_id: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -196,6 +209,7 @@ pub struct DiscoveredExplorerItem {
 pub struct IndexView {
     pub kpi: KpiStrip,
     pub columns: Vec<FunnelColumn>,
+    pub state_counts: StateCounts,
     pub next_steps: Vec<NextStep>,
     pub daemon_health: crate::daemon_health::DaemonHealth,
     pub llm_health: crate::llm_health::LlmHealth,

@@ -21,11 +21,7 @@ pub async fn events_for(pool: &SqlitePool, listing_id: &str) -> Result<Vec<Event
 }
 
 /// Fetch recent audit events ordered by created_at DESC with limit and offset.
-pub async fn list_recent_events(
-    pool: &SqlitePool,
-    limit: u32,
-    offset: u32,
-) -> Result<Vec<Event>> {
+pub async fn list_recent_events(pool: &SqlitePool, limit: u32, offset: u32) -> Result<Vec<Event>> {
     let rows = sqlx::query_as(
         "SELECT id, listing_id, from_state, to_state, note, created_at
          FROM events ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -38,6 +34,7 @@ pub async fn list_recent_events(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::pool::pool_in_memory;
@@ -63,4 +60,3 @@ mod tests {
         assert_eq!(evs[1].to_state, "discovered");
     }
 }
-

@@ -141,15 +141,34 @@ impl RigLlm {
         cache: Arc<Cache>,
         timeout_seconds: u64,
     ) -> Result<Self> {
-        let base_url = std::env::var("LLM_API_BASE_URL")
-            .or_else(|_| std::env::var("LLM_BASE_URL"))
-            .or_else(|_| std::env::var("CAREERAI_LLM_API_BASE_URL"))
-            .or_else(|_| std::env::var("DEEPSEEK_API_BASE_URL"))
-            .or_else(|_| std::env::var("OPENAI_API_BASE_URL"))
-            .or_else(|_| std::env::var("OPENROUTER_API_BASE_URL"))
-            .or_else(|_| std::env::var("OLLAMA_API_BASE_URL"))
-            .or_else(|_| std::env::var("ANTHROPIC_BASE_URL"))
-            .ok();
+        Self::with_api_key_and_base_url(provider, api_key, model, None, cache, timeout_seconds)
+    }
+
+    /// Like [`Self::with_api_key`] but accepts an explicit base URL override
+    /// (e.g. `config.local.yaml`'s `llm.api_base_url`). When `None`, the base
+    /// URL is resolved from the standard env vars.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn with_api_key_and_base_url(
+        provider: Provider,
+        api_key: String,
+        model: impl Into<String>,
+        base_url_override: Option<String>,
+        cache: Arc<Cache>,
+        timeout_seconds: u64,
+    ) -> Result<Self> {
+        let base_url = base_url_override
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                std::env::var("LLM_API_BASE_URL")
+                    .or_else(|_| std::env::var("LLM_BASE_URL"))
+                    .or_else(|_| std::env::var("CAREERAI_LLM_API_BASE_URL"))
+                    .or_else(|_| std::env::var("DEEPSEEK_API_BASE_URL"))
+                    .or_else(|_| std::env::var("OPENAI_API_BASE_URL"))
+                    .or_else(|_| std::env::var("OPENROUTER_API_BASE_URL"))
+                    .or_else(|_| std::env::var("OLLAMA_API_BASE_URL"))
+                    .or_else(|_| std::env::var("ANTHROPIC_BASE_URL"))
+                    .ok()
+            });
 
         let http = match provider {
             Provider::Anthropic => {
@@ -185,6 +204,17 @@ impl RigLlm {
         }
     }
 
+    /// The model to actually send: the per-request model (e.g.
+    /// `tailor_model` / `cover_letter_model`) wins, falling back to the
+    /// backend default resolved at construction time.
+    fn effective_model<'a>(&'a self, req: &'a LlmRequest) -> &'a str {
+        if req.model.trim().is_empty() {
+            &self.model
+        } else {
+            &req.model
+        }
+    }
+
     /// Build the Anthropic `/v1/messages` request body. When `cache_profile`
     /// is true, the profile_block is sent as its own user message whose
     /// single content block carries `cache_control: {type: "ephemeral"}`,
@@ -209,7 +239,7 @@ impl RigLlm {
         }));
 
         json!({
-            "model": self.model,
+            "model": self.effective_model(req),
             "max_tokens": req.max_tokens,
             "temperature": req.temperature,
             "system": req.system,
@@ -238,7 +268,7 @@ impl RigLlm {
         }
         messages.push(json!({ "role": "user", "content": req.user }));
         json!({
-            "model": self.model,
+            "model": self.effective_model(req),
             "messages": messages,
             "temperature": req.temperature,
             "max_tokens": req.max_tokens,

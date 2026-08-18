@@ -90,6 +90,25 @@ fn classify_rejects_listing_missing_required_skill() {
 }
 
 #[test]
+fn must_include_filter_passes_when_any_one_skill_present() {
+    // `must_include_skills` is an OR-list (documented "at least one"), not
+    // an AND-list. Pins the semantics against regressions to `.all()`.
+    let mut cfg = cfg(&[], &[]);
+    cfg.matching.must_include_skills = vec!["rust".into(), "tokio".into()];
+    let l = listing("Backend Engineer", None, "We write Rust services.");
+    assert!(apply_must_include_filter(&l, &cfg.matching));
+}
+
+#[test]
+fn classify_allows_missing_location_when_empty_sentinel_present() {
+    let mut cfg = cfg(&[], &[]);
+    cfg.user.locations = vec![String::new(), "Remote".into()];
+    let rules = FilterRules::default();
+    let l = listing("Embedded Engineer", None, "firmware rust");
+    assert_eq!(classify(&l, &cfg, &rules), Decision::Keep);
+}
+
+#[test]
 fn rejects_location_not_in_allowlist() {
     let cfg = cfg(&["Remote", "Delhi"], &[]);
     let rules = FilterRules::default();

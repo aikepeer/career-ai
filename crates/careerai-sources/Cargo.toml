@@ -43,12 +43,12 @@ rand = { version = "0.9", optional = true }
 scraper = { workspace = true }
 
 [features]
-default = []
+default = ["browser"]
 # Enables the LinkedIn browser-driven discovery adapter. Pulls in
 # `careerai-submit` for `BrowserSession` + `Credential` reuse and
 # `chromiumoxide` for the CDP element-handle API used to scrape
-# search-result cards. CI default is off; the workspace `--features
-# browser` build (driven from `careerai-cli`) opts in.
+# search-result cards. Browser support is on by default so a vanilla
+# `cargo build -p careerai-sources` includes the browser adapters.
 browser = ["dep:careerai-submit", "dep:chromiumoxide", "dep:rand"]
 
 [dev-dependencies]

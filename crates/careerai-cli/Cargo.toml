@@ -44,7 +44,7 @@ tempfile.workspace = true
 sqlx.workspace = true
 
 [features]
-default = ["live-llm-cli", "live-llm-api"]
+default = ["live-llm-cli", "live-llm-api", "browser"]
 # Granular pass-through. The CLI binary defaults to the claude CLI
 # subprocess backend so a vanilla `cargo install careerai-cli` works for
 # Claude Code subscribers without an API key. Add `--features

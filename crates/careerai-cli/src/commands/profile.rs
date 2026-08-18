@@ -58,7 +58,9 @@ fn import(
     let live_compiled = cfg!(any(feature = "live-llm-cli", feature = "live-llm-api"));
     let want_llm = match use_llm {
         Some(v) => v,
-        None => live_compiled && super::profile_llm::backend_maybe_available(backend_override.as_ref()),
+        None => {
+            live_compiled && super::profile_llm::backend_maybe_available(backend_override.as_ref())
+        }
     };
 
     let profile = if want_llm {

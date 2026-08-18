@@ -151,7 +151,7 @@ impl Backend {
             BackendChoice::Auto => build::resolve_auto(cfg, cache).await,
             BackendChoice::ClaudeCli => build::build_cli(cfg, cache).await,
             BackendChoice::Api => build::build_api(cfg, cache),
-            other => build::build_named_cli(other.as_str(), cfg, cache).await,
+            other => build::build_named_cli(other.as_str(), cfg, cache),
         }
     }
 
@@ -190,10 +190,17 @@ impl Backend {
         }
 
         // Always look for an API key, even when CLI wins, so `probe`
-        // output can show the fallback status.
+        // output can show the fallback status. Also honor an explicit
+        // key in `config/local.yaml` (`llm.api_key`).
         let api_source = key::api_key_source();
-        probe.api_key_present = api_source.is_some();
-        probe.api_key_source = api_source;
+        probe.api_key_present =
+            api_source.is_some() || cfg.api_key.as_deref().is_some_and(|k| !k.trim().is_empty());
+        probe.api_key_source = api_source.or_else(|| {
+            cfg.api_key
+                .as_deref()
+                .filter(|k| !k.trim().is_empty())
+                .map(|_| "config:llm.api_key")
+        });
         if probe.api_key_present && probe.chosen == BackendChoice::Auto {
             #[cfg(feature = "live-llm-api")]
             {

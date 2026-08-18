@@ -43,14 +43,16 @@ mod inspect;
 mod linkedin;
 mod match_;
 mod render;
+mod run;
 mod tailor;
 
-pub use apply::{applied_show, apply_all, apply_one, AppliedOutcome};
+pub use apply::{applied_show, apply_all, apply_one, retry_application, AppliedOutcome};
 pub use digest::digest_summary;
 pub use inspect::{inspect_show, InspectReport};
 pub use linkedin::{confirm_linkedin_submit, list_drafted_linkedin};
 pub use match_::{match_all, match_one, MatchReport};
 pub use render::{render_one, RenderedOutcome};
+pub use run::{run_pipeline, ApplyReport, ApplySourceReport, RunFailure, RunReport};
 pub use tailor::{tailor_one, TailoredOutcome};
 
 pub async fn open_pool(root: &Path) -> Result<SqlitePool> {
@@ -71,6 +73,11 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     }
     for company in &cfg.sources.ashby.companies {
         out.push(Arc::new(careerai_sources::AshbySource::new(
+            company.clone(),
+        )));
+    }
+    for company in &cfg.sources.teamtailor.companies {
+        out.push(Arc::new(careerai_sources::TeamtailorSource::new(
             company.clone(),
         )));
     }
@@ -140,16 +147,23 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
 /// matches `name` (caller should treat this as a no-op, not an error).
 fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
     match name {
-        "greenhouse" => {
-            cfg.sources.greenhouse.companies.first().map(|company| {
-                Arc::new(GreenhouseSource::new(company.clone())) as Arc<dyn Source>
-            })
-        }
-        "lever" => cfg.sources.lever.companies.first().map(|company| {
-            Arc::new(LeverSource::new(company.clone())) as Arc<dyn Source>
-        }),
+        "greenhouse" => cfg
+            .sources
+            .greenhouse
+            .companies
+            .first()
+            .map(|company| Arc::new(GreenhouseSource::new(company.clone())) as Arc<dyn Source>),
+        "lever" => cfg
+            .sources
+            .lever
+            .companies
+            .first()
+            .map(|company| Arc::new(LeverSource::new(company.clone())) as Arc<dyn Source>),
         "ashby" => cfg.sources.ashby.companies.first().map(|company| {
             Arc::new(careerai_sources::AshbySource::new(company.clone())) as Arc<dyn Source>
+        }),
+        "teamtailor" => cfg.sources.teamtailor.companies.first().map(|company| {
+            Arc::new(careerai_sources::TeamtailorSource::new(company.clone())) as Arc<dyn Source>
         }),
         "remotive" if cfg.sources.remotive.enabled => {
             let mut s = RemotiveSource::new();
@@ -158,9 +172,7 @@ fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
             }
             Some(Arc::new(s))
         }
-        "remoteok" if cfg.sources.remoteok.enabled => {
-            Some(Arc::new(RemoteOkSource::new()))
-        }
+        "remoteok" if cfg.sources.remoteok.enabled => Some(Arc::new(RemoteOkSource::new())),
         "naukri" if cfg.sources.naukri.enabled => {
             let mut s = NaukriSource::new();
             if !cfg.sources.naukri.keywords.is_empty() {
@@ -174,17 +186,15 @@ fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
             }
             Some(Arc::new(s))
         }
-        "indeed_rss" if cfg.sources.indeed_rss.enabled => {
-            Some(Arc::new(IndeedRssSource::new(cfg.sources.indeed_rss.clone())))
-        }
+        "indeed_rss" if cfg.sources.indeed_rss.enabled => Some(Arc::new(IndeedRssSource::new(
+            cfg.sources.indeed_rss.clone(),
+        ))),
         #[cfg(feature = "browser")]
-        "linkedin_browser" if cfg.sources.linkedin_browser.enabled => {
-            Some(Arc::new(careerai_sources::LinkedinBrowserSource::new(
-                cfg.sources.linkedin_browser.clone(),
-            )))
-        }
+        "linkedin-browser" if cfg.sources.linkedin_browser.enabled => Some(Arc::new(
+            careerai_sources::LinkedinBrowserSource::new(cfg.sources.linkedin_browser.clone()),
+        )),
         #[cfg(not(feature = "browser"))]
-        "linkedin_browser" if cfg.sources.linkedin_browser.enabled => {
+        "linkedin-browser" if cfg.sources.linkedin_browser.enabled => {
             tracing::warn!(
                 "linkedin_browser source is enabled in config but `browser` feature is OFF; \
                  rebuild with `cargo build --features browser` to activate it"

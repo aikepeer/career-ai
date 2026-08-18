@@ -20,7 +20,9 @@ pub async fn run(
     auto_submit: bool,
     source_filter: Option<&str>,
 ) -> Result<()> {
-    let auto_submit_override = if auto_submit { Some(true) } else { Some(false) };
+    // Only override config when the operator explicitly passed
+    // `--auto-submit`; `None` lets `submit.auto_submit` in config apply.
+    let auto_submit_override = auto_submit.then_some(true);
 
     match (application_id, all) {
         (None, false) => {

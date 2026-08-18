@@ -98,13 +98,13 @@ pub async fn digest_summary(root: &Path, since: chrono::Duration) -> Result<Dige
 
     // last_tick: most recent event in the database (not bounded by
     // window). MAX(created_at) on an empty `events` returns one row
-    // containing NULL — sqlx's `Option<(String,)>` decode handles that
-    // by returning Ok(None), which is what we want.
-    let last: Option<(String,)> = sqlx::query_as("SELECT MAX(created_at) FROM events")
+    // containing NULL. `fetch_optional` only makes the *row* optional,
+    // not the column value, so decode the column as `Option<String>`.
+    let last: Option<(Option<String>,)> = sqlx::query_as("SELECT MAX(created_at) FROM events")
         .fetch_optional(&pool)
         .await
         .context("digest: last_tick")?;
-    report.last_tick = last.and_then(|(s,)| if s.is_empty() { None } else { Some(s) });
+    report.last_tick = last.and_then(|(s,)| s).filter(|s| !s.is_empty());
 
     Ok(report)
 }

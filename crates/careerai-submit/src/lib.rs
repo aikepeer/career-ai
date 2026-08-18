@@ -24,7 +24,10 @@ pub mod naukri_selectors;
 pub mod rate_limiter;
 mod submit;
 
-pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
+pub use ats_http::{
+    AshbySubmitter, GreenhouseSubmitter, LeverSubmitter, SmartRecruitersSubmitter,
+    TeamtailorSubmitter,
+};
 pub use base::{SubmitContext, SubmitDecision, SubmitOutcome, Submitter, WouldSubmit};
 #[cfg(feature = "browser")]
 pub use browser_session::{stealth_script_sha256, BrowserSession, BrowserSessionConfig};

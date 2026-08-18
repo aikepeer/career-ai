@@ -62,6 +62,10 @@ async fn main() -> Result<()> {
         Command::Profile { command } => commands::profile::run(command, backend_override)?,
         Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
         Command::Match { tune } => commands::match_::run(&cwd, tune).await?,
+        Command::Run { auto_submit } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::run::run(&cwd, &cfg, auto_submit).await?;
+        }
         Command::Shortlist { command } => match command {
             ShortlistCommand::Show { limit } => commands::shortlist::run_show(&cwd, limit).await?,
         },
@@ -163,16 +167,26 @@ async fn main() -> Result<()> {
                 let agent = careerai_sources::WebSearchDiscoveryAgent::default();
                 let portals = agent.discover_portals();
                 println!("🌐 Web Search Discovery Agent — Discovered Job & Freelance Portals:");
-                println!("{:<22} {:<15} {:<32} {:<30}", "NAME", "CATEGORY", "BASE URL", "DESCRIPTION");
+                println!(
+                    "{:<22} {:<15} {:<32} {:<30}",
+                    "NAME", "CATEGORY", "BASE URL", "DESCRIPTION"
+                );
                 println!("{}", "-".repeat(100));
                 for p in &portals {
-                    println!("{:<22} {:<15} {:<32} {:<30}", p.name, p.category, p.base_url, p.description);
+                    println!(
+                        "{:<22} {:<15} {:<32} {:<30}",
+                        p.name, p.category, p.base_url, p.description
+                    );
                 }
 
                 if apply {
                     let config_path = cwd.join("config").join("local.yaml");
                     let added = agent.apply_to_config(&config_path, &portals)?;
-                    println!("\n✅ Successfully updated {} with {} newly discovered portals!", config_path.display(), added);
+                    println!(
+                        "\n✅ Successfully updated {} with {} newly discovered portals!",
+                        config_path.display(),
+                        added
+                    );
                 } else {
                     println!("\n💡 Run `careerai sources discover-web --apply` to append these portals directly into config/local.yaml.");
                 }
@@ -180,6 +194,10 @@ async fn main() -> Result<()> {
         },
         Command::Inspect { application_id } => {
             commands::inspect::run(&cwd, &application_id).await?;
+        }
+        Command::Retry { application_id } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::retry::run(&cwd, &cfg, &application_id).await?;
         }
         Command::Daemon => {
             let cfg = load_cfg(&cwd)?;

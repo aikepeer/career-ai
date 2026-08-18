@@ -75,16 +75,21 @@ rates:
     max_per_day: 30
 
 submit:
+  # Dry-run remains the default. Live submission is enabled by EITHER
+  # `auto_submit: true` here OR `careerai apply --auto-submit` (the CLI
+  # flag overrides config); they are not both required.
   auto_submit: false
   per_source:
     greenhouse: { enabled: true }
     lever:      { enabled: true }
     ashby:      { enabled: true }
+    teamtailor: { enabled: true }
+    smartrecruiters: { enabled: true }
     remotive:   { enabled: true }
     remoteok:   { enabled: true }
-    naukri:     { enabled: false }
-    linkedin:   { enabled: false }
-    indeed:     { enabled: false }
+    naukri:     { enabled: true }   # browser submitter (requires --features browser)
+    linkedin:   { enabled: true }   # browser submitter (requires --features browser + li_at cookie)
+    indeed:     { enabled: false }  # no submitter yet (aggregator → employer ATS)
   # LinkedIn browser submitter (M5a). Only consulted when the CLI is
   # built with `--features browser`. Defaults tuned for India-remote
   # operators: small daily cap, long min-interval, late-night quiet
@@ -128,12 +133,11 @@ scheduler:
     lever:            "0 0 */1 * * *"
     remotive:         "0 0 */2 * * *"
     naukri:           "0 15 */3 * * *"
-    linkedin:         "0 0 */4 * * *"
     # Native browser-driven LinkedIn discovery (Source::name() = "linkedin-browser").
     # Listings emitted by this adapter set listing.source = "linkedin" so the M5
     # submitter routes them. Cron only fires when sources.linkedin_browser.enabled = true.
     linkedin-browser: "0 30 */4 * * *"
-    indeed:           "0 30 */4 * * *"
+    indeed_rss:       "0 30 */4 * * *"
   # Periodic dry-run apply sweep over rendered/prepared applications. The
   # daemon hard-pins auto_submit=false on every tick — live submission is
   # operator-driven only (`careerai apply --auto-submit ...`). Left unset
@@ -152,6 +156,9 @@ sources:
     companies: []
   ashby:
     companies: []
+  teamtailor:
+    companies:
+      - "synmatchai"
   remotive:
     enabled: true
     category: "software-dev"

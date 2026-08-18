@@ -1,6 +1,8 @@
 //! Config generation module — builds exhaustive `config/local.yaml`
 //! from a candidate [`Profile`] and domain defaults.
 
+use std::fmt::Write as _;
+
 use crate::schema::Profile;
 
 /// Generate a complete `config/local.yaml` string from candidate profile data.
@@ -77,7 +79,6 @@ llm:
   provider: "deepseek"
   model: "deepseek-chat"
   api_base_url: "https://api.deepseek.com/v1"
-  api_key: "sk-deepseekapi"
   parse_resume_model: "deepseek-chat"
   tailor_model: "deepseek-chat"
   timeout_seconds: 300
@@ -94,8 +95,7 @@ scheduler:
     lever: "0 0 */1 * * *"
     remotive: "0 0 */2 * * *"
     naukri: "0 15 */3 * * *"
-    linkedin: "0 0 */4 * * *"
-    indeed: "0 30 */4 * * *"
+    indeed_rss: "0 30 */4 * * *"
 
 filter:
   remote_preference: "remote_first"
@@ -109,17 +109,19 @@ filter:
 
 fn format_list(p1: &[String], p2: &[String], p3: &[String]) -> String {
     let mut out = String::new();
-    out.push_str("    # Priority 1: AI/ML, Embedded Systems, Robotics, Drones, Camera, Video, Radio/WiFi\n");
+    out.push_str(
+        "    # Priority 1: AI/ML, Embedded Systems, Robotics, Drones, Camera, Video, Radio/WiFi\n",
+    );
     for k in p1 {
-        out.push_str(&format!("    - \"{k}\"\n"));
+        let _ = writeln!(out, "    - \"{k}\"");
     }
     out.push_str("    # Priority 2: Fullstack & Software Development\n");
     for k in p2 {
-        out.push_str(&format!("    - \"{k}\"\n"));
+        let _ = writeln!(out, "    - \"{k}\"");
     }
     out.push_str("    # Priority 3: STEM, Telecommunications, Physics & Math\n");
     for k in p3 {
-        out.push_str(&format!("    - \"{k}\"\n"));
+        let _ = writeln!(out, "    - \"{k}\"");
     }
     out
 }
@@ -127,7 +129,7 @@ fn format_list(p1: &[String], p2: &[String], p3: &[String]) -> String {
 fn format_locations(locs: &[String]) -> String {
     let mut out = String::new();
     for l in locs {
-        out.push_str(&format!("    - \"{l}\"\n"));
+        let _ = writeln!(out, "    - \"{l}\"");
     }
     out
 }

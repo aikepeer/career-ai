@@ -93,9 +93,8 @@ fn read_csv<R: Read + Seek, T: for<'de> Deserialize<'de>>(
     archive: &mut zip::ZipArchive<R>,
     name: &str,
 ) -> Result<Vec<T>> {
-    let idx = match find_zip_index(archive, name) {
-        Some(idx) => idx,
-        None => return Err(ProfileError::LinkedInMissingFile(name.to_string())),
+    let Some(idx) = find_zip_index(archive, name) else {
+        return Err(ProfileError::LinkedInMissingFile(name.to_string()));
     };
     let entry = archive.by_index(idx).map_err(ProfileError::Zip)?;
     let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(entry);

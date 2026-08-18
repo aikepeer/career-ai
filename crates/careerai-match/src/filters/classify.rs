@@ -16,7 +16,10 @@ impl Decision {
     }
 }
 
-/// Returns `true` if the listing satisfies the `must_include_skills` hard filter.
+/// Returns `true` if the listing contains **at least one** of the configured
+/// `must_include_skills` (case-insensitive substring match anywhere in the
+/// title or description), or if no skills are configured. Empty config means
+/// no hard filter.
 pub fn apply_must_include_filter(listing: &RawListing, cfg: &MatchConfig) -> bool {
     if cfg.must_include_skills.is_empty() {
         return true;
@@ -94,11 +97,16 @@ fn location_ok(listing: &RawListing, allowlist_lc: &[String]) -> bool {
     if allowlist_lc.is_empty() {
         return true;
     }
+    // An empty-string entry is a sentinel meaning "allow listings with no
+    // location". Without filtering it out here, `loc.contains("")` would be
+    // `true` for every string and silently disable location filtering.
+    let allow_missing = allowlist_lc.iter().any(String::is_empty);
     let Some(loc) = listing.location.as_deref() else {
-        return allowlist_lc.iter().any(String::is_empty);
+        return allow_missing;
     };
     let loc_lc = loc.to_lowercase();
     allowlist_lc
         .iter()
+        .filter(|allowed| !allowed.is_empty())
         .any(|allowed| loc_lc.contains(allowed.as_str()))
 }

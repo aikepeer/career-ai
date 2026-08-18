@@ -61,7 +61,12 @@ pub(super) async fn resolve_auto(
 
     #[cfg(feature = "live-llm-api")]
     {
-        if api_key_source().is_some() {
+        // A key explicitly set in config (`llm.api_key`, e.g. written by the
+        // dashboard) is a first-class key source for auto mode, mirroring
+        // `build_api`. Previously only env/keyring were consulted here, so a
+        // config-file key silently produced `NoneAvailable`.
+        let config_key_present = cfg.api_key.as_deref().is_some_and(|k| !k.trim().is_empty());
+        if config_key_present || api_key_source().is_some() {
             return build_api(cfg, cache);
         }
     }
@@ -95,7 +100,7 @@ pub(super) async fn build_cli(
 }
 
 #[cfg(feature = "live-llm-cli")]
-pub(super) async fn build_named_cli(
+pub(super) fn build_named_cli(
     name: &str,
     cfg: &LlmConfig,
     cache: Arc<Cache>,
@@ -115,7 +120,7 @@ pub(super) async fn build_named_cli(
 }
 
 #[cfg(not(feature = "live-llm-cli"))]
-pub(super) async fn build_named_cli(
+pub(super) fn build_named_cli(
     _name: &str,
     _cfg: &LlmConfig,
     _cache: Arc<Cache>,
@@ -124,6 +129,9 @@ pub(super) async fn build_named_cli(
 }
 
 #[cfg(not(feature = "live-llm-cli"))]
+// The caller (`Backend::resolve`) awaits this uniformly; the feature-gated
+// real implementation is async, so this stub must keep the async signature.
+#[allow(clippy::unused_async)]
 pub(super) async fn build_cli(
     _cfg: &LlmConfig,
     _cache: Arc<Cache>,
@@ -136,13 +144,22 @@ pub(super) fn build_api(
     cfg: &LlmConfig,
     cache: Arc<Cache>,
 ) -> std::result::Result<Backend, BackendError> {
-    let key = read_api_key().ok_or(BackendError::ApiKeyMissing)?;
-    let provider = detect_provider();
+    // Prefer the explicit config-file key, falling back to env/keyring.
+    // Previously only env/keyring were consulted, so a key in
+    // `config/local.yaml` (llm.api_key) was silently ignored.
+    let key = cfg
+        .api_key
+        .clone()
+        .filter(|k| !k.trim().is_empty())
+        .or_else(read_api_key)
+        .ok_or(BackendError::ApiKeyMissing)?;
+    let provider = provider_from_config(&cfg.provider).unwrap_or_else(detect_provider);
     let model = pick_default_model(cfg, provider);
-    let llm = RigLlm::with_api_key(
+    let llm = RigLlm::with_api_key_and_base_url(
         provider,
         key,
         model,
+        cfg.api_base_url.clone(),
         cache,
         cfg.timeout_seconds.max(1),
     )
@@ -193,5 +210,35 @@ pub(super) fn strip_provider_prefix(model: &str) -> &str {
         rest
     } else {
         model
+    }
+}
+
+/// Map a `llm.provider` config string to a concrete [`Provider`]. Returns
+/// `None` for `auto`/empty so the caller can fall back to env-based
+/// detection.
+#[cfg(feature = "live-llm-api")]
+fn provider_from_config(s: &str) -> Option<Provider> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => Some(Provider::Anthropic),
+        "openai" | "deepseek" | "openrouter" | "groq" | "grok" | "xai" | "ollama"
+        | "openai-compatible" => Some(Provider::OpenAI),
+        _ => None,
+    }
+}
+
+#[cfg(all(test, feature = "live-llm-api"))]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_from_config_maps_common_names() {
+        assert_eq!(provider_from_config("deepseek"), Some(Provider::OpenAI));
+        assert_eq!(provider_from_config("openai"), Some(Provider::OpenAI));
+        assert_eq!(provider_from_config("openrouter"), Some(Provider::OpenAI));
+        assert_eq!(provider_from_config("anthropic"), Some(Provider::Anthropic));
+        assert_eq!(provider_from_config("auto"), None);
+        assert_eq!(provider_from_config(""), None);
+        assert_eq!(provider_from_config("  DeepSeek  "), Some(Provider::OpenAI));
     }
 }

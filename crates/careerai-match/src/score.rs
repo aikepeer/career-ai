@@ -13,6 +13,16 @@ use careerai_sources::RawListing;
 /// without touching the rank/pipeline layer.
 pub trait Scorer: Send + Sync {
     fn score(&self, profile_text: &str, listing: &RawListing) -> f32;
+
+    /// Score a whole batch. Implementations may pre-tokenize the profile
+    /// once (the profile is typically much larger than any single listing);
+    /// the default delegates to [`Scorer::score`] per listing.
+    fn score_many(&self, profile_text: &str, listings: &[RawListing]) -> Vec<f32> {
+        listings
+            .iter()
+            .map(|listing| self.score(profile_text, listing))
+            .collect()
+    }
 }
 
 /// Flatten a structured [`Profile`] into the one big blob we hand to the
@@ -61,16 +71,33 @@ pub fn flatten_profile(p: &Profile) -> String {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct JaccardScorer;
 
+impl JaccardScorer {
+    fn score_with_tokens(profile_tokens: &HashSet<String>, listing: &RawListing) -> f32 {
+        let title_score = jaccard(profile_tokens, &tokenize(&listing.title));
+        let body_score = jaccard(profile_tokens, &tokenize(&listing.description));
+        // Title is a strong signal (curated by the poster), weight 2x.
+        (2.0 * title_score + body_score) / 3.0
+    }
+}
+
 impl Scorer for JaccardScorer {
     fn score(&self, profile_text: &str, listing: &RawListing) -> f32 {
         let profile_tokens = tokenize(profile_text);
         if profile_tokens.is_empty() {
             return 0.0;
         }
-        let title_score = jaccard(&profile_tokens, &tokenize(&listing.title));
-        let body_score = jaccard(&profile_tokens, &tokenize(&listing.description));
-        // Title is a strong signal (curated by the poster), weight 2x.
-        (2.0 * title_score + body_score) / 3.0
+        Self::score_with_tokens(&profile_tokens, listing)
+    }
+
+    fn score_many(&self, profile_text: &str, listings: &[RawListing]) -> Vec<f32> {
+        let profile_tokens = tokenize(profile_text);
+        if profile_tokens.is_empty() {
+            return vec![0.0; listings.len()];
+        }
+        listings
+            .iter()
+            .map(|listing| Self::score_with_tokens(&profile_tokens, listing))
+            .collect()
     }
 }
 

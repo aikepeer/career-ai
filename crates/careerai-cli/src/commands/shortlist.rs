@@ -17,11 +17,12 @@ pub async fn run_show(cwd: &Path, limit: u32) -> Result<()> {
             .score
             .map_or_else(|| "—".to_string(), |s| format!("{s:.3}"));
         println!(
-            "{:>2}. [{score}] {} @ {} ({})\n    {}",
+            "{:>2}. [{score}] {} @ {} ({})\n    id:   {}\n    url:  {}",
             i + 1,
             l.title,
             l.company,
             l.source,
+            l.id,
             l.url,
         );
     }

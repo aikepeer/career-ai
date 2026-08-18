@@ -6,6 +6,8 @@
 //! One instance per company slug. The orchestrator creates a list from
 //! `config.sources.greenhouse.companies` and calls each in turn.
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
@@ -52,7 +54,12 @@ impl Source for GreenhouseSource {
             self.base_url.trim_end_matches('/'),
             self.company,
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             return Err(SourceError::HttpStatus {
                 status: resp.status().as_u16(),

@@ -53,28 +53,52 @@ pub(super) fn detect_provider() -> crate::rig::Provider {
 }
 
 pub(super) fn api_key_source() -> Option<&'static str> {
-    if std::env::var("ANTHROPIC_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("ANTHROPIC_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:ANTHROPIC_API_KEY");
     }
-    if std::env::var("DEEPSEEK_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("DEEPSEEK_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:DEEPSEEK_API_KEY");
     }
-    if std::env::var("OPENAI_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("OPENAI_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:OPENAI_API_KEY");
     }
-    if std::env::var("GROK_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("GROK_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:GROK_API_KEY");
     }
-    if std::env::var("XAI_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("XAI_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:XAI_API_KEY");
     }
-    if std::env::var("OPENROUTER_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:OPENROUTER_API_KEY");
     }
-    if std::env::var("CAREERAI_LLM_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("CAREERAI_LLM_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:CAREERAI_LLM_API_KEY");
     }
-    if std::env::var("CLAUDE_WEB_API_KEY").ok().is_some_and(|v| !v.is_empty()) {
+    if std::env::var("CLAUDE_WEB_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.is_empty())
+    {
         return Some("env:CLAUDE_WEB_API_KEY");
     }
     let entry = keyring::Entry::new("career-ai", "anthropic/api_key").ok()?;

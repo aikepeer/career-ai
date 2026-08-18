@@ -20,6 +20,8 @@ pub mod notify;
 pub mod profile;
 pub mod profile_llm;
 pub mod render;
+pub mod retry;
+pub mod run;
 pub mod shortlist;
 pub mod tailor;
 
@@ -70,15 +72,16 @@ pub enum ShortlistCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum StatusCommand {
-    /// Start the read-only dashboard HTTP server. Defaults to
+    /// Start the dashboard HTTP server. Defaults to
     /// 127.0.0.1:8787 with a 60s meta-refresh.
     Serve {
         /// Port to bind. Overrides `dashboard.port` in config.
         #[arg(long)]
         port: Option<u16>,
-        /// Bind address. Hidden — defaults to 127.0.0.1. Setting any
-        /// other value triggers a stderr warning since the surface has
-        /// no auth.
+        /// Bind address. Hidden — defaults to 127.0.0.1. A non-loopback
+        /// value is refused unless
+        /// `CAREERAI_DASHBOARD_ALLOW_NON_LOOPBACK=1` is set, because the
+        /// surface has no authentication and mutating endpoints.
         #[arg(long, hide = true)]
         bind: Option<std::net::IpAddr>,
     },

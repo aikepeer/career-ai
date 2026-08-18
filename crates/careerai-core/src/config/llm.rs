@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 /// 1. `claude` CLI on PATH and authed -> `ClaudeCli`
 /// 2. `ANTHROPIC_API_KEY` reachable (env or keyring) -> `Api`
 /// 3. Else error.
-/// Inference backend selector for the LLM gateway.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendChoice {
@@ -136,7 +135,9 @@ fn default_max_retries() -> u32 {
     3
 }
 fn default_timeout_seconds() -> u64 {
-    if let Ok(val) = std::env::var("LLM_TIMEOUT_SECONDS").or_else(|_| std::env::var("CAREERAI_LLM_TIMEOUT")) {
+    if let Ok(val) =
+        std::env::var("LLM_TIMEOUT_SECONDS").or_else(|_| std::env::var("CAREERAI_LLM_TIMEOUT"))
+    {
         if let Ok(parsed) = val.parse::<u64>() {
             return parsed;
         }

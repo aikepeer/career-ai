@@ -26,6 +26,7 @@ pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
         shortlisted: count_state(pool, ListingState::Shortlisted).await?,
         tailored: count_state(pool, ListingState::Tailored).await?,
         rendered: count_state(pool, ListingState::Rendered).await?,
+        drafted: count_state(pool, ListingState::Drafted).await?,
     };
     let source_lag_hours = source_lag(pool).await?;
     Ok(PipelineSnapshot {

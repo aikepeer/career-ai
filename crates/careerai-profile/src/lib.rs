@@ -184,7 +184,9 @@ fn parse_text_with_optional_llm(
                 error = %e,
                 "LLM extraction failed"
             );
-            Err(ProfileError::Validation(format!("LLM extraction failed: {e}")))
+            Err(ProfileError::Validation(format!(
+                "LLM extraction failed: {e}"
+            )))
         }
     }
 }

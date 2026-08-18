@@ -51,6 +51,27 @@ html, body {
   flex-direction: column;
 }
 
+/* Links (e.g. job titles in the Discovered Explorer). Use the theme's
+   cyan accent instead of the browser's default dark-blue, so links are
+   clearly visible on the dark theme. Cyan also remains distinguishable for
+   the common red/green color-blindness types (protanopia/deuteranopia),
+   and the hover underline provides a non-color cue. */
+a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+.title-link {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+.title-link:hover {
+  text-decoration: underline;
+}
+
 header {
   display: flex;
   align-items: center;
@@ -544,10 +565,15 @@ header {
 /* TAB 3: CONFIG & SOURCES */
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+  .config-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
   .config-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -779,7 +805,6 @@ footer {
   background: var(--bg-card);
 }
 
-.config-form-card { grid-column: 1 / -1; }
 .config-form { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; width: 100%; box-sizing: border-box; }
 .form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-group label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
@@ -972,16 +997,16 @@ footer {
   cursor: pointer;
 }
 
-/* KEYWORD CHIP — 3-column grid (falls back to 2 on narrow screens) */
+/* KEYWORD CHIP — 6-column grid on wide screens, shrinking for narrow ones */
 .kw-chip {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 11px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 5px 10px;
+  padding: 3px 6px;
   cursor: pointer;
   user-select: none;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -993,13 +1018,13 @@ footer {
   border-color: var(--accent-indigo);
   background: hsl(240 18% 20%);
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   #keywords-container {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: repeat(3, 1fr) !important;
   }
 }
 @media (max-width: 560px) {
   #keywords-container {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: repeat(2, 1fr) !important;
   }
 }

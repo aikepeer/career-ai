@@ -1,10 +1,11 @@
 //! Integration coverage for `pipeline::apply_one`, `apply_all`,
 //! `applied_show`, and `inspect_show`.
 //!
-//! Stays fully offline: the Greenhouse stub's live `submit()` short-circuits
-//! with `SourceDisabled` (per Wave 1B), so forcing `--auto-submit` surfaces
-//! an Err without ever reaching the network. Dry-run path exercises the
-//! DryRunSubmitter wrapper end-to-end via the real `submit_application`
+//! Stays fully offline: ATS HTTP `submit()` bodies are covered by the submit
+//! crate's wiremock integration tests, so here forcing `--auto-submit`
+//! against an unknown source surfaces the submit-layer `UnknownSource` error
+//! without ever reaching the network. Dry-run path exercises the
+//! `DryRunSubmitter` wrapper end-to-end via the real `submit_application`
 //! entry point.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
@@ -142,9 +143,13 @@ async fn apply_one_dry_run_preserves_state() {
     let mut cfg = CoreConfig::load(root).expect("load cfg");
     // Opt greenhouse in — dry-run still runs with per_source enabled; we
     // want to prove dry-run wins even when the source is live-capable.
-    cfg.submit
-        .per_source
-        .insert("greenhouse".into(), SubmitSource { enabled: true });
+    cfg.submit.per_source.insert(
+        "greenhouse".into(),
+        SubmitSource {
+            enabled: true,
+            ..Default::default()
+        },
+    );
 
     let outcome = pipeline::apply_one(root, &cfg, &application_id, Some(false))
         .await
@@ -181,31 +186,35 @@ async fn apply_one_dry_run_preserves_state() {
 }
 
 #[tokio::test]
-async fn apply_one_force_live_surfaces_source_disabled() {
+async fn apply_one_force_live_surfaces_unknown_source_error() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     scaffold_project(root);
-    let (_listing_id, application_id) = seed_rendered_application(root, "greenhouse").await;
+    let (_listing_id, application_id) = seed_rendered_application(root, "unknown").await;
 
     let mut cfg = CoreConfig::load(root).expect("load cfg");
     // per_source must be enabled, otherwise the gate would convert the
-    // call to Skipped before ever reaching the submitter.
-    cfg.submit
-        .per_source
-        .insert("greenhouse".into(), SubmitSource { enabled: true });
+    // call to Skipped before ever reaching the submitter dispatch.
+    cfg.submit.per_source.insert(
+        "unknown".into(),
+        SubmitSource {
+            enabled: true,
+            ..Default::default()
+        },
+    );
 
     let err = pipeline::apply_one(root, &cfg, &application_id, Some(true))
         .await
-        .expect_err("live submit must surface SourceDisabled from the stub");
+        .expect_err("live submit must surface UnknownSource from the submit layer");
 
-    // The Greenhouse Wave 1B stub returns SubmitError::SourceDisabled from
-    // submit(); submit_application propagates as-is.
+    // The submit layer rejects unknown sources before any network call;
+    // submit_application propagates that typed error through the pipeline.
     let msg = err.to_string().to_lowercase();
     assert!(
         err.chain().any(|c| c
             .downcast_ref::<careerai_submit::SubmitError>()
-            .is_some_and(|e| matches!(e, careerai_submit::SubmitError::SourceDisabled(_)))),
-        "expected SourceDisabled in cause chain; got: {msg}"
+            .is_some_and(|e| matches!(e, careerai_submit::SubmitError::UnknownSource(_)))),
+        "expected UnknownSource in cause chain; got: {msg}"
     );
 }
 
@@ -217,9 +226,13 @@ async fn applied_show_is_empty_after_dry_run_only() {
     let (_l, application_id) = seed_rendered_application(root, "greenhouse").await;
 
     let mut cfg = CoreConfig::load(root).expect("load cfg");
-    cfg.submit
-        .per_source
-        .insert("greenhouse".into(), SubmitSource { enabled: true });
+    cfg.submit.per_source.insert(
+        "greenhouse".into(),
+        SubmitSource {
+            enabled: true,
+            ..Default::default()
+        },
+    );
 
     // Drive a dry-run so something has happened.
     let _ = pipeline::apply_one(root, &cfg, &application_id, Some(false))

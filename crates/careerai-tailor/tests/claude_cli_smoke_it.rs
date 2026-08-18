@@ -132,6 +132,8 @@ __P__
 
     fn fixture_cfg(cache_dir: String) -> LlmConfig {
         LlmConfig {
+            provider: String::new(),
+            model: String::new(),
             // The whole point of this assertion: `anthropic/` must be
             // stripped before reaching the stub binary's argv.
             tailor_model: "anthropic/claude-sonnet-4-6".into(),
@@ -139,6 +141,8 @@ __P__
             filter_model: String::new(),
             parse_resume_model: String::new(),
             cache_dir,
+            api_base_url: None,
+            api_key: None,
             max_retries: 1,
             timeout_seconds: 30,
             prompt_version: "tailor.v1".into(),

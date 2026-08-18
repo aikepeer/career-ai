@@ -10,14 +10,14 @@ use crate::base::{SubmitContext, Submitter, WouldSubmit};
 use crate::browser_session::{BrowserSession, BrowserSessionConfig};
 use crate::credentials::{self, Credential};
 use crate::error::{Result, SubmitError};
-use crate::rate_limiter::{RateLimiter, RatePermit};
+use crate::rate_limiter::RateLimiter;
 use tracing::warn;
 
 use super::config::LinkedinConfig;
 
 // Re-export the always-on selector const so this module's call sites
 // don't reach into `crate::linkedin_selectors`.
-use crate::linkedin_selectors::EASY_APPLY_SELECTOR;
+use crate::linkedin_selectors::{EASY_APPLY_SELECTOR, SUBMIT_APPLICATION_SELECTOR};
 
 const LINKEDIN_DOMAIN: &str = ".linkedin.com";
 const LINKEDIN_LI_AT: &str = "li_at";
@@ -126,12 +126,18 @@ impl Submitter for LinkedinSubmitter {
                 other => other,
             })?;
 
-        let mut permit_slot = Some(permit);
-        let outcome = self
-            .run_session(&session, ctx, &li_at, &mut permit_slot)
-            .await;
+        // Hold the permit for the duration of the attempt. `RatePermit`
+        // refunds the day-cap slot on drop unless `commit()` is called —
+        // commit only once the final submit click has actually succeeded.
+        let mut permit = Some(permit);
+        let outcome = self.run_session(&session, ctx, &li_at).await;
         if let Err(e) = session.close().await {
             tracing::warn!(target: "submit", error = %e, "linkedin browser close failed");
+        }
+        if outcome.is_ok() {
+            if let Some(p) = permit.take() {
+                p.commit();
+            }
         }
         outcome
     }
@@ -143,7 +149,6 @@ impl LinkedinSubmitter {
         session: &BrowserSession,
         ctx: &SubmitContext<'_>,
         li_at: &str,
-        permit_slot: &mut Option<RatePermit<'_>>,
     ) -> Result<String> {
         session
             .set_cookie(LINKEDIN_LI_AT, li_at, LINKEDIN_DOMAIN)
@@ -173,10 +178,6 @@ impl LinkedinSubmitter {
 
         click_easy_apply(session, self.cfg.action_timeout_seconds).await?;
 
-        if let Some(permit) = permit_slot.take() {
-            permit.commit();
-        }
-
         let final_path = self.screenshot_path(ctx, "pre-submit");
         if let Err(e) = session.screenshot(&final_path).await {
             tracing::warn!(
@@ -191,17 +192,32 @@ impl LinkedinSubmitter {
             return Err(SubmitError::SourceDisabled(format!(
                 "linkedin submit reached pre-submit state (screenshot: {}); \
                  final Submit click gated by submit.linkedin.allow_submit_click=false — \
-                 see CLAUDE.md ToS notes (M5b lifts after audit)",
+                 set it true (acknowledging the ToS trade-off) to enable",
                 final_path.display()
             )));
         }
 
-        Err(SubmitError::SourceDisabled(format!(
-            "linkedin submit reached pre-submit state (screenshot: {}); \
-             final Submit click is intentionally not implemented in M5a; \
-             allow_submit_click=true is reserved for M5b",
-            final_path.display()
-        )))
+        click_submit_application(session, self.cfg.action_timeout_seconds).await?;
+
+        let submitted_path = self.screenshot_path(ctx, "submitted");
+        if let Err(e) = ensure_parent(&submitted_path).await {
+            tracing::warn!(
+                target = "submit",
+                error = %e,
+                path = %submitted_path.display(),
+                "linkedin submitted screenshot dir create failed"
+            );
+        }
+        if let Err(e) = session.screenshot(&submitted_path).await {
+            tracing::warn!(
+                target = "submit",
+                error = %e,
+                path = %submitted_path.display(),
+                "linkedin submitted screenshot failed"
+            );
+        }
+
+        Ok(format!("linkedin:{}", ctx.listing.external_id))
     }
 }
 
@@ -210,6 +226,36 @@ async fn ensure_parent(p: &std::path::Path) -> std::io::Result<()> {
         tokio::fs::create_dir_all(parent).await?;
     }
     Ok(())
+}
+
+async fn click_submit_application(session: &BrowserSession, timeout_seconds: u64) -> Result<()> {
+    let timeout = Duration::from_secs(timeout_seconds);
+
+    let element_fut = session.page().find_element(SUBMIT_APPLICATION_SELECTOR);
+    let element = match tokio::time::timeout(timeout, element_fut).await {
+        Ok(Ok(el)) => el,
+        Ok(Err(e)) => {
+            return Err(SubmitError::SourceDisabled(format!(
+                "linkedin Submit application button not found ({SUBMIT_APPLICATION_SELECTOR}): {e}"
+            )));
+        }
+        Err(_) => {
+            return Err(SubmitError::SourceDisabled(format!(
+                "linkedin Submit application button not found within {timeout_seconds}s; \
+                 form may require additional required fields or a CAPTCHA"
+            )));
+        }
+    };
+    let click_fut = element.click();
+    match tokio::time::timeout(timeout, click_fut).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(SubmitError::SourceDisabled(format!(
+            "linkedin Submit application click failed: {e}"
+        ))),
+        Err(_) => Err(SubmitError::SourceDisabled(format!(
+            "linkedin Submit application click stalled ({timeout_seconds}s)"
+        ))),
+    }
 }
 
 async fn click_easy_apply(session: &BrowserSession, timeout_seconds: u64) -> Result<()> {

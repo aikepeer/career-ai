@@ -130,7 +130,7 @@
           <div class="col-empty">No items</div>
           {% else %}
           {% for card in col.top %}
-          <article class="card" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id }}')">
+          <article class="card" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id | js | safe }}')">
             <div class="card-header">
               <span class="card-title">{{ card.title }}</span>
               {% if card.score %}
@@ -216,7 +216,7 @@
               <span class="sev-badge sev-{{ ev.severity }}">{{ ev.severity }}</span>
             </td>
             <td>
-              <span class="code-link" onclick="openAppModal('{{ ev.listing_id }}')">{{ ev.listing_id }}</span>
+              <span class="code-link" onclick="openAppModal('{{ ev.listing_id | js | safe }}')">{{ ev.listing_id }}</span>
             </td>
             <td>
               <span class="transition-pill">
@@ -247,14 +247,15 @@
         <div class="config-card-header">
           <h3>🎯 Target Discovery Keywords</h3>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <button type="button" class="btn-primary" onclick="runPipelineCmd('discover', this)" style="padding:4px 10px; font-size:11px;" title="Execute careerai discover">⚡ Run Discover</button>
-            <button type="button" class="btn-primary" onclick="runPipelineCmd('match', this)" style="padding:4px 10px; font-size:11px; background:hsl(160 84% 39%);" title="Execute careerai match">🎯 Run Matcher</button>
+            <button type="button" class="btn-primary" onclick="runCliCommand('discover', {}, this)" style="padding:4px 10px; font-size:11px;" title="Execute careerai discover">⚡ Run Discover</button>
+            <button type="button" class="btn-primary" onclick="runCliCommand('match', {}, this)" style="padding:4px 10px; font-size:11px; background:hsl(160 84% 39%);" title="Execute careerai match">🎯 Run Matcher</button>
+            <button type="button" class="btn-primary" onclick="runCliCommand('run', {}, this)" style="padding:4px 10px; font-size:11px; background:hsl(207 90% 54%);" title="Run the full pipeline (dry-run by default)">🚀 Run All</button>
             <span class="pill pill-info">{{ view.config.keywords | length }} keywords — Click to remove · Type to add</span>
           </div>
         </div>
-        <div id="keywords-container" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:12px;">
+        <div id="keywords-container" style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px;">
           {% for kw in view.config.keywords | sort(attribute="name") %}
-          <span class="skill-tag kw-chip" style="cursor:pointer; justify-content:space-between;" onclick="toggleKeyword('{{ kw.name }}')" title="Click to remove">
+          <span class="skill-tag kw-chip" style="cursor:pointer; justify-content:space-between;" onclick="toggleKeyword('{{ kw.name | js | safe }}')" title="Click to remove">
             <span>✓ {{ kw.name }}</span><span style="opacity:0.6; margin-left:6px;">✕</span>
           </span>
           {% endfor %}
@@ -270,13 +271,13 @@
         <div class="config-card-header">
           <h3>📥 Active Job Sources</h3>
           <div style="display:flex; gap:8px; align-items:center;">
-            <button type="button" class="btn-primary" onclick="runPipelineCmd('discover', this)" style="padding:4px 10px; font-size:11px;" title="Run discovery on all sources">⚡ Run Discover</button>
+            <button type="button" class="btn-primary" onclick="runCliCommand('discover', {}, this)" style="padding:4px 10px; font-size:11px;" title="Run discovery on all sources">⚡ Run Discover</button>
             <span class="badge">{{ view.config.sources | length }} sources</span>
           </div>
         </div>
         <div class="sources-list" style="max-height: 440px; overflow-y: auto; padding-right: 4px;">
           {% for src in view.config.sources %}
-          <div class="source-item" style="cursor: pointer; transition: background 0.15s ease;" onclick="filterExplorerBySource('{{ src.name }}')" title="Click to view all {{ src.name }} jobs in Explorer">
+          <div class="source-item" style="cursor: pointer; transition: background 0.15s ease;" onclick="filterExplorerBySource('{{ src.name | js | safe }}')" title="Click to view all {{ src.name }} jobs in Explorer">
             <div class="source-main">
               <span class="source-name">⚡ {{ src.name }}</span>
               <span class="source-kind">{{ src.kind }}</span>
@@ -284,9 +285,19 @@
             <div class="source-stats">
               <span class="source-count">{{ src.listing_count }} jobs</span>
               {% if src.url %}
-              <a href="{{ src.url }}" target="_blank" onclick="event.stopPropagation();" class="pill pill-info" style="text-decoration:none; font-size:11px; padding:2px 8px;" title="Open {{ src.name }} portal">🌐 Portal ↗</a>
+              <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="pill pill-info" style="text-decoration:none; font-size:11px; padding:2px 8px;" title="Open {{ src.name }} portal">🌐 Portal ↗</a>
               {% endif %}
               <span class="status-pill status-{{ src.status }}">{{ src.status }}</span>
+              {% if src.submit_enabled %}
+              <span class="status-pill status-active" title="Live submission enabled">submit on</span>
+              {% else %}
+              <span class="status-pill status-ready" title="Live submission disabled (dry-run default)">submit off</span>
+              {% endif %}
+              <span class="source-kind" title="Resolved submit rate policy">
+                {% if src.max_per_day > 0 %}{{ src.max_per_day }}/day{% else %}default cap{% endif %}
+                {% if src.min_seconds_between > 0 %} · {{ src.min_seconds_between }}s apart{% endif %}
+                {% if src.quiet_hours_utc %} · quiet {{ src.quiet_hours_utc[0] }}–{{ src.quiet_hours_utc[1] }} UTC{% endif %}
+              </span>
             </div>
           </div>
           {% endfor %}
@@ -354,7 +365,7 @@
           </div>
           <div class="form-group">
             <label for="cfg-api-key">API Key / Token (Saved in config/local.yaml)</label>
-            <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-deepseek-... or sk-ant-api..." value="{{ view.config.llm_api_key | default(value='') }}">
+            <input type="password" id="cfg-api-key" class="form-control" placeholder="sk-deepseek-... or sk-ant-api..." value="">
           </div>
           <div class="form-group">
             <label for="cfg-timeout">LLM Request Timeout in Seconds (Default: 300s / 5 mins for long prompts)</label>
@@ -366,6 +377,26 @@
             <span id="save-status-msg" class="save-status"></span>
           </div>
         </form>
+
+        <!-- Config generation preview + apply (two-step, non-destructive) -->
+        <div id="config-diff-panel" style="display:none; margin-top:16px;">
+          <h4 style="margin-bottom:8px; color:var(--text-secondary); font-size:13px; font-weight:600;">CONFIG PREVIEW</h4>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">Review the merged <code>config/local.yaml</code> below before applying. The existing file is backed up to <code>local.yaml.bak</code> on apply.</p>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+            <div>
+              <div class="config-label">BEFORE (current local.yaml)</div>
+              <pre id="config-before" class="code-preview" style="max-height:280px; overflow:auto; margin:0;">&nbsp;</pre>
+            </div>
+            <div>
+              <div class="config-label">AFTER (merged)</div>
+              <pre id="config-after" class="code-preview" style="max-height:280px; overflow:auto; margin:0;">&nbsp;</pre>
+            </div>
+          </div>
+          <div class="form-actions" style="margin-top:12px;">
+            <button type="button" class="btn-primary" onclick="applyGeneratedConfig()">✅ Apply Merged Config</button>
+            <button type="button" class="close-btn-secondary" onclick="dismissConfigPreview()">Discard</button>
+          </div>
+        </div>
       </div>
 
       <!-- Profile Import + Editable Profile Card — FULL WIDTH -->
@@ -391,6 +422,10 @@
             <span id="import-status" class="save-status"></span>
           </div>
         </form>
+        <div id="import-apply-actions" style="display:none; margin-bottom:16px;">
+          <button type="button" class="btn-primary" onclick="applyImportedProfile()">✅ Apply Imported Profile</button>
+          <span class="save-status">Imported draft is ready — review the fields below, then apply. The current profile is backed up before replacement.</span>
+        </div>
         <!-- Inline Editable Profile Form -->
         <div id="profile-editor" style="border-top:1px solid var(--border); padding-top:16px;">
           <h4 style="margin-bottom:12px; color:var(--text-secondary); font-size:13px; font-weight:600;">PROFILE DETAILS</h4>
@@ -416,7 +451,7 @@
             <label for="pf-roles">Target Roles (comma-separated)</label>
             <input type="text" id="pf-roles" class="form-control" value="{{ view.config.profile.target_roles | default(value=[]) | join(sep=', ') }}" placeholder="Embedded Systems Engineer, Robotics SWE">
           </div>
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:12px;">
+          <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:12px;">
             <div class="form-group">
               <label for="pf-languages">Languages / Stack (comma-separated)</label>
               <input type="text" id="pf-languages" class="form-control" value="{{ view.config.profile.languages | default(value=[]) | join(sep=', ') }}" placeholder="Rust, Python, C++">
@@ -463,6 +498,9 @@
     <div class="actions-container">
       <div class="actions-section">
         <h3>📝 Drafted Applications Awaiting Approval</h3>
+        {% if view.state_counts.drafted > 0 %}
+        <button type="button" class="btn-primary" onclick="runCliCommand('review', {}, this)" style="margin:8px 0 12px; padding:6px 12px; font-size:12px;">🔍 Review Drafted LinkedIn</button>
+        {% endif %}
         {% if view.action_items | length == 0 %}
         <div class="empty-card">
           <span>✨ No pending drafted applications requiring manual review right now.</span>
@@ -485,7 +523,7 @@
               {% if item.action_url %}
               <a href="{{ item.action_url }}" target="_blank" rel="noopener" class="action-btn">{{ item.action_label }} ↗</a>
               {% else %}
-              <button class="action-btn" onclick="openAppModal('{{ item.id }}')">{{ item.action_label }} →</button>
+              <button class="action-btn" onclick="openAppModal('{{ item.id | js | safe }}')">{{ item.action_label }} →</button>
               {% endif %}
             </div>
           </div>
@@ -500,7 +538,7 @@
   <div id="tab-explorer" class="tab-panel">
     <div class="panel-header">
       <h2>🔍 Discovered & Filtered Job Explorer</h2>
-      <p class="panel-desc">Browse, search, and filter all 557+ discovered postings before and after matching</p>
+      <p class="panel-desc">Browse, search, and filter all discovered postings before and after matching</p>
     </div>
 
     <!-- E-Commerce Shopping-Style Multi-Select Filter Panel -->
@@ -530,8 +568,9 @@
 
     <div class="explorer-toolbar" style="display:flex; gap:10px; margin-bottom:16px; align-items:center;">
       <input type="text" id="explorer-search-input" class="form-control" placeholder="Search postings by job title, company, or skills..." oninput="filterExplorerTable()" style="flex:1;">
-      <button type="button" class="btn-primary" onclick="runPipelineCmd('discover', this)" style="padding:8px 14px; font-size:12px;">⚡ Run Discover</button>
-      <button type="button" class="btn-primary" onclick="runPipelineCmd('match', this)" style="padding:8px 14px; font-size:12px; background:hsl(160 84% 39%);">🎯 Run Matcher</button>
+      <button type="button" class="btn-primary" onclick="runCliCommand('discover', {}, this)" style="padding:8px 14px; font-size:12px;">⚡ Run Discover</button>
+      <button type="button" class="btn-primary" onclick="runCliCommand('match', {}, this)" style="padding:8px 14px; font-size:12px; background:hsl(160 84% 39%);">🎯 Run Matcher</button>
+      <button type="button" class="btn-primary" onclick="runCliCommand('run', {}, this)" style="padding:8px 14px; font-size:12px; background:hsl(207 90% 54%);" title="Run the full pipeline (dry-run by default)">🚀 Run All</button>
     </div>
 
     <div class="table-container">
@@ -555,15 +594,29 @@
           {% else %}
           {% for item in view.discovered_explorer %}
           <tr class="explorer-row" data-search="{% if item.title %}{{ item.title | lower }}{% endif %} {% if item.company %}{{ item.company | lower }}{% endif %} {% if item.location %}{{ item.location | lower }}{% endif %}" data-remote="{{ item.is_remote }}" data-state="{{ item.state }}">
-            <td><a href="{{ item.url }}" target="_blank" class="title-link">{% if item.title %}{{ item.title }}{% else %}Listing {{ item.id }}{% endif %}</a></td>
+            <td><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="title-link">{% if item.title %}{{ item.title }}{% else %}Listing {{ item.id }}{% endif %}</a></td>
             <td>🏢 {% if item.company %}{{ item.company }}{% else %}Unspecified{% endif %}</td>
             <td>📍 {% if item.location %}{{ item.location }}{% else %}Remote / Unspecified{% endif %}</td>
             <td><span class="pill pill-info">{{ item.source }}</span></td>
             <td><span class="sev-badge sev-{% if item.state == 'discovered' %}info{% else %}warn{% endif %}">{{ item.state }}</span></td>
             <td>{% if item.score %}{{ (item.score * 100) | round(method="floor") }}%{% else %}—{% endif %}</td>
             <td>
-              <button class="detail-link-btn" onclick="openAppModal('{{ item.id }}')">Inspect →</button>
-              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist('{{ item.id }}')">⚡ Shortlist</button>
+              <button class="detail-link-btn" onclick="openAppModal('{{ item.id | js | safe }}')">Inspect →</button>
+              {% if item.state == "discovered" or item.state == "filtered_out" %}
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist('{{ item.id | js | safe }}')">⚡ Shortlist</button>
+              {% elif item.state == "shortlisted" %}
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand('tailor', {listing_id: '{{ item.id | js | safe }}'}, this)">✂️ Tailor</button>
+              {% elif item.state == "tailored" and item.application_id %}
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand('render', {application_id: '{{ item.application_id | js | safe }}'}, this)">📄 Render</button>
+              {% elif item.state == "rendered" or item.state == "prepared" %}
+              {% if item.application_id %}
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand('apply', {application_id: '{{ item.application_id | js | safe }}'}, this)">📨 Apply</button>
+              {% endif %}
+              {% elif item.state == "drafted" %}
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="openAppModal('{{ item.id | js | safe }}')">👀 Review Draft</button>
+              {% elif item.state == "failed" and item.application_id %}
+              <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand('retry', {application_id: '{{ item.application_id | js | safe }}'}, this)">🔄 Retry</button>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -653,6 +706,13 @@
         <h3>📁 Rendered Artifacts</h3>
         <ul id="modal-artifacts" class="artifacts-list">
           <li class="empty-item">No disk artifacts registered.</li>
+        </ul>
+      </div>
+
+      <div class="modal-section">
+        <h3>🧭 Pipeline Timeline</h3>
+        <ul id="modal-timeline" class="artifacts-list">
+          <li class="empty-item">No audit events recorded.</li>
         </ul>
       </div>
     </div>
@@ -772,6 +832,21 @@ function openAppModal(id) {
       } else {
         artifactsUl.innerHTML = '<li class="empty-item">No disk artifacts registered.</li>';
       }
+
+      var timelineUl = document.getElementById('modal-timeline');
+      timelineUl.innerHTML = '';
+      if (data.timeline && data.timeline.length > 0) {
+        data.timeline.forEach(function(ev) {
+          var li = document.createElement('li');
+          li.className = 'artifact-item';
+          li.innerText = '[' + (ev.relative_time || '?') + '] ' +
+            (ev.from_state || '∅') + ' → ' + ev.to_state +
+            (ev.note ? ' — ' + ev.note : '');
+          timelineUl.appendChild(li);
+        });
+      } else {
+        timelineUl.innerHTML = '<li class="empty-item">No audit events recorded.</li>';
+      }
     })
     .catch(function(err) {
       document.getElementById('modal-title').innerText = 'Failed to fetch details';
@@ -781,6 +856,55 @@ function openAppModal(id) {
 
 function closeAppModal() {
   document.getElementById('app-modal').classList.remove('active');
+}
+
+// The "Generate Config from Profile" button calls this endpoint, which
+// derives discovery keywords/skills from profile/profile.yaml and writes
+// config/local.yaml. This function was referenced by the template but
+// never defined, so the button silently did nothing.
+function generateConfig() {
+  var msgEl = document.getElementById('save-status-msg');
+  if (msgEl) msgEl.innerText = 'Generating config preview...';
+  fetch('/api/v1/config/generate', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'preview') {
+        if (msgEl) msgEl.innerText = 'Preview ready — review the diff, then apply.';
+        document.getElementById('config-before').innerText = d.before || '(no existing config/local.yaml)';
+        document.getElementById('config-after').innerText = d.after || '';
+        document.getElementById('config-diff-panel').style.display = 'block';
+      } else {
+        if (msgEl) msgEl.innerText = '❌ ' + (d.error || 'Generation failed');
+      }
+    })
+    .catch(function(err) {
+      if (msgEl) msgEl.innerText = '❌ ' + err;
+    });
+}
+
+function applyGeneratedConfig() {
+  var msgEl = document.getElementById('save-status-msg');
+  if (msgEl) msgEl.innerText = 'Applying merged config...';
+  fetch('/api/v1/config/apply', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'success') {
+        if (msgEl) msgEl.innerText = '✅ ' + (d.message || 'Config applied.');
+        document.getElementById('config-diff-panel').style.display = 'none';
+        setTimeout(function() { location.reload(); }, 1200);
+      } else {
+        if (msgEl) msgEl.innerText = '❌ ' + (d.error || 'Apply failed');
+      }
+    })
+    .catch(function(err) {
+      if (msgEl) msgEl.innerText = '❌ ' + err;
+    });
+}
+
+function dismissConfigPreview() {
+  document.getElementById('config-diff-panel').style.display = 'none';
+  var msgEl = document.getElementById('save-status-msg');
+  if (msgEl) msgEl.innerText = '';
 }
 
 function saveLlmSettings(e) {
@@ -793,13 +917,15 @@ function saveLlmSettings(e) {
   var msgEl = document.getElementById('save-status-msg');
   msgEl.innerText = 'Saving...';
 
-  // Persist to localStorage immediately so fields survive reloads
+  // Persist non-secret fields to localStorage so they survive reloads.
+  // The API key is intentionally NOT persisted: it is a bearer secret
+  // and localStorage is readable by any script on the origin.
   try {
     localStorage.setItem('careerai-cfg-backend', backend);
     localStorage.setItem('careerai-cfg-model', model);
     localStorage.setItem('careerai-cfg-api-base', apiBase);
-    localStorage.setItem('careerai-cfg-api-key', apiKey);
     localStorage.setItem('careerai-cfg-timeout', String(timeoutSec));
+    localStorage.removeItem('careerai-cfg-api-key');
   } catch(lsErr) {}
 
   fetch('/api/v1/config', {
@@ -839,7 +965,6 @@ function importProfile(e) {
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.status === 'success') {
-      statusEl.innerText = '✅ Profile imported!';
       var p = d.profile;
       if (p) {
         if (p.personal) {
@@ -855,11 +980,34 @@ function importProfile(e) {
           document.getElementById('pf-tools').value = (p.skills.tools || []).join(', ');
         }
       }
+      if (d.pending === true) {
+        statusEl.innerText = '✅ Imported draft ready — review fields then Apply.';
+        document.getElementById('import-apply-actions').style.display = 'block';
+      } else {
+        statusEl.innerText = '✅ Profile imported (draft not saved).';
+      }
     } else {
       statusEl.innerText = '❌ ' + (d.error || 'Import failed');
     }
   })
   .catch(function(err) { statusEl.innerText = '❌ ' + err; });
+}
+
+function applyImportedProfile() {
+  var statusEl = document.getElementById('import-status');
+  statusEl.innerText = 'Applying imported profile...';
+  fetch('/api/v1/profile/import/confirm', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status === 'success') {
+        statusEl.innerText = '✅ ' + (d.message || 'Profile applied.');
+        document.getElementById('import-apply-actions').style.display = 'none';
+        setTimeout(function() { location.reload(); }, 1200);
+      } else {
+        statusEl.innerText = '❌ ' + (d.error || 'Apply failed');
+      }
+    })
+    .catch(function(err) { statusEl.innerText = '❌ ' + err; });
 }
 
 function filterExplorerTable() {
@@ -1023,7 +1171,7 @@ function addCustomKeyword() {
       span.style.cursor = 'pointer';
       span.style.justifyContent = 'space-between';
       span.title = 'Click to remove';
-      span.setAttribute('onclick', "toggleKeyword('" + kw.replace(/'/g, "\\'") + "')");
+      span.setAttribute('onclick', "toggleKeyword('" + escapeJsString(kw) + "')");
       span.innerHTML = '<span>✓ ' + escapeHtml(kw) + '</span><span style="opacity:0.6; margin-left:6px;">✕</span>';
       container.appendChild(span);
       sortKeywordsContainer();
@@ -1042,34 +1190,35 @@ function filterExplorerBySource(srcName) {
   filterExplorerTable();
 }
 
-function runPipelineCmd(cmd, btn) {
-  var originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Running...';
-  fetch('/api/v1/pipeline/' + cmd, { method: 'POST' })
+function runCliCommand(command, args, btn) {
+  var originalText = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Running...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: command, args: args || {} })
+  })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.status === 'success') {
-        btn.innerHTML = '✅ Done!';
+        if (btn) btn.innerHTML = '✅ Done!';
         setTimeout(function() {
-          btn.disabled = false;
-          btn.innerHTML = originalText;
+          if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
           refreshExplorerListings();
-          if (cmd === 'match') location.reload();
+          if (command !== 'discover') location.reload();
         }, 1500);
       } else {
-        btn.innerHTML = '❌ ' + (d.error || 'Failed');
+        var message = d.status === 'busy' ? 'Busy — another run is in progress' : (d.error || d.message || 'Failed');
+        if (btn) btn.innerHTML = '❌ ' + message;
         setTimeout(function() {
-          btn.disabled = false;
-          btn.innerHTML = originalText;
+          if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
         }, 3000);
       }
     })
     .catch(function(err) {
-      btn.innerHTML = '❌ Error';
+      if (btn) btn.innerHTML = '❌ Error';
       setTimeout(function() {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
+        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
       }, 3000);
     });
 }
@@ -1110,21 +1259,46 @@ function usePromptChip(text) {
   }
 }
 
-function saveChatHistory() {
+// Chat history is persisted as structured {role, text, time} entries, not
+// as a raw innerHTML blob. Restoring re-renders each entry through the
+// same escaping path used at send time, so a saved conversation can never
+// smuggle markup into the page.
+var chatMessages = [];
+
+function appendChatMessage(role, text, time) {
   var container = document.getElementById('chat-messages');
-  if (container) {
-    try { localStorage.setItem('careerai-chat-history', container.innerHTML); } catch(e) {}
-  }
+  if (!container) return;
+  var div = document.createElement('div');
+  div.className = role === 'user' ? 'chat-msg msg-user' : 'chat-msg msg-assistant';
+  var avatar = role === 'user' ? '👤' : '🤖';
+  var author = role === 'user' ? 'You' : 'Career-AI Assistant';
+  var timeLabel = time || 'Just now';
+  div.innerHTML = '<div class="msg-avatar">' + avatar + '</div>' +
+    '<div class="msg-content">' +
+      '<div class="msg-header"><span class="msg-author">' + escapeHtml(author) + '</span><span class="msg-time">' + escapeHtml(timeLabel) + '</span></div>' +
+      '<div class="msg-text">' + (role === 'user' ? escapeHtml(text) : formatMarkdownResponse(text)) + '</div>' +
+    '</div>';
+  container.appendChild(div);
+}
+
+function saveChatHistory() {
+  try { localStorage.setItem('careerai-chat-history', JSON.stringify(chatMessages)); } catch(e) {}
 }
 
 function clearChatHistory() {
+  chatMessages = [{
+    role: 'assistant',
+    text: 'Hello! Chat history cleared. How can I help you?',
+    time: 'Just now'
+  }];
   try {
     localStorage.removeItem('careerai-chat-history');
     sessionStorage.removeItem('careerai-chat-draft');
   } catch(e) {}
   var container = document.getElementById('chat-messages');
   if (container) {
-    container.innerHTML = '<div class="chat-msg msg-assistant"><div class="msg-avatar">🤖</div><div class="msg-content"><div class="msg-header"><span class="msg-author">Career-AI Assistant</span><span class="msg-time">Just now</span></div><div class="msg-text">Hello! Chat history cleared. How can I help you?</div></div></div>';
+    container.innerHTML = '';
+    chatMessages.forEach(function(m) { appendChatMessage(m.role, m.text, m.time); });
   }
 }
 
@@ -1135,16 +1309,9 @@ function sendChatMessage(event) {
   if (!text) return;
 
   var container = document.getElementById('chat-messages');
-  
-  var userDiv = document.createElement('div');
-  userDiv.className = 'chat-msg msg-user';
-  userDiv.innerHTML = '<div class="msg-avatar">👤</div>' +
-    '<div class="msg-content">' +
-      '<div class="msg-header"><span class="msg-author">You</span><span class="msg-time">Just now</span></div>' +
-      '<div class="msg-text">' + escapeHtml(text) + '</div>' +
-    '</div>';
-  container.appendChild(userDiv);
-  
+  chatMessages.push({ role: 'user', text: text, time: 'Just now' });
+  appendChatMessage('user', text, 'Just now');
+
   input.value = '';
   try { sessionStorage.removeItem('careerai-chat-draft'); } catch(e) {}
   container.scrollTop = container.scrollHeight;
@@ -1170,17 +1337,16 @@ function sendChatMessage(event) {
     var textEl = aiDiv.querySelector('.msg-text');
     var timeEl = aiDiv.querySelector('.msg-time');
     if (timeEl) timeEl.innerText = 'Just now';
-    if (data.reply) {
-      if (textEl) {
-        textEl.classList.remove('msg-loading');
+    var reply = data.reply || data.error || 'No response from assistant.';
+    if (textEl) {
+      textEl.classList.remove('msg-loading');
+      if (data.reply) {
         textEl.innerHTML = formatMarkdownResponse(data.reply);
-      }
-    } else {
-      if (textEl) {
-        textEl.classList.remove('msg-loading');
-        textEl.innerText = data.error || 'No response from assistant.';
+      } else {
+        textEl.innerText = reply;
       }
     }
+    chatMessages.push({ role: 'assistant', text: reply, time: 'Just now' });
     container.scrollTop = container.scrollHeight;
     saveChatHistory();
   })
@@ -1190,16 +1356,41 @@ function sendChatMessage(event) {
       textEl.classList.remove('msg-loading');
       textEl.innerText = 'Error connecting to assistant: ' + err;
     }
+    chatMessages.push({ role: 'assistant', text: 'Error connecting to assistant: ' + err, time: 'Just now' });
     saveChatHistory();
   });
 }
 
 function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Escape for a single-quoted JS string embedded in an HTML attribute.
+// Backslashes and quotes must be escaped for the JS parser; `&`, `<`,
+// `>`, and `"` become entities so the surrounding `onclick="..."` HTML
+// attribute cannot be terminated.
+function escapeJsString(str) {
+  return String(str)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/&/g, "\\x26")
+    .replace(/</g, "\\x3c")
+    .replace(/>/g, "\\x3e")
+    .replace(/"/g, "&quot;")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r");
 }
 
 function formatMarkdownResponse(md) {
-  return md
+  // Escape first so the LLM reply (which echoes the user's message) can
+  // never smuggle raw HTML into `innerHTML`, then apply the small
+  // markdown subset the assistant actually emits.
+  return escapeHtml(md)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`(.*?)`/g, '<code>$1</code>')
@@ -1222,8 +1413,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (savedModel && document.getElementById('cfg-model')) document.getElementById('cfg-model').value = savedModel;
     var savedApiBase = localStorage.getItem('careerai-cfg-api-base');
     if (savedApiBase && document.getElementById('cfg-api-base')) document.getElementById('cfg-api-base').value = savedApiBase;
-    var savedApiKey = localStorage.getItem('careerai-cfg-api-key');
-    if (savedApiKey && document.getElementById('cfg-api-key')) document.getElementById('cfg-api-key').value = savedApiKey;
     var savedTimeout = localStorage.getItem('careerai-cfg-timeout');
     if (savedTimeout && document.getElementById('cfg-timeout')) document.getElementById('cfg-timeout').value = savedTimeout;
   } catch(e) {}
@@ -1237,12 +1426,21 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   } catch(e) {}
 
-  // Restore Chat History
+  // Restore Chat History (structured JSON, re-rendered with escaping)
   try {
     var savedChat = localStorage.getItem('careerai-chat-history');
     if (savedChat) {
-      var container = document.getElementById('chat-messages');
-      if (container) container.innerHTML = savedChat;
+      var parsed = JSON.parse(savedChat);
+      if (Array.isArray(parsed)) {
+        chatMessages = parsed.filter(function(m) {
+          return m && (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string';
+        });
+        var container = document.getElementById('chat-messages');
+        if (container) {
+          container.innerHTML = '';
+          chatMessages.forEach(function(m) { appendChatMessage(m.role, m.text, m.time); });
+        }
+      }
     }
   } catch(e) {}
 
@@ -1265,7 +1463,7 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 
   // Auto-save LLM form inputs to localStorage as user types
-  ['cfg-backend', 'cfg-model', 'cfg-api-base', 'cfg-api-key', 'cfg-timeout'].forEach(function(id) {
+  ['cfg-backend', 'cfg-model', 'cfg-api-base', 'cfg-timeout'].forEach(function(id) {
     var el = document.getElementById(id);
     el?.addEventListener('input', function(e) {
       try { localStorage.setItem('careerai-' + id, e.target.value); } catch(err) {}
@@ -1332,7 +1530,7 @@ function refreshExplorerListings() {
           '<td><span class="pill pill-info">' + escapeHtml(item.source || 'unknown') + '</span></td>' +
           '<td><span class="sev-badge ' + sevClass + '">' + escapeHtml(item.state || '') + '</span></td>' +
           '<td>' + scoreStr + '</td>' +
-          '<td><button class="detail-link-btn" onclick="openAppModal(\'' + escapeHtml(item.id) + '\')">Inspect →</button><button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist(\'' + escapeHtml(item.id) + '\')">⚡ Shortlist</button></td>';
+          '<td><button class="detail-link-btn" onclick="openAppModal(\'' + escapeJsString(item.id) + '\')">Inspect →</button><button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist(\'' + escapeJsString(item.id) + '\')">⚡ Shortlist</button></td>';
 
         fragment.appendChild(tr);
       });

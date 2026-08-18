@@ -1,6 +1,8 @@
 //! Web Search Discovery Agent — dynamically discovers emerging job portals
 //! and freelance marketplaces (Remote-first -> Freelance/Gig -> Tech/Indian -> Global).
 
+use std::fmt::Write as _;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,21 +41,25 @@ impl WebSearchDiscoveryAgent {
                 category: "freelance".into(),
                 base_url: "https://www.upwork.com".into(),
                 priority: 1,
-                description: "Global freelance and contract gig marketplace for AI, Embedded, and Web.".into(),
+                description:
+                    "Global freelance and contract gig marketplace for AI, Embedded, and Web."
+                        .into(),
             },
             DiscoveredPortal {
                 name: "Toptal".into(),
                 category: "freelance".into(),
                 base_url: "https://www.toptal.com".into(),
                 priority: 1,
-                description: "Top 3% freelance network for senior engineers and software architects.".into(),
+                description:
+                    "Top 3% freelance network for senior engineers and software architects.".into(),
             },
             DiscoveredPortal {
                 name: "Contra".into(),
                 category: "freelance".into(),
                 base_url: "https://contra.com".into(),
                 priority: 1,
-                description: "Commission-free freelance network for tech and design creators.".into(),
+                description: "Commission-free freelance network for tech and design creators."
+                    .into(),
             },
             DiscoveredPortal {
                 name: "Arc.dev".into(),
@@ -88,14 +94,16 @@ impl WebSearchDiscoveryAgent {
                 category: "freelance".into(),
                 base_url: "https://www.freelancer.com".into(),
                 priority: 1,
-                description: "Global freelance and crowdsourcing marketplace for tech projects.".into(),
+                description: "Global freelance and crowdsourcing marketplace for tech projects."
+                    .into(),
             },
             DiscoveredPortal {
                 name: "Guru".into(),
                 category: "freelance".into(),
                 base_url: "https://www.guru.com".into(),
                 priority: 1,
-                description: "Freelance network for software development and engineering contracts.".into(),
+                description:
+                    "Freelance network for software development and engineering contracts.".into(),
             },
             DiscoveredPortal {
                 name: "WeWorkRemotely".into(),
@@ -144,10 +152,11 @@ impl WebSearchDiscoveryAgent {
         for portal in portals {
             let entry_snippet = format!("  - name: \"{}\"", portal.name);
             if !content.contains(&entry_snippet) {
-                content.push_str(&format!(
-                    "  - name: \"{}\"\n    category: \"{}\"\n    base_url: \"{}\"\n    priority: {}\n",
+                let _ = writeln!(
+                    content,
+                    "  - name: \"{}\"\n    category: \"{}\"\n    base_url: \"{}\"\n    priority: {}",
                     portal.name, portal.category, portal.base_url, portal.priority
-                ));
+                );
                 added_count += 1;
             }
         }
@@ -162,6 +171,7 @@ impl WebSearchDiscoveryAgent {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -195,4 +205,3 @@ mod tests {
         assert_eq!(re_added, 0);
     }
 }
-

@@ -25,10 +25,16 @@ pub async fn run_probe(
         // Two lines when the operator forced something: their request
         // and what would actually resolve. One line otherwise.
         if let Some(ref forced) = probe.forced {
-            println!("active backend:      {} (forced via --llm-backend)", forced.as_str());
+            println!(
+                "active backend:      {} (forced via --llm-backend)",
+                forced.as_str()
+            );
             println!("auto-detect default: {}", probe.chosen.as_str());
         } else {
-            println!("active backend:      {} (auto-detected)", probe.chosen.as_str());
+            println!(
+                "active backend:      {} (auto-detected)",
+                probe.chosen.as_str()
+            );
         }
 
         if let Some(bin) = &probe.claude_binary {

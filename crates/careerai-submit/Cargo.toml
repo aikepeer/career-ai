@@ -31,11 +31,14 @@ rand = "0.9"
 base64 = { workspace = true }
 
 [features]
-default = []
+default = ["browser"]
+# Browser-based submitters (LinkedIn) are on by default so a vanilla
+# build includes the M5 browser path.
 browser = ["dep:chromiumoxide", "dep:futures"]
 
 [dev-dependencies]
 wiremock.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 scraper = { workspace = true }
 

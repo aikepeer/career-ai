@@ -18,12 +18,11 @@ pub fn rank_all<'a, S: Scorer>(
     profile_text: &str,
     listings: &'a [RawListing],
 ) -> Vec<Scored<'a>> {
+    let batch_scores = scorer.score_many(profile_text, listings);
     let mut out: Vec<Scored<'a>> = listings
         .iter()
-        .map(|listing| Scored {
-            listing,
-            score: scorer.score(profile_text, listing),
-        })
+        .zip(batch_scores)
+        .map(|(listing, score)| Scored { listing, score })
         .collect();
     out.sort_by(|a, b| {
         b.score

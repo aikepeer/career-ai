@@ -58,6 +58,11 @@ pub(crate) enum Command {
         #[arg(long)]
         tune: bool,
     },
+    /// Run the full pipeline (match → tailor → render → apply) in one shot.
+    Run {
+        #[arg(long = "auto-submit")]
+        auto_submit: bool,
+    },
     /// Tailor the master resume to a shortlisted listing.
     Tailor {
         listing_id: String,
@@ -80,6 +85,10 @@ pub(crate) enum Command {
     Daemon,
     /// Inspect an application's row, state history, and artifacts.
     Inspect {
+        application_id: String,
+    },
+    /// Reset a failed application to its pre-submit state and retry apply.
+    Retry {
         application_id: String,
     },
     /// Profile ingestion + validation subcommands.

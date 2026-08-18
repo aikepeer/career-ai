@@ -51,7 +51,10 @@ pub(super) fn backend_maybe_available(
     if std::env::var("CAREERAI_LLM_BACKEND").is_ok() {
         return true;
     }
-    if which::which("claude").is_ok() || which::which("agy").is_ok() || which::which("goose").is_ok() {
+    if which::which("claude").is_ok()
+        || which::which("agy").is_ok()
+        || which::which("goose").is_ok()
+    {
         return true;
     }
     api_key_reachable()

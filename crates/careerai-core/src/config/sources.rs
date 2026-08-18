@@ -29,6 +29,12 @@ pub struct SourcesConfig {
     /// by probing seed slugs against the user's `domains:` keywords.
     #[serde(default)]
     pub ashby: CompaniesSource,
+    /// Teamtailor careers boards. One entry per company subdomain — e.g.
+    /// `synmatchai` → `https://synmatchai.teamtailor.com/jobs.json`.
+    /// Discovery adapter ships in `careerai-sources` as
+    /// `TeamtailorSource` (JSON Feed 1.1 + schema.org `_jobposting`).
+    #[serde(default)]
+    pub teamtailor: CompaniesSource,
     #[serde(default)]
     pub remotive: RemotiveSourceConfig,
     #[serde(default)]
@@ -64,7 +70,6 @@ pub struct SourcesConfig {
     #[serde(default)]
     pub filter: FilterConfig,
 }
-
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompaniesSource {

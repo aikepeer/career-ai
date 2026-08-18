@@ -45,7 +45,10 @@ pub fn tailor_prompt(profile: &Profile, listing: &Listing, cfg: &LlmConfig) -> R
         prompt_version: cfg.prompt_version.clone(),
         model: cfg.tailor_model.clone(),
         temperature: 0.1,
-        max_tokens: 4096,
+        // A full resume diff can easily exceed 4096 tokens (dozens of
+        // `ops` across experience/projects/skills); the old cap truncated
+        // the JSON mid-way and failed validation with "EOF while parsing".
+        max_tokens: 16_384,
         cache_profile: cfg.anthropic_prompt_cache,
     })
 }
@@ -81,7 +84,7 @@ pub fn cover_letter_prompt(
             cfg.cover_letter_model.clone()
         },
         temperature: 0.4,
-        max_tokens: 1500,
+        max_tokens: 4096,
         cache_profile: cfg.anthropic_prompt_cache,
     })
 }
@@ -158,11 +161,15 @@ mod tests {
 
     fn fixture_cfg() -> LlmConfig {
         LlmConfig {
+            provider: String::new(),
+            model: String::new(),
             tailor_model: "claude-3-5-sonnet".into(),
             cover_letter_model: "claude-3-5-sonnet".into(),
             filter_model: String::new(),
             parse_resume_model: String::new(),
             cache_dir: "data/cache/llm".into(),
+            api_base_url: None,
+            api_key: None,
             max_retries: 3,
             timeout_seconds: 120,
             prompt_version: "tailor.v1".into(),
