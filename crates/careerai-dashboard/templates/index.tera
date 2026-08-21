@@ -281,7 +281,7 @@
             <span class="pill pill-info">{{ view.config.keywords | length }} keywords — Click to remove · Type to add</span>
           </div>
         </div>
-        <div id="keywords-container" style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px;">
+        <div id="keywords-container" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin-bottom:12px;">
           {% for kw in view.config.keywords | sort(attribute="name") %}
           <span class="skill-tag kw-chip" style="cursor:pointer; justify-content:space-between;" onclick="toggleKeyword('{{ kw.name | js | safe }}')" title="Click to remove">
             <span>✓ {{ kw.name }}</span><span style="opacity:0.6; margin-left:6px;">✕</span>

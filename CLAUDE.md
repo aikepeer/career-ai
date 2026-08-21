@@ -137,7 +137,7 @@ Match the layer to what you're testing:
 1. **Unit** — pure functions (parsing, filters, rank math, diff apply). No I/O. Fast.
 2. **Integration** (`tests/*_it.rs`) — real SQLite (tempfile), `wiremock` for HTTP, `MockLLM` stub for `rig`. Validates state-machine transitions end-to-end.
 3. **Golden / snapshot** — `insta` for filter outputs; render-artifact tests extract text from produced DOCX/PDF via `pdf-extract` + `docx-rs` and diff against snapshots.
-4. **Browser** — `chromiumoxide` driven against captured LinkedIn/Indeed HTML served by a local `tiny-http` fixture server. CI never hits real LinkedIn/Indeed.
+4. **Browser** — `chromiumoxide` driven against captured LinkedIn/Indeed HTML served by a local `tiny-http` fixture server. CI never hits real LinkedIn/Indeed. The dashboard has live-browser E2E tests (`crates/careerai-dashboard/tests/browser_it.rs`) that boot the server in-process and drive a real headless Chromium (click through the config tab, preview the generated config, mobile-overflow check). Install the pinned browser with `scripts/fetch-chromium.sh` (or set `CAREERAI_CHROMIUM`); tests skip when no browser is found.
 
 `INSTA_UPDATE=always cargo test` is how you accept intentional snapshot changes — always review the diff before accepting.
 
