@@ -13,6 +13,9 @@
 //!    capitalization automatically. Without them the guardrail
 //!    false-rejects rewords whose lead verb wasn't in the original
 //!    seed list of seven.
+//! 3. Common sentence-start adjectives / participles (`Experienced`,
+//!    `Skilled`, `Proficient`, ...). Summary rewrites lead with these;
+//!    they are ordinary English, not invented entities.
 
 pub(crate) const COMMON_ENGLISH_CAPS: &[&str] = &[
     // --- connectors / pronouns / determiners ---
@@ -188,4 +191,17 @@ pub(crate) const COMMON_ENGLISH_CAPS: &[&str] = &[
     "tracked",
     "received",
     "stabilized",
+    // --- common sentence-start adjectives / participles ---
+    // Summary rewrites often lead with an adjective ("Experienced in
+    // embedded Linux..."), capitalized at sentence start like any
+    // proper noun. These are normal English, not invented entities;
+    // without them the guardrail false-rejects otherwise compliant
+    // rewrites (regression: live tailoring rejected a summary reword
+    // for the word "Experienced").
+    "experienced",
+    "skilled",
+    "proficient",
+    "seasoned",
+    "passionate",
+    "dedicated",
 ];

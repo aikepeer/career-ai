@@ -59,7 +59,7 @@ pub async fn extract_profile_from_text(
 
     let first_text = llm.call(&req).await.map_err(ExtractError::LlmCall)?;
 
-    let first_err = match parse_and_validate(&first_text) {
+    match parse_and_validate(&first_text) {
         Ok(profile) => {
             debug!(target: "profile.llm_extract", "first attempt succeeded");
             return Ok(profile);
@@ -76,9 +76,8 @@ pub async fn extract_profile_from_text(
                  prose, no markdown fences.",
                 req.user, e
             );
-            e
         }
-    };
+    }
 
     let second_text = match llm.call(&req).await {
         Ok(t) => t,
@@ -92,9 +91,7 @@ pub async fn extract_profile_from_text(
         Ok(profile) => Ok(profile),
         Err(e) => {
             warn!(target: "profile.llm_extract", error = %e, "retry parse failed");
-            Err(ExtractError::SchemaValidate(format!(
-                "attempt 1 failed ({first_err}); attempt 2 failed ({e})"
-            )))
+            Err(ExtractError::MaxRetries)
         }
     }
 }

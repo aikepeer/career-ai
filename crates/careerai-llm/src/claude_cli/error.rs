@@ -69,7 +69,12 @@ pub(crate) fn classify_failure_stderr(stderr: &str) -> ClaudeCliError {
 
 /// Classify a parsed-but-errorful JSON payload.
 pub(crate) fn classify_error_payload(parsed: &ClaudeCliResult) -> ClaudeCliError {
-    let msg = parsed.result.clone().unwrap_or_default();
+    // claude carries the message in `result`; agy carries it in `error`.
+    let msg = parsed
+        .result
+        .clone()
+        .or_else(|| parsed.error.clone())
+        .unwrap_or_default();
     let lc = msg.to_lowercase();
 
     if let Some(status) = parsed.api_error_status {

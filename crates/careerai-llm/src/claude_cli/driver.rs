@@ -1,5 +1,8 @@
 //! Subprocess-backed `Llm` impl that shells out to the user's
-//! `claude` CLI (`--print --output-format json`).
+//! `claude` CLI (`--print --output-format json`). Also supports
+//! `agy`, a Claude-Code-compatible Go CLI configured as
+//! `llm.backend: agy` (see `send_once` for its flag + envelope
+//! differences).
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -96,6 +99,39 @@ impl ClaudeCliLlm {
         let model = model_raw.split_once('/').map_or(model_raw, |(_, r)| r);
 
         let bin_str = self.binary.to_string_lossy().to_lowercase();
+        // `agy` (a Claude-Code-compatible Go CLI) accepts `-p/--print`
+        // and `--output-format json` but has no `--append-system-prompt-file`
+        // flag and reports a different envelope — both handled below.
+        let is_agy = bin_str.contains("agy");
+
+        // SECURITY: the system prompt + profile block can carry PII
+        // (rendered profile YAML). Passing them via argv would expose
+        // that content to any local process via `/proc/<pid>/cmdline`
+        // (Linux) or `ps -ef` output. For claude-compatible CLIs, write
+        // them to a 0o600 file in a private dir we own, and use
+        // `--append-system-prompt-file` so argv carries only flags +
+        // model id. `agy` has no such flag AND takes the prompt as an
+        // argv argument (stdin prompts make it print flag help instead
+        // of responding), so its system text + profile must ride in the
+        // prompt argument — an accepted agy-specific trade-off the
+        // operator opts into by configuring the backend.
+        let combined = if req.system.is_empty() && req.profile_block.is_empty() {
+            String::new()
+        } else if req.profile_block.is_empty() {
+            req.system.clone()
+        } else if req.system.is_empty() {
+            req.profile_block.clone()
+        } else {
+            format!("{}\n\n{}", req.system, req.profile_block)
+        };
+        let agy_prompt = if !is_agy {
+            String::new()
+        } else if combined.is_empty() {
+            req.user.clone()
+        } else {
+            format!("{combined}\n\n{}", req.user)
+        };
+
         let mut cmd = Command::new(&self.binary);
 
         if bin_str.contains("claude") {
@@ -104,8 +140,21 @@ impl ClaudeCliLlm {
                 .arg("json")
                 .arg("--model")
                 .arg(model);
-        } else if bin_str.contains("agy") {
-            cmd.arg("-p").arg("--print");
+        } else if is_agy {
+            // agy consumes the argument immediately after `-p` as the
+            // prompt; flags must come AFTER it (verified against the
+            // real binary — flags before the prompt make agy print its
+            // `--output-format` help instead of responding).
+            cmd.arg("-p")
+                .arg(agy_prompt)
+                .arg("--output-format")
+                .arg("json");
+            // Empty model -> let agy fall back to its own default.
+            // A bogus configured model would otherwise be rejected
+            // with agy's "invalid model selection" error.
+            if !model.is_empty() {
+                cmd.arg("--model").arg(model);
+            }
         } else if bin_str.contains("goose") {
             cmd.arg("run");
         } else if bin_str.contains("aider") {
@@ -114,33 +163,18 @@ impl ClaudeCliLlm {
             cmd.arg("--print");
         }
 
-        // SECURITY: the system prompt + profile block can carry PII
-        // (rendered profile YAML). Passing them via argv would expose
-        // that content to any local process via `/proc/<pid>/cmdline`
-        // (Linux) or `ps -ef` output. Write them to a 0o600 file in a
-        // private dir we own, and use `--append-system-prompt-file` so
-        // argv carries only flags + model id.
-        //
         // The temp file is held alive until after `wait_with_output`
         // returns; `_prompt_guard` keeps the `NamedTempFile` in scope so
         // its destructor does not unlink before claude reads it.
-        let _prompt_guard: Option<tempfile::NamedTempFile> =
-            if !req.system.is_empty() || !req.profile_block.is_empty() {
-                let combined = if req.profile_block.is_empty() {
-                    req.system.clone()
-                } else if req.system.is_empty() {
-                    req.profile_block.clone()
-                } else {
-                    format!("{}\n\n{}", req.system, req.profile_block)
-                };
-                let tmp = write_private_prompt_file(&combined).map_err(|e| {
-                    ClaudeCliError::Transport(format!("write system-prompt tempfile: {e}"))
-                })?;
-                cmd.arg("--append-system-prompt-file").arg(tmp.path());
-                Some(tmp)
-            } else {
-                None
-            };
+        let _prompt_guard: Option<tempfile::NamedTempFile> = if is_agy || combined.is_empty() {
+            None
+        } else {
+            let tmp = write_private_prompt_file(&combined).map_err(|e| {
+                ClaudeCliError::Transport(format!("write system-prompt tempfile: {e}"))
+            })?;
+            cmd.arg("--append-system-prompt-file").arg(tmp.path());
+            Some(tmp)
+        };
 
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -156,19 +190,22 @@ impl ClaudeCliLlm {
         // fatal: the child may have exited early (e.g. an auth-fail
         // path that prints its JSON and exits before reading stdin).
         // Surface the child's exit + stdout instead of failing the
-        // write.
+        // write. agy receives its prompt via argv and never reads
+        // stdin; still drop the pipe so it sees EOF.
         if let Some(mut stdin) = child.stdin.take() {
-            let user = req.user.clone();
-            match stdin.write_all(user.as_bytes()).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                    trace!(
-                        target = "careerai_llm::claude_cli",
-                        "claude closed stdin before we wrote (likely early exit); continuing"
-                    );
-                }
-                Err(e) => {
-                    return Err(ClaudeCliError::Transport(format!("write stdin: {e}")));
+            if !is_agy {
+                let user = req.user.clone();
+                match stdin.write_all(user.as_bytes()).await {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                        trace!(
+                            target = "careerai_llm::claude_cli",
+                            "claude closed stdin before we wrote (likely early exit); continuing"
+                        );
+                    }
+                    Err(e) => {
+                        return Err(ClaudeCliError::Transport(format!("write stdin: {e}")));
+                    }
                 }
             }
             // Drop stdin so the CLI sees EOF.
@@ -216,6 +253,26 @@ impl ClaudeCliLlm {
                 )));
             }
         };
+
+        // agy's envelope carries `status`/`response`/`error` instead of
+        // claude's `is_error`/`result`. Handle it before the claude
+        // fields, which are `None` for agy.
+        if let Some(status) = parsed.status.as_deref() {
+            if status == "SUCCESS" {
+                let text = parsed.response.clone().ok_or_else(|| {
+                    ClaudeCliError::ParseJson("agy missing `response` field".into())
+                })?;
+                let usage = parsed.usage.unwrap_or_default();
+                return Ok(LlmResponse {
+                    text,
+                    prompt_tokens: clamp_u64_u32(usage.input_tokens),
+                    completion_tokens: clamp_u64_u32(usage.output_tokens),
+                    cache_hit: false,
+                    cached_prompt_tokens: clamp_u64_u32(usage.cache_read_input_tokens),
+                });
+            }
+            return Err(classify_error_payload(&parsed));
+        }
 
         if parsed.is_error.unwrap_or(false) {
             return Err(classify_error_payload(&parsed));

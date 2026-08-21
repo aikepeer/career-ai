@@ -45,6 +45,28 @@ fn accepts_employer_from_profile() {
 }
 
 #[test]
+fn accepts_common_english_adjective_lead() {
+    // Sentence-start resume adjectives ("Experienced", "Skilled", ...)
+    // are normal English, not invented proper nouns. Regression:
+    // agy-backed tailoring of the live profile failed here — the model
+    // reworded the summary to lead with "Experienced in embedded
+    // Linux..." and the guardrail rejected the word as an invented
+    // proper noun.
+    let p = fixture();
+    for lead in ["Experienced", "Skilled", "Proficient", "Seasoned"] {
+        forbid_invented_entities(
+            &format!("{lead} in building resilient cloud infrastructure."),
+            "",
+            &p,
+            "x",
+        )
+        .unwrap_or_else(|e| {
+            panic!("sentence-start {lead} must not be an invented proper noun: {e:?}")
+        });
+    }
+}
+
+#[test]
 fn rejects_employer_not_in_profile() {
     let p = fixture();
     let err = forbid_invented_entities("Shipped at Google.", "", &p, "x").unwrap_err();
