@@ -147,16 +147,7 @@ pub async fn api_save_config(
     State(_state): State<Arc<AppState>>,
     Json(payload): Json<SaveConfigRequest>,
 ) -> impl IntoResponse {
-    let cwd = match std::env::current_dir() {
-        Ok(d) => d,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("cwd error: {e}") })),
-            )
-                .into_response();
-        }
-    };
+    let cwd = careerai_core::paths::resolve_root_env();
     let config_path = cwd.join("config").join("local.yaml");
 
     // Persist to the layered config file instead of mutating process env.

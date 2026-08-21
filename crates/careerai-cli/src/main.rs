@@ -40,7 +40,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log.as_deref());
 
-    let cwd = std::env::current_dir()?;
+    // App root: `CAREERAI_ROOT` override → CWD → home-fallback to the
+    // project workspace (runit services start in $HOME). Every
+    // subcommand reads config/, data/, and profile/ from here.
+    let cwd = careerai_core::paths::resolve_root_env();
 
     // Parse the global `--llm-backend` flag once so subcommands can
     // forward it down without re-parsing.

@@ -68,7 +68,7 @@ pub async fn import_paths_best_effort(paths: &[&Path]) -> Result<Profile> {
 }
 
 async fn try_llm_import(paths: &[&Path]) -> Result<Profile> {
-    let cwd = std::env::current_dir().map_err(ProfileError::Io)?;
+    let cwd = careerai_core::paths::resolve_root_env();
     let llm_cfg = if cwd.join("config").exists() {
         CoreConfig::load(&cwd)
             .map_err(|e| ProfileError::Validation(format!("load config: {e}")))?

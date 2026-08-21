@@ -73,7 +73,7 @@ pub(super) fn run_with_llm(
     {
         use std::sync::Arc;
 
-        let cwd = std::env::current_dir()?;
+        let cwd = careerai_core::paths::resolve_root_env();
         // Fall back to `LlmConfig::default()` ONLY when no `config/`
         // directory is present (e.g. running `profile import` before
         // `init`). When config exists, surface load/parse failures so

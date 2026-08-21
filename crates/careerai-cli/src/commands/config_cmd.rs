@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use careerai_profile::schema::Profile;
 
 pub fn run_generate(force: bool) -> Result<()> {
-    let cwd = std::env::current_dir().context("current dir")?;
+    let cwd = careerai_core::paths::resolve_root_env();
     let profile_path = cwd.join("profile").join("profile.yaml");
     let local_cfg_path = cwd.join("config").join("local.yaml");
 

@@ -27,12 +27,7 @@ fn generated_config_for(cwd: &std::path::Path) -> Result<String, String> {
 /// `config/local.yaml` plus the profile-derived generated config. Keeping
 /// both error shapes here means preview and apply can never drift apart.
 fn config_targets() -> Result<(PathBuf, String), (StatusCode, Json<serde_json::Value>)> {
-    let cwd = std::env::current_dir().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("cwd error: {e}") })),
-        )
-    })?;
+    let cwd = careerai_core::paths::resolve_root_env();
     let local_cfg = cwd.join("config").join("local.yaml");
     let generated = generated_config_for(&cwd).map_err(|e| {
         (

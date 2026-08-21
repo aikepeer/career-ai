@@ -5,4 +5,5 @@
 
 pub mod config;
 pub mod init;
+pub mod paths;
 pub mod state;

@@ -53,8 +53,13 @@ async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
     };
 
     let exe = resolve_cli_executable();
+    // Run the child from the app root (same resolution the CLI binary
+    // uses) so dashboard-invoked commands read the same config/, data/,
+    // profile/ tree regardless of where the dashboard process started.
+    let cli_root = careerai_core::paths::resolve_root_env();
     match tokio::process::Command::new(&exe)
         .args(&argv)
+        .current_dir(cli_root)
         .output()
         .await
     {

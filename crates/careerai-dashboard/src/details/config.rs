@@ -6,12 +6,13 @@ use sqlx::{Row, SqlitePool};
 use crate::error::Result;
 use crate::view::ConfigView;
 
-/// Load the layered core config from the process working directory.
-/// Shared by the config view and the chat assistant so both read the
-/// same on-disk state the CLI uses.
+/// Load the layered core config from the app root (same resolution the
+/// CLI uses: `CAREERAI_ROOT` → CWD → home fallback). Shared by the
+/// config view and the chat assistant so both read the same on-disk
+/// state the CLI uses.
 pub(crate) fn load_core_config() -> Option<careerai_core::config::CoreConfig> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    careerai_core::config::CoreConfig::load(&cwd).ok()
+    let root = careerai_core::paths::resolve_root_env();
+    careerai_core::config::CoreConfig::load(&root).ok()
 }
 
 /// The threshold the matcher actually applies (`match.score_threshold`).

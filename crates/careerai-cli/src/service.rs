@@ -47,11 +47,11 @@ pub fn run_install(force: bool) -> Result<()> {
     require_linux("install")?;
     let unit_path = unit_path()?;
     let bin = current_bin()?;
-    // Pin the daemon's WorkingDirectory to the project root the user is
-    // installing from. Without this, `systemd --user` starts the
-    // service in the manager's default cwd and the CLI's
-    // current_dir()-based config/data resolution reads the wrong tree.
-    let cwd = std::env::current_dir().context("resolve current_dir")?;
+    // Pin the daemon's WorkingDirectory to the app root (same resolution
+    // the CLI uses). Without this, `systemd --user` starts the service
+    // in the manager's default cwd and config/data resolution would read
+    // the wrong tree.
+    let cwd = careerai_core::paths::resolve_root_env();
     let body = render_unit(&bin, &cwd);
 
     if let Some(parent) = unit_path.parent() {
