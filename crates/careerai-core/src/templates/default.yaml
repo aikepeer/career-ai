@@ -1,12 +1,9 @@
 user:
-  locations:
-    - "Remote"
-    - "Remote (India)"
-    - "Delhi"
-    - "Delhi NCR"
-    - "Gurgaon"
-    - "Noida"
-    - "Bangalore-remote"
+  # Empty = no location hard-filter. Relevance is decided by scoring, not
+  # by whether the listing's location string matches a fixed allowlist.
+  # The old 7-string allowlist (Remote/Delhi/Gurgaon/Noida/Bangalore...)
+  # silently killed ~90% of discovered listings before scoring.
+  locations: []
   timezone: "Asia/Kolkata"
   work_auth:
     india: true
@@ -41,11 +38,15 @@ match:
   # NOTE: `embedding_model` is reserved for a future BGE-cosine scorer.
   # The shipping v1 scorer is `JaccardScorer` (token Jaccard), so
   # `score_threshold` and `notify_threshold` below are calibrated for
-  # Jaccard's empirical range (~0.02–0.05 on realistic profile/JD pairs),
-  # NOT for cosine on normalized embeddings. When a real embedding-based
-  # `Scorer` lands, bump these together with the model swap.
+  # Jaccard's empirical range, NOT for cosine on normalized embeddings.
+  # When a real embedding-based `Scorer` lands, bump these together with
+  # the model swap.
   embedding_model: "BAAI/bge-small-en-v1.5"
-  score_threshold: 0.035
+  # Jaccard scores on realistic profile/JD pairs land in ~0.003–0.04.
+  # 0.035 filtered everything below it (0.003–0.031 band seen in
+  # production), so the default keeps every scored listing; tighten it
+  # with `careerai match --tune` after a discovery cycle.
+  score_threshold: 0.003
   # Hard filter: a listing must contain at least one of these tokens
   # (case-insensitive substring) somewhere in its title/description/skills,
   # or it's filtered out before scoring. Leave empty for no filter.

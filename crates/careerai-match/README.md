@@ -28,7 +28,7 @@ listings move from `discovered` → `shortlisted`.
 
 ```yaml
 match:
-  score_threshold: 0.035       # below = filtered_out
+  score_threshold: 0.003       # below = filtered_out (Jaccard floor ~0.003)
   notify_threshold: 0.05       # >= notify_threshold fires HighScoreMatch
   must_include_skills: []      # AND-ed with the listing description
   embedding_model: "BAAI/bge-small-en-v1.5"  # reserved for BGE swap

@@ -75,6 +75,8 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
     let action_items = actions_res.unwrap_or_default();
     let discovered_explorer = explorer_res.unwrap_or_default();
     let next_steps = next_steps::compute(&snap);
+    let guided = crate::guided::compute(&snap, &config);
+    let cli_groups = crate::cli_catalog::grouped();
 
     let view = IndexView {
         kpi: snap.kpi,
@@ -90,6 +92,8 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
     };
     let mut ctx = tera::Context::new();
     ctx.insert("view", &view);
+    ctx.insert("guided", &guided);
+    ctx.insert("cli_groups", &cli_groups);
     ctx.insert("refresh_seconds", &state.refresh_seconds);
     ctx.insert("css", crate::STYLE_CSS);
     ctx.insert("build_version", crate::BUILD_VERSION);

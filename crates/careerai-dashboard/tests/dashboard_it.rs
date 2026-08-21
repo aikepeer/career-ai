@@ -16,9 +16,35 @@ async fn pick_free_port() -> u16 {
     port
 }
 
+/// Insert a listing and return its generated DB id, so served-HTML
+/// assertions can target the real id.
+async fn seed_listing_id(pool: &sqlx::SqlitePool) -> String {
+    use careerai_db::models::NewListing;
+    use careerai_db::queries::listings::insert_or_ignore;
+    let (id, _) = insert_or_ignore(
+        pool,
+        &NewListing {
+            source: "greenhouse".into(),
+            external_id: "explorer-it-1".into(),
+            title: "Senior Rust Engineer".into(),
+            company: "Beta Corp".into(),
+            location: Some("Remote".into()),
+            url: "https://example.com/explorer-it-1".into(),
+            description: "Build LLM systems".into(),
+            raw_json: None,
+        },
+    )
+    .await
+    .expect("insert listing");
+    id
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn healthz_and_index_render() {
     let pool = pool_in_memory().await.expect("in-memory pool");
+    // Seed one listing so the server-rendered Explorer table has a row
+    // whose copyable id cell can be asserted in the served HTML.
+    let listing_id = seed_listing_id(&pool).await;
     let port = pick_free_port().await;
     let opts = ServeOptions {
         port,
@@ -70,6 +96,30 @@ async fn healthz_and_index_render() {
         "body missing generic CLI dispatcher hook: {body:.300}"
     );
     assert!(body.contains("Run All"), "body missing Run All control");
+    assert!(
+        body.contains("CLI Commands"),
+        "body missing CLI Commands tab: {body:.300}"
+    );
+    assert!(
+        body.contains("guided-path"),
+        "body missing numbered guided path: {body:.300}"
+    );
+    assert!(
+        body.contains("careerai init"),
+        "body missing init in command catalog: {body:.300}"
+    );
+    assert!(
+        body.contains("careerai daemon"),
+        "body missing daemon in command catalog: {body:.300}"
+    );
+    assert!(
+        body.contains("listing-id-cell"),
+        "explorer rows must render a copyable id cell: {body:.2000}"
+    );
+    assert!(
+        body.contains(&listing_id),
+        "explorer must render the seeded listing id {listing_id}: {body:.2000}"
+    );
 
     let snapshot_json = reqwest_get(&format!("http://127.0.0.1:{port}/api/v1/snapshot")).await;
     assert!(

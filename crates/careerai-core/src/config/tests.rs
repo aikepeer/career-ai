@@ -59,10 +59,15 @@ fn naukri_validated_passes_through_none() {
 fn embedded_defaults_parse() {
     let tmp = tempfile::tempdir().unwrap();
     let cfg = CoreConfig::load(tmp.path()).unwrap();
-    assert!(!cfg.user.locations.is_empty());
-    assert!(cfg.user.locations.iter().any(|l| l.contains("Remote")));
+    // No location hard-filter by default: the old 7-string allowlist
+    // (Remote/Delhi/Gurgaon/Noida/...) rejected ~90% of discovered
+    // listings before scoring. Relevance is decided by score only.
+    assert!(cfg.user.locations.is_empty());
     assert!(!cfg.domains.is_empty());
+    // Jaccard scores on realistic profile/JD pairs land in ~0.003–0.04,
+    // so the shipping default sits at the observed floor, not mid-range.
     assert!(cfg.matching.score_threshold > 0.0);
+    assert!(cfg.matching.score_threshold <= 0.01);
 }
 
 #[test]

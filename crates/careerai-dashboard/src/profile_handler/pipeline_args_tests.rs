@@ -128,6 +128,29 @@ fn whitelisted_commands_build_expected_argv() {
     );
 }
 
+/// Whitelist entries added for full dashboard/CLI parity (Commands tab).
+#[test]
+fn parity_commands_build_expected_argv() {
+    assert_eq!(
+        args_str(&build_command_args(&req("profile show")).unwrap()),
+        ["profile", "show"]
+    );
+    assert_eq!(
+        args_str(&build_command_args(&req("profile validate")).unwrap()),
+        ["profile", "validate"]
+    );
+    assert_eq!(
+        args_str(&build_command_args(&req("mcp probe")).unwrap()),
+        ["mcp", "probe"]
+    );
+    let mut r = req("sources discover-web");
+    r.args.apply = Some(true);
+    assert_eq!(
+        args_str(&build_command_args(&r).unwrap()),
+        ["sources", "discover-web", "--apply"]
+    );
+}
+
 #[test]
 fn apply_application_id_is_positional() {
     let mut r = req("apply");

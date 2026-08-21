@@ -5,10 +5,12 @@ use sqlx::SqlitePool;
 use tera::Tera;
 
 pub mod chat;
+pub mod cli_catalog;
 pub mod daemon_health;
 pub mod data;
 pub mod details;
 pub mod error;
+pub mod guided;
 pub mod handlers;
 pub mod llm_health;
 pub mod next_steps;
@@ -227,12 +229,48 @@ mod tests {
             "Apply",
             "Retry",
             "Inspect",
+            "CLI Commands",
+            "guided-path",
+            "Do Step",
+            "careerai init",
+            "careerai daemon",
+            "tab-btn-commands",
         ] {
             assert!(
                 INDEX_TERA.contains(needle),
                 "index.tera must expose `{needle}` for dashboard/CLI parity",
             );
         }
+    }
+
+    #[test]
+    fn index_template_shows_explorer_listing_ids() {
+        // The Explorer table must surface each listing's DB id so the
+        // operator can copy it and run `careerai tailor <id>` from the
+        // terminal. Both render paths (server-side Tera, client-side
+        // refresh) must emit a copyable listing-id cell.
+        assert!(
+            INDEX_TERA.contains("<th>ID</th>"),
+            "explorer table must have a visible ID column header"
+        );
+        assert!(
+            INDEX_TERA.contains("listing-id-cell"),
+            "explorer rows must render a copyable listing-id cell"
+        );
+        // Server-rendered row embeds the id via Tera + the copy helper;
+        // the JS refresh path must do the same from /api/v1/explorer.
+        assert!(
+            INDEX_TERA.contains("copyCliCommand('{{ item.id | js | safe }}'"),
+            "server-rendered id cell must be click-to-copy with the Tera id"
+        );
+        assert!(
+            INDEX_TERA.contains("escapeJsString(item.id)"),
+            "JS-refresh id cell must embed item.id"
+        );
+        assert!(
+            INDEX_TERA.contains("escapeHtml(item.id)"),
+            "JS-refresh id cell must render the id text"
+        );
     }
 
     #[test]

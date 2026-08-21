@@ -54,6 +54,9 @@
       <span class="tab-badge">{{ view.discovered_explorer | length }}</span>
       {% endif %}
     </button>
+    <button class="nav-btn" id="tab-btn-commands" onclick="switchTab('commands')">
+      <span class="nav-icon">⌨️</span> CLI Commands
+    </button>
     <button class="nav-btn" id="tab-btn-chat" onclick="switchTab('chat')">
       <span class="nav-icon">🤖</span> AI Assistant
       <span class="tab-badge badge-accent">AI</span>
@@ -99,6 +102,31 @@
         <div class="kpi-label">Response Rate</div>
         <div class="kpi-sub">Interview & callback ratio</div>
       </div>
+    </section>
+
+    <!-- NUMBERED GUIDED PATH: the operator's 1→7 sequence -->
+    <section class="guided-path" role="guided-path">
+      <div class="guided-head">
+        <h2>🧭 Guided Path</h2>
+        <p class="guided-headline">{{ guided.headline }}</p>
+      </div>
+      <ol class="guided-steps">
+        {% for step in guided.steps %}
+        <li class="guided-step guided-{{ step.status }}">
+          <span class="guided-num">
+            {% if step.status == "done" %}✓{% else %}{{ step.number }}{% endif %}
+          </span>
+          <div class="guided-body">
+            <span class="guided-title">{{ step.title }}</span>
+            <span class="guided-hint">{{ step.hint }}</span>
+            <code class="guided-cmd">{{ step.command }}</code>
+          </div>
+          {% if step.status == "current" %}
+          <button type="button" class="btn-primary btn-sm guided-go" onclick="switchTab('{{ step.tab }}')">Do Step {{ step.number }} →</button>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
     </section>
 
     <div class="filter-bar">
@@ -578,6 +606,7 @@
         <thead>
           <tr>
             <th>Job Title</th>
+            <th>ID</th>
             <th>Company</th>
             <th>Location</th>
             <th>Source</th>
@@ -589,12 +618,13 @@
         <tbody id="explorer-tbody">
           {% if view.discovered_explorer | length == 0 %}
           <tr>
-            <td colspan="7" class="empty-cell">No discovered jobs found in database. Run <code>careerai discover</code> to populate listings.</td>
+            <td colspan="8" class="empty-cell">No discovered jobs found in database. Run <code>careerai discover</code> to populate listings.</td>
           </tr>
           {% else %}
           {% for item in view.discovered_explorer %}
           <tr class="explorer-row" data-search="{% if item.title %}{{ item.title | lower }}{% endif %} {% if item.company %}{{ item.company | lower }}{% endif %} {% if item.location %}{{ item.location | lower }}{% endif %}" data-remote="{{ item.is_remote }}" data-state="{{ item.state }}">
             <td><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="title-link">{% if item.title %}{{ item.title }}{% else %}Listing {{ item.id }}{% endif %}</a></td>
+            <td><code class="listing-id-cell" title="Click to copy — use with `careerai tailor <id>`" onclick="copyCliCommand('{{ item.id | js | safe }}', this)">{{ item.id }}</code></td>
             <td>🏢 {% if item.company %}{{ item.company }}{% else %}Unspecified{% endif %}</td>
             <td>📍 {% if item.location %}{{ item.location }}{% else %}Remote / Unspecified{% endif %}</td>
             <td><span class="pill pill-info">{{ item.source }}</span></td>
@@ -626,7 +656,78 @@
     </div>
   </div>
 
-  <!-- TAB 6: AI CHAT ASSISTANT -->
+  <!-- TAB 6: CLI COMMAND CENTER -->
+  <div id="tab-commands" class="tab-panel">
+    <div class="panel-header">
+      <h2>⌨️ CLI Command Center</h2>
+      <p class="panel-desc">Every <code>careerai</code> CLI command as a button — runnable one-shots execute in place; long-running or credential-prompting commands copy to your terminal</p>
+    </div>
+
+    {% for group in cli_groups %}
+    <section class="cmd-group">
+      <h3 class="cmd-group-title">{{ group.name }}<span class="cmd-group-count">{{ group.cards | length }}</span></h3>
+      <div class="cmd-grid">
+        {% for card in group.cards %}
+        <div class="cmd-card cmd-{{ card.availability }}">
+          <div class="cmd-head">
+            <code class="cmd-argv">{{ card.argv }}</code>
+            <span class="avail-badge avail-{{ card.availability }}">
+              {% if card.availability == "runnable" %}run here{% elif card.availability == "needs_id" %}needs an id{% else %}terminal only{% endif %}
+            </span>
+          </div>
+          <p class="cmd-summary">{{ card.summary }}</p>
+          <p class="cmd-hint">{{ card.hint }}</p>
+          <div class="cmd-actions">
+            {% if card.availability == "runnable" %}
+            <button type="button" class="btn-primary btn-sm" onclick="runCliCommand('{{ card.run_command | js | safe }}', {}, this)">▶ Run</button>
+            {% elif card.availability == "needs_id" %}
+            <input type="text" class="form-control cmd-id-input" placeholder="{% if card.name == 'tailor' %}listing id{% else %}application id{% endif %}" onkeydown="if(event.key==='Enter'){event.preventDefault();runCliCommandWithId('{{ card.run_command | js | safe }}', this, this.nextElementSibling);}">
+            <button type="button" class="btn-primary btn-sm" onclick="runCliCommandWithId('{{ card.run_command | js | safe }}', this.previousElementSibling, this)">▶ Run</button>
+            {% endif %}
+            <button type="button" class="chip-btn cmd-copy" title="Copy CLI command" onclick="copyCliCommand('{{ card.argv | js | safe }}', this)">📋 Copy</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+
+    <!-- Static full-surface reference — works with JS disabled and is
+         the copy-paste cheat sheet for the terminal. -->
+    <details class="cli-cheatsheet">
+      <summary>📜 Full CLI reference (static)</summary>
+      <pre class="code-preview">careerai init                              bootstrap config/, profile/, .env
+careerai config generate                   derive keywords + sources from profile
+careerai profile import &lt;files&gt;           ingest resume PDF/DOCX + LinkedIn ZIP
+careerai profile show                      print parsed profile.yaml
+careerai profile validate                  validate profile.yaml against schema
+careerai discover [--source X,Y]           pull new listings from job sources
+careerai match [--tune]                    filter + rank discovered listings
+careerai run [--auto-submit]               match → tailor → render → apply (dry-run default)
+careerai tailor &lt;listing-id&gt;              LLM-tailor resume to one listing
+careerai render &lt;application-id&gt;          render to DOCX + PDF via pandoc
+careerai apply [--all] [--auto-submit]     submit prepared applications (dry-run default)
+careerai retry &lt;application-id&gt;           reset a failed application and retry
+careerai review                            review drafted LinkedIn Easy Apply packets
+careerai shortlist show [--limit N]        list currently shortlisted listings
+careerai applied [--source S] [--limit N]  show submitted applications
+careerai inspect &lt;application-id&gt;         dump application row + history + artifacts
+careerai digest [--since 24h]              daily pipeline summary
+careerai sources sync [--apply]            merge seeded ATS companies into local.yaml
+careerai sources discover-web [--apply]    discover job portals via web-search agent
+careerai mcp probe                         probe MCP job sources for reachability
+careerai llm probe                         report + ping the resolved LLM backend
+careerai notify test                       fire a test event through notify channels
+careerai cookies refresh &lt;linkedin|naukri&gt; store session cookie in OS keyring
+careerai daemon                            start the cron scheduler (foreground)
+careerai status serve [--port N]           serve this dashboard
+careerai service install [--force]         install systemd user unit
+careerai service status                    systemctl --user status for careerai
+careerai service uninstall                 disable + remove the systemd unit</pre>
+    </details>
+  </div>
+
+  <!-- TAB 7: AI CHAT ASSISTANT -->
   <div id="tab-chat" class="tab-panel">
     <div class="panel-header">
       <h2>🤖 Interactive AI Career & Pipeline Assistant</h2>
@@ -1181,7 +1282,7 @@ function addCustomKeyword() {
 }
 
 function filterExplorerBySource(srcName) {
-  switchTab('tab-explorer');
+  switchTab('explorer');
   var inp = document.getElementById('explorer-search-input');
   if (inp) {
     inp.value = srcName;
@@ -1221,6 +1322,52 @@ function runCliCommand(command, args, btn) {
         if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
       }, 3000);
     });
+}
+
+// Commands-tab runner for cards that need an id argument. `tailor`
+// takes a listing id; render/apply/retry/inspect take an application
+// id. A blank id on `apply` means --all (dry-run still applies).
+function runCliCommandWithId(command, inputEl, btn) {
+  var id = ((inputEl && inputEl.value) || '').trim();
+  var args = {};
+  if (command === 'tailor') {
+    args.listing_id = id;
+  } else {
+    args.application_id = id;
+  }
+  if (!id) {
+    if (command === 'apply') {
+      args = { all: true };
+      delete args.application_id;
+    } else {
+      if (inputEl) {
+        inputEl.focus();
+        inputEl.placeholder = 'Enter an id first';
+      }
+      return;
+    }
+  }
+  runCliCommand(command, args, btn);
+}
+
+function copyCliCommand(argv, btn) {
+  var done = function() {
+    if (!btn) return;
+    var t = btn.innerHTML;
+    btn.innerHTML = '✅ Copied';
+    setTimeout(function() { btn.innerHTML = t; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(argv).then(done, done);
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = argv;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    ta.remove();
+    done();
+  }
 }
 
 function forceShortlist(id) {
@@ -1525,6 +1672,7 @@ function refreshExplorerListings() {
         var sevClass = item.state === 'discovered' ? 'sev-info' : 'sev-warn';
 
         tr.innerHTML = '<td><a href="' + escapeHtml(item.url || '#') + '" target="_blank" class="title-link">' + escapeHtml(titleStr) + '</a></td>' +
+          '<td><code class="listing-id-cell" title="Click to copy" onclick="copyCliCommand(\'' + escapeJsString(item.id) + '\', this)">' + escapeHtml(item.id) + '</code></td>' +
           '<td>' + escapeHtml(companyStr) + '</td>' +
           '<td>' + escapeHtml(locStr) + '</td>' +
           '<td><span class="pill pill-info">' + escapeHtml(item.source || 'unknown') + '</span></td>' +

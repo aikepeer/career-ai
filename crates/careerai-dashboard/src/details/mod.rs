@@ -8,6 +8,7 @@ mod explorer;
 pub use actions::fetch_action_center;
 pub use application::fetch_application_detail;
 pub use config::fetch_config_view;
+pub(crate) use config::{load_core_config, resolve_score_threshold};
 pub use explorer::fetch_discovered_explorer;
 
 use careerai_db::queries as db_queries;

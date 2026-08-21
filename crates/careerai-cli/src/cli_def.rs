@@ -48,7 +48,8 @@ pub(crate) enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Pull new listings from configured sources.
+    /// Pull new listings from configured sources. Prints the id of each
+    /// new listing for use with `careerai tailor <id>`.
     Discover {
         #[arg(long = "source", value_delimiter = ',')]
         sources: Vec<String>,

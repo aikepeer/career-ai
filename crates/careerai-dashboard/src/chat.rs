@@ -77,9 +77,9 @@ pub async fn api_chat_agent(
         let snap = data::snapshot(&state.pool).await.ok();
         let total = snap.as_ref().map_or(0, |s| s.kpi.today_discovered);
         let shortlisted = snap.as_ref().map_or(0, |s| s.kpi.shortlisted_active);
-        format!(
-            "📊 **Pipeline Matching Analysis**\n\nCurrently, your pipeline has ingested **{total} discovered jobs today**, with **{shortlisted} active shortlisted** top matches (Score ≥ 0.70).\n\n**Recommendations to increase high-scoring matches:**\n1. Ensure your `profile/profile.yaml` lists all core skills (C, C++, Rust, Python, RTOS, Yocto).\n2. Lower `min_score_threshold` in `config/local.yaml` if you want a wider net.\n3. Explore the **Discovered & Filtered Explorer** tab to manually force-shortlist any filtered job."
-        )
+        let core_cfg = crate::details::load_core_config();
+        let threshold = crate::details::resolve_score_threshold(core_cfg.as_ref());
+        matching_analysis_reply(total, shortlisted, threshold)
     } else if lower.contains("prep") || lower.contains("interview") || lower.contains("question") {
         "📝 **Interview Preparation Guide**\n\nBased on your candidate stack (Embedded Systems, Linux Kernel, RTOS, Rust, AI/ML):\n\n**Top Technical Focus Areas:**\n1. **Concurrency & Real-time Constraints**: Mutex/Semaphore mechanics, priority inversion, ISRs.\n2. **Memory Management**: Zero-copy buffer sharing, DMA transfers, memory mapping (`mmap`).\n3. **Edge AI & Acceleration**: Quantization (INT8/FP16), TensorRT/ONNX runtime optimization, latency benchmarks.\n\nCheck your **Action & Interview Center** tab for generated company-specific study sheets!".to_string()
     } else {
@@ -94,4 +94,31 @@ pub async fn api_chat_agent(
         })),
     )
         .into_response()
+}
+
+fn matching_analysis_reply(total: u64, shortlisted: u64, threshold: f32) -> String {
+    format!(
+        "📊 **Pipeline Matching Analysis**\n\nCurrently, your pipeline has ingested **{total} discovered jobs today**, with **{shortlisted} active shortlisted** top matches (Score ≥ {threshold}).\n\n**Recommendations to increase high-scoring matches:**\n1. Ensure your `profile/profile.yaml` lists all core skills (C, C++, Rust, Python, RTOS, Yocto).\n2. Lower `match.score_threshold` in `config/local.yaml` if you want a wider net.\n3. Explore the **Discovered & Filtered Explorer** tab to manually force-shortlist any filtered job."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matching_analysis_references_the_effective_threshold_key() {
+        let reply = matching_analysis_reply(3, 2, 0.01);
+        assert!(reply.contains("Score ≥ 0.01"), "reply was: {reply}");
+        assert!(
+            reply.contains("`match.score_threshold`"),
+            "must point at the key the matcher reads; reply was: {reply}"
+        );
+        assert!(
+            !reply.contains("min_score_threshold"),
+            "min_score_threshold is not consumed by the matcher; reply was: {reply}"
+        );
+        assert!(reply.contains("**3 discovered jobs today**"));
+        assert!(reply.contains("**2 active shortlisted**"));
+    }
 }

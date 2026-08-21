@@ -6,6 +6,21 @@ use sqlx::{Row, SqlitePool};
 use crate::error::Result;
 use crate::view::ConfigView;
 
+/// Load the layered core config from the process working directory.
+/// Shared by the config view and the chat assistant so both read the
+/// same on-disk state the CLI uses.
+pub(crate) fn load_core_config() -> Option<careerai_core::config::CoreConfig> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    careerai_core::config::CoreConfig::load(&cwd).ok()
+}
+
+/// The threshold the matcher actually applies (`match.score_threshold`).
+/// Falls back to the historical display default when config is
+/// unavailable, so the API never lies about a configured value.
+pub(crate) fn resolve_score_threshold(core_cfg: Option<&careerai_core::config::CoreConfig>) -> f32 {
+    core_cfg.map_or(0.70, |c| c.matching.score_threshold)
+}
+
 pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
     let rows = sqlx::query(
         "SELECT source, COUNT(*) as n, MAX(created_at) as last_sync FROM listings GROUP BY source",
@@ -21,8 +36,7 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         let last_sync: Option<DateTime<Utc>> = row.try_get("last_sync").ok();
         db_rows.push((name, count_i, last_sync));
     }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let core_cfg = careerai_core::config::CoreConfig::load(&cwd).ok();
+    let core_cfg = load_core_config();
     let sources = crate::profile_handler::build_sources_list(db_rows, core_cfg.as_ref());
 
     let llm_provider = core_cfg.as_ref().map_or_else(
@@ -58,9 +72,10 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
 
     let profile = crate::profile_handler::load_profile_view();
     let keywords = crate::profile_handler::load_keywords_from_config(core_cfg.as_ref());
+    let score_threshold = resolve_score_threshold(core_cfg.as_ref());
 
     Ok(ConfigView {
-        score_threshold: 0.70,
+        score_threshold,
         must_include_skills: vec![
             "Rust".into(),
             "Python".into(),
@@ -79,4 +94,26 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         llm_api_base,
         llm_timeout_seconds,
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn score_threshold_comes_from_loaded_config() {
+        let mut cfg =
+            careerai_core::config::CoreConfig::load(std::path::Path::new("/nonexistent-root"))
+                .expect("embedded defaults load");
+        cfg.matching.score_threshold = 0.42;
+        assert!(
+            (resolve_score_threshold(Some(&cfg)) - 0.42).abs() < 1e-6,
+            "must report the configured threshold, not a hardcoded value"
+        );
+        assert!(
+            (resolve_score_threshold(None) - 0.70).abs() < 1e-6,
+            "fallback display value stays 0.70 when config is unavailable"
+        );
+    }
 }

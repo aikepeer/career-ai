@@ -161,6 +161,14 @@ fn sources_sync_args(args: &CliRunArgs) -> Vec<OsString> {
     out
 }
 
+fn sources_discover_web_args(args: &CliRunArgs) -> Vec<OsString> {
+    let mut out = vec![os("sources"), os("discover-web")];
+    if args.apply == Some(true) {
+        out.push(os("--apply"));
+    }
+    out
+}
+
 fn digest_args(args: &CliRunArgs) -> Vec<OsString> {
     let mut out = vec![os("digest")];
     if let Some(since) = &args.since {
@@ -198,9 +206,13 @@ pub fn build_command_args(req: &CliRunRequest) -> Result<Vec<OsString>, CliRunVa
         WhitelistedCommand::Retry => retry_args(args),
         WhitelistedCommand::ConfigGenerate => Ok(config_generate_args(args)),
         WhitelistedCommand::SourcesSync => Ok(sources_sync_args(args)),
+        WhitelistedCommand::SourcesDiscoverWeb => Ok(sources_discover_web_args(args)),
         WhitelistedCommand::Digest => Ok(digest_args(args)),
         WhitelistedCommand::LlmProbe => Ok(llm_probe_args()),
+        WhitelistedCommand::McpProbe => Ok(vec![os("mcp"), os("probe")]),
         WhitelistedCommand::NotifyTest => Ok(notify_test_args()),
+        WhitelistedCommand::ProfileShow => Ok(vec![os("profile"), os("show")]),
+        WhitelistedCommand::ProfileValidate => Ok(vec![os("profile"), os("validate")]),
     }
 }
 

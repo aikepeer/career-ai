@@ -66,9 +66,13 @@ pub(super) enum WhitelistedCommand {
     Retry,
     ConfigGenerate,
     SourcesSync,
+    SourcesDiscoverWeb,
     Digest,
     LlmProbe,
+    McpProbe,
     NotifyTest,
+    ProfileShow,
+    ProfileValidate,
 }
 
 pub(super) fn parse_command(raw: &str) -> Result<WhitelistedCommand, CliRunValidationError> {
@@ -87,11 +91,15 @@ pub(super) fn parse_command(raw: &str) -> Result<WhitelistedCommand, CliRunValid
         "retry" => WhitelistedCommand::Retry,
         "config generate" => WhitelistedCommand::ConfigGenerate,
         "sources sync" => WhitelistedCommand::SourcesSync,
+        "sources discover-web" => WhitelistedCommand::SourcesDiscoverWeb,
         "digest" => WhitelistedCommand::Digest,
         "llm probe" => WhitelistedCommand::LlmProbe,
+        "mcp probe" => WhitelistedCommand::McpProbe,
         "notify test" => WhitelistedCommand::NotifyTest,
-        "daemon" | "status serve" | "status" | "service" | "service install" | "service status"
-        | "service uninstall" | "cookies refresh" => {
+        "profile show" => WhitelistedCommand::ProfileShow,
+        "profile validate" => WhitelistedCommand::ProfileValidate,
+        "init" | "profile import" | "daemon" | "status serve" | "status" | "service"
+        | "service install" | "service status" | "service uninstall" | "cookies refresh" => {
             return Err(CliRunValidationError::DisallowedCommand(raw.to_string()));
         }
         other => return Err(CliRunValidationError::UnknownCommand(other.to_string())),

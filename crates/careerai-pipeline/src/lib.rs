@@ -238,6 +238,9 @@ pub async fn discover_all(
                 info!(source = name, count = listings.len(), "discovered");
                 report.fetched += listings.len();
                 for raw in listings {
+                    let title = raw.title.clone();
+                    let company = raw.company.clone();
+                    let source = raw.source.clone();
                     let new = NewListing {
                         source: raw.source,
                         external_id: raw.external_id,
@@ -249,7 +252,15 @@ pub async fn discover_all(
                         raw_json: raw.raw_json,
                     };
                     match queries::insert_or_ignore(&pool, &new).await {
-                        Ok((_, true)) => report.new_rows += 1,
+                        Ok((id, true)) => {
+                            report.new_rows += 1;
+                            report.new.push(NewListingRow {
+                                id,
+                                title,
+                                company,
+                                source,
+                            });
+                        }
                         Ok((_, false)) => report.duplicates += 1,
                         Err(e) => {
                             warn!(error = %e, "persist failed");
@@ -286,6 +297,9 @@ pub async fn discover_one(root: &Path, cfg: &CoreConfig, source: &str) -> Result
             info!(source = name, count = listings.len(), "discovered");
             report.fetched += listings.len();
             for raw in listings {
+                let title = raw.title.clone();
+                let company = raw.company.clone();
+                let source = raw.source.clone();
                 let new = NewListing {
                     source: raw.source,
                     external_id: raw.external_id,
@@ -297,7 +311,15 @@ pub async fn discover_one(root: &Path, cfg: &CoreConfig, source: &str) -> Result
                     raw_json: raw.raw_json,
                 };
                 match queries::insert_or_ignore(&pool, &new).await {
-                    Ok((_, true)) => report.new_rows += 1,
+                    Ok((id, true)) => {
+                        report.new_rows += 1;
+                        report.new.push(NewListingRow {
+                            id,
+                            title,
+                            company,
+                            source,
+                        });
+                    }
                     Ok((_, false)) => report.duplicates += 1,
                     Err(e) => {
                         warn!(error = %e, "persist failed");
@@ -320,6 +342,19 @@ pub struct DiscoveryReport {
     pub new_rows: usize,
     pub duplicates: usize,
     pub errors: usize,
+    /// Newly inserted listings (id + title/company/source projection).
+    /// Lets the CLI print ids so the operator can run
+    /// `careerai tailor <id>` straight after discovery.
+    pub new: Vec<NewListingRow>,
+}
+
+/// Projection of a listing inserted by `discover_all` / `discover_one`.
+#[derive(Debug, Default, Clone)]
+pub struct NewListingRow {
+    pub id: String,
+    pub title: String,
+    pub company: String,
+    pub source: String,
 }
 
 /// Per-source activity counts within the digest window.
