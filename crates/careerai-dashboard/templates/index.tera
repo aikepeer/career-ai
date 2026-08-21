@@ -401,10 +401,22 @@
           </div>
           <div class="form-actions">
             <button type="submit" class="btn-primary">💾 Save LLM Settings</button>
-            <button type="button" class="btn-primary" onclick="generateConfig()">⚙️ Generate Config from Profile</button>
             <span id="save-status-msg" class="save-status"></span>
           </div>
         </form>
+      </div>
+
+      <!-- Generate Config from Profile — RIGHT of Configure LLM Backend -->
+      <div class="config-card config-gen-card">
+        <div class="config-card-header">
+          <h3>⚙️ Generate Config from Profile</h3>
+          <span class="pill pill-info">Auto Setup</span>
+        </div>
+        <p class="card-subtitle" style="margin-bottom:12px; color:var(--text-secondary); font-size:13px;">Derive discovery keywords, target roles, and job sources from <code>profile/profile.yaml</code> — review the merged <code>config/local.yaml</code> before applying.</p>
+        <div class="form-actions">
+          <button type="button" class="btn-primary" onclick="generateConfig()">⚙️ Generate Config from Profile</button>
+          <span id="config-gen-status-msg" class="save-status"></span>
+        </div>
 
         <!-- Config generation preview + apply (two-step, non-destructive) -->
         <div id="config-diff-panel" style="display:none; margin-top:16px;">
@@ -959,12 +971,19 @@ function closeAppModal() {
   document.getElementById('app-modal').classList.remove('active');
 }
 
+// Status element for the "Generate Config from Profile" card (right of
+// the LLM backend form). Falls back to the form's status element if the
+// card is missing, so older cached pages still get feedback.
+function configGenStatus() {
+  return document.getElementById('config-gen-status-msg') || document.getElementById('save-status-msg');
+}
+
 // The "Generate Config from Profile" button calls this endpoint, which
 // derives discovery keywords/skills from profile/profile.yaml and writes
 // config/local.yaml. This function was referenced by the template but
 // never defined, so the button silently did nothing.
 function generateConfig() {
-  var msgEl = document.getElementById('save-status-msg');
+  var msgEl = configGenStatus();
   if (msgEl) msgEl.innerText = 'Generating config preview...';
   fetch('/api/v1/config/generate', { method: 'POST' })
     .then(function(r) { return r.json(); })
@@ -984,7 +1003,7 @@ function generateConfig() {
 }
 
 function applyGeneratedConfig() {
-  var msgEl = document.getElementById('save-status-msg');
+  var msgEl = configGenStatus();
   if (msgEl) msgEl.innerText = 'Applying merged config...';
   fetch('/api/v1/config/apply', { method: 'POST' })
     .then(function(r) { return r.json(); })
@@ -1004,7 +1023,7 @@ function applyGeneratedConfig() {
 
 function dismissConfigPreview() {
   document.getElementById('config-diff-panel').style.display = 'none';
-  var msgEl = document.getElementById('save-status-msg');
+  var msgEl = configGenStatus();
   if (msgEl) msgEl.innerText = '';
 }
 

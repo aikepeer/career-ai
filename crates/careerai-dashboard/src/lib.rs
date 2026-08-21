@@ -274,6 +274,51 @@ mod tests {
     }
 
     #[test]
+    fn index_template_places_config_generate_beside_llm_backend() {
+        // "Generate Config from Profile" must render as its own card to
+        // the right of the "Configure LLM Backend & API" form, not as a
+        // button buried inside that form. The diff-preview panel travels
+        // with the button so preview+apply stay on the same card.
+        let form_start = INDEX_TERA
+            .find(r#"<form id="llm-config-form""#)
+            .expect("llm config form exists");
+        let form_end = INDEX_TERA[form_start..]
+            .find("</form>")
+            .expect("llm config form closes")
+            + form_start;
+        let form_body = &INDEX_TERA[form_start..form_end];
+        assert!(
+            !form_body.contains("Generate Config from Profile"),
+            "generate button must not live inside the LLM backend form"
+        );
+        assert!(
+            form_body.contains("Save LLM Settings"),
+            "save button stays in the LLM backend form"
+        );
+
+        let card_start = INDEX_TERA
+            .find(r#"<div class="config-card config-gen-card">"#)
+            .expect("generate-config card exists");
+        let card = &INDEX_TERA[card_start..];
+        assert!(
+            card.contains("Generate Config from Profile"),
+            "right-hand card carries the generate heading + button"
+        );
+        assert!(
+            card.contains("config-gen-status-msg"),
+            "right-hand card has its own status element"
+        );
+        assert!(
+            card.contains("config-diff-panel"),
+            "diff preview panel lives on the generate card"
+        );
+        assert!(
+            card.contains("applyGeneratedConfig()"),
+            "apply action stays reachable from the generate card"
+        );
+    }
+
+    #[test]
     fn validate_bind_rejects_non_loopback_without_opt_in() {
         let public = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
         assert!(matches!(
