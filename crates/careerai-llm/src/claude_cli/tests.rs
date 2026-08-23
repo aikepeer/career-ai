@@ -5,12 +5,7 @@ use std::path::PathBuf;
 use super::*;
 use crate::error::LlmError;
 
-/// Serialize tests that mutate `CAREERAI_CLAUDE_BIN` /
-/// `CAREERAI_SKIP_CLI_PROBE`. cargo runs tests in parallel by
-/// default; without this lock, env-var flips race across threads
-/// and produce intermittent failures (the var leaking from one
-/// test's set into another's read).
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+use crate::ENV_LOCK;
 
 mod stub_binary_tests;
 

@@ -59,6 +59,9 @@ pub use crate::rig::{Provider, RigLlm};
 pub use crate::trait_def::Llm;
 pub use crate::types::{LlmRequest, LlmResponse};
 
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // Re-export the BackendChoice from core so callers don't need a separate
 // import path.
 pub use careerai_core::config::BackendChoice;
