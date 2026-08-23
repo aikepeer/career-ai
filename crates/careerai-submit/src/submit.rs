@@ -378,7 +378,7 @@ fn rate_policy_for(rates: &RatesConfig, source: &str) -> RatePolicy {
 }
 
 fn load_profile(root: &Path) -> Result<Profile> {
-    let path = root.join("profile").join("profile.yaml");
+    let path = careerai_core::paths::profile_path(root);
     let text = std::fs::read_to_string(&path).map_err(SubmitError::Io)?;
     Profile::from_yaml(&text).map_err(|e| {
         SubmitError::Io(std::io::Error::new(

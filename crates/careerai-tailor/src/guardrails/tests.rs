@@ -67,6 +67,43 @@ fn accepts_common_english_adjective_lead() {
 }
 
 #[test]
+fn accepts_sentence_start_capitalization_of_bullet_word() {
+    // A reword may capitalize a word that appears (lowercase) in the
+    // original bullet — "curated" → "Curated" at sentence start.
+    // Regression: live tailoring rejected a faithful reword because the
+    // original-bullet carve-out only covered already-Capitalized runs.
+    let p = fixture();
+    forbid_invented_entities(
+        "Curated signed Yocto images for TI AM665x platforms.",
+        "built HMI tooling; curated signed Yocto images for TI AM665x",
+        &p,
+        "experience[1].bullets[0]",
+    )
+    .unwrap();
+}
+
+#[test]
+fn still_rejects_invented_noun_even_when_bullet_word_capitalized() {
+    // Control for `accepts_sentence_start_capitalization_of_bullet_word`:
+    // capitalizing a word from the bullet is fine, but a genuinely new
+    // Capitalized noun must still be rejected.
+    let p = fixture();
+    let err = forbid_invented_entities(
+        "Curated signed Yocto images for AcmeCorp cloud.",
+        "built HMI tooling; curated signed Yocto images for TI AM665x",
+        &p,
+        "experience[1].bullets[0]",
+    )
+    .unwrap_err();
+    match err {
+        TailorError::InventedContent {
+            offending_token, ..
+        } => assert_eq!(offending_token, "AcmeCorp"),
+        other => panic!("expected InventedContent, got {other:?}"),
+    }
+}
+
+#[test]
 fn rejects_employer_not_in_profile() {
     let p = fixture();
     let err = forbid_invented_entities("Shipped at Google.", "", &p, "x").unwrap_err();

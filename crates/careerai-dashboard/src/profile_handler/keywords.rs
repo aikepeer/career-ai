@@ -22,17 +22,7 @@ pub async fn api_config_keywords(Json(payload): Json<KeywordToggleRequest>) -> i
             .into_response();
     }
 
-    let cwd = match std::env::current_dir() {
-        Ok(d) => d,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("cwd error: {e}") })),
-            )
-                .into_response();
-        }
-    };
-
+    let cwd = careerai_core::paths::resolve_root_env();
     let config_path = cwd.join("config").join("local.yaml");
     match update_keywords_in_config(&config_path, &payload.action, kw) {
         Ok(modified) => (

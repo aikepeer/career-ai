@@ -11,9 +11,8 @@ use crate::ProfileCommand;
 /// Default location for the canonical profile file, resolved against the
 /// app root (`CAREERAI_ROOT` → CWD → home fallback): `<root>/profile/profile.yaml`.
 pub(crate) fn profile_yaml_path() -> PathBuf {
-    careerai_core::paths::resolve_root_env()
-        .join("profile")
-        .join("profile.yaml")
+    let root = careerai_core::paths::resolve_root_env();
+    careerai_core::paths::profile_path(&root)
 }
 
 pub fn run(
@@ -56,11 +55,17 @@ fn import(
         paths.to_vec()
     };
     let out = profile_yaml_path();
-    if out.exists() && !force {
-        anyhow::bail!(
-            "{} already exists; pass --force to overwrite",
-            out.display(),
-        );
+    if out.exists() {
+        if !force {
+            anyhow::bail!(
+                "{} already exists; pass --force to overwrite",
+                out.display(),
+            );
+        }
+        let bak = out.with_file_name("profile.yaml.bak");
+        std::fs::copy(&out, &bak)
+            .with_context(|| format!("backup {} to {}", out.display(), bak.display()))?;
+        println!("backed up existing profile to {}", bak.display());
     }
     let refs: Vec<&Path> = sources.iter().map(PathBuf::as_path).collect();
 
@@ -329,5 +334,11 @@ mod tests {
         touch(&dir, "electricity-bill.pdf");
         let err = default_resume_sources(home.path()).unwrap_err();
         assert!(format!("{err:#}").contains("Documents/personal"));
+    }
+
+    #[test]
+    fn profile_yaml_path_resolves_profile_yaml_under_root() {
+        let p = profile_yaml_path();
+        assert!(p.ends_with("profile/profile.yaml"));
     }
 }

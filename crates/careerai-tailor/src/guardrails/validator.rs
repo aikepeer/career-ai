@@ -89,6 +89,20 @@ pub(crate) fn forbid_invented_entities_with(
         }
     }
 
+    // Extend the carve-out to ANY word of the original bullet, not just
+    // its already-Capitalized runs. A reword may legitimately capitalize
+    // an existing word at sentence start ("curated" → "Curated"), and
+    // the Capitalized-run scan would miss the lowercase form entirely.
+    // Still strictly per-bullet: a token that lives only in another
+    // bullet or is invented outright keeps failing below.
+    let mut original_words: HashSet<String> = HashSet::new();
+    for w in original_bullet.split(|c: char| !c.is_alphanumeric()) {
+        let lower = w.to_lowercase();
+        if lower.len() >= 3 {
+            original_words.insert(strip_for_match(&lower));
+        }
+    }
+
     // SAFETY: every substantive token in a span must clear the
     // intersection set. The earlier loop short-circuited on the first
     // match, which let an invented noun ride along inside a span where
@@ -111,6 +125,7 @@ pub(crate) fn forbid_invented_entities_with(
                 || sets.skill_tokens.contains(&lower)
                 || sets.summary_proper_nouns.contains(&stripped)
                 || original_proper_nouns.contains(&stripped)
+                || original_words.contains(&stripped)
                 || COMMON_ENGLISH_CAPS.contains(&stripped.as_str());
             if !cleared {
                 return Err(TailorError::InventedContent {

@@ -5,14 +5,18 @@ use careerai_profile::schema::Profile;
 
 pub fn run_generate(force: bool) -> Result<()> {
     let cwd = careerai_core::paths::resolve_root_env();
-    let profile_path = cwd.join("profile").join("profile.yaml");
+    let profile_path = careerai_core::paths::profile_path(&cwd);
     let local_cfg_path = cwd.join("config").join("local.yaml");
 
-    if local_cfg_path.exists() && !force {
-        anyhow::bail!(
-            "{} already exists; pass --force to overwrite",
-            local_cfg_path.display()
-        );
+    if local_cfg_path.exists() {
+        if !force {
+            anyhow::bail!(
+                "{} already exists; pass --force to overwrite",
+                local_cfg_path.display()
+            );
+        }
+        let bak = local_cfg_path.with_file_name("local.yaml.bak");
+        let _ = std::fs::copy(&local_cfg_path, &bak);
     }
 
     let profile = if profile_path.exists() {

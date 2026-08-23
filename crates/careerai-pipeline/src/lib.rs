@@ -424,7 +424,7 @@ pub async fn shortlist_show(root: &Path, limit: i64) -> Result<Vec<careerai_db::
 }
 
 pub(crate) fn load_profile(root: &Path) -> Result<Profile> {
-    let path = root.join("profile").join("profile.yaml");
+    let path = careerai_core::paths::profile_path(root);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     Profile::from_yaml(&text).context("parse profile yaml")

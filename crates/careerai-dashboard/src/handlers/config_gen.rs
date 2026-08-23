@@ -11,7 +11,7 @@ use crate::AppState;
 /// Returns a `BAD_REQUEST`-shaped error string on unparseable profile data
 /// so callers never overwrite `config/local.yaml` from a broken profile.
 fn generated_config_for(cwd: &std::path::Path) -> Result<String, String> {
-    let profile_path = cwd.join("profile").join("profile.yaml");
+    let profile_path = careerai_core::paths::profile_path(cwd);
     let profile = if profile_path.exists() {
         let raw = std::fs::read_to_string(&profile_path)
             .map_err(|e| format!("read {} failed: {e}", profile_path.display()))?;

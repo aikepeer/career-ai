@@ -43,6 +43,21 @@ pub fn resolve_root_env() -> PathBuf {
     resolve_root(&cwd, home.as_deref(), env_root.as_deref())
 }
 
+/// Return the canonical path to `profile/profile.yaml` for a given root directory.
+pub fn profile_path(root: &Path) -> PathBuf {
+    root.join("profile").join("profile.yaml")
+}
+
+/// Return the canonical path to `profile/profile.draft.yaml` for a given root directory.
+pub fn profile_draft_path(root: &Path) -> PathBuf {
+    root.join("profile").join("profile.draft.yaml")
+}
+
+/// Return the canonical path to `profile/` directory for a given root directory.
+pub fn profile_dir(root: &Path) -> PathBuf {
+    root.join("profile")
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -113,5 +128,22 @@ mod tests {
     fn missing_home_falls_back_to_cwd() {
         let cwd = tempfile::tempdir().unwrap().path().to_path_buf();
         assert_eq!(resolve_root(&cwd, None, None), cwd);
+    }
+
+    #[test]
+    fn profile_helpers_derive_canonical_paths() {
+        let root = Path::new("/tmp/test-project");
+        assert_eq!(
+            profile_path(root),
+            PathBuf::from("/tmp/test-project/profile/profile.yaml")
+        );
+        assert_eq!(
+            profile_draft_path(root),
+            PathBuf::from("/tmp/test-project/profile/profile.draft.yaml")
+        );
+        assert_eq!(
+            profile_dir(root),
+            PathBuf::from("/tmp/test-project/profile")
+        );
     }
 }

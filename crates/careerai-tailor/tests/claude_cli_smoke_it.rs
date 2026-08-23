@@ -203,7 +203,7 @@ __P__
         //    `Backend` implements `Llm`, so it satisfies the trait
         //    bound on the function.
         let profile = fixture_profile();
-        let outcome = tailor_for_listing(&pool, &backend, &listing_id, &profile, &cfg)
+        let outcome = tailor_for_listing(&pool, &backend, &listing_id, &profile, &cfg, dir.path())
             .await
             .expect("tailor against stub claude-cli");
 

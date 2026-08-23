@@ -19,7 +19,7 @@ use super::CareerAiServer;
 
 impl CareerAiServer {
     pub(crate) async fn do_profile_status(&self) -> Result<ProfileStatusResult, McpServerError> {
-        let path = self.root().join("profile").join("profile.yaml");
+        let path = careerai_core::paths::profile_path(self.root());
         let path_str = path.display().to_string();
 
         // Distinguish "file truly absent" (a normal, expected state on a

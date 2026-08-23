@@ -8,7 +8,7 @@ inventing experience.
 
 | Owns | Never does |
 |---|---|
-| `tailor_for_listing(listing, cfg, profile, llm)` entry point | DB queries |
+| `tailor_for_listing(pool, llm, listing_id, profile, cfg, base_dir)` entry point | DB queries |
 | `Diff` schema (`Reword`, `Reorder`, `EmphasizeBullets`, `EmphasizeProjects`) | Rendering to DOCX/PDF (`careerai-render` does that) |
 | `validate_diff` — 9 rules including the constrained-grammar gate | LLM transport (uses `&dyn Llm` from `careerai-llm`) |
 | `forbid_invented_entities[_with]` — proper-noun / number / year / employer guardrails | Cron / scheduling |

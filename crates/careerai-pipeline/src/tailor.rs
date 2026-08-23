@@ -103,15 +103,22 @@ pub async fn tailor_one(
             let cache = Arc::new(careerai_llm::Cache::new(cache_root));
             match careerai_llm::Backend::resolve(cfg.llm.backend.clone(), &cfg.llm, cache).await {
                 Ok(backend) => {
-                    let outcome =
-                        tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm)
-                            .await
-                            .context("tailor_for_listing")?;
-                    return Ok(TailoredOutcome {
-                        application_id: outcome.application_id,
-                        listing_title: listing.title,
-                        company: listing.company,
-                    });
+                    match tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm, root).await {
+                        Ok(outcome) => {
+                            return Ok(TailoredOutcome {
+                                application_id: outcome.application_id,
+                                listing_title: listing.title,
+                                company: listing.company,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target = "tailor",
+                                error = %format_args!("{e:#}"),
+                                "live tailoring failed; falling back to MockLlm fixtures"
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -136,7 +143,7 @@ pub async fn tailor_one(
     let llm = MockLlm::from_dir(&fixtures)
         .with_context(|| format!("load llm fixtures from {}", fixtures.display()))?;
 
-    let outcome = tailor_for_listing(&pool, &llm, &listing.id, &profile, &cfg.llm)
+    let outcome = tailor_for_listing(&pool, &llm, &listing.id, &profile, &cfg.llm, root)
         .await
         .context("tailor_for_listing")?;
 

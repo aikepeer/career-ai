@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
 
     let root = match cli.root {
         Some(p) => p,
-        None => std::env::current_dir().context("current_dir")?,
+        None => careerai_core::paths::resolve_root_env(),
     };
     tracing::info!(root = %root.display(), "starting careerai-mcp on stdio");
 

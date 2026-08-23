@@ -71,25 +71,32 @@ async fn load_profile_for_edit() -> Result<Profile, String> {
 }
 
 /// Persist a full [`Profile`] to `profile/profile.yaml` atomically (write a
-/// temp file and rename it), so experience / education / projects and any
-/// other fields not surfaced by the dashboard form are preserved on save.
+/// temp file and rename it), preserving existing files as backup before overwriting.
 pub async fn save_profile_to_disk(profile: &Profile) -> Result<PathBuf, String> {
-    let path = get_profile_file_path();
+    save_profile_to_disk_at(profile, &get_profile_file_path()).await
+}
+
+/// Write a profile YAML document atomically to an arbitrary path, creating
+/// parent directory and backing up any existing target file first.
+pub async fn save_profile_to_disk_at(profile: &Profile, path: &Path) -> Result<PathBuf, String> {
     let dir = path
         .parent()
         .ok_or_else(|| "profile path has no parent directory".to_string())?;
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| format!("create profile dir: {e}"))?;
+    if path.exists() {
+        backup_file(path)?;
+    }
     let yaml = serde_yaml::to_string(profile).map_err(|e| format!("serialize profile: {e}"))?;
-    let tmp = unique_tmp_path(&path);
+    let tmp = unique_tmp_path(path);
     tokio::fs::write(&tmp, &yaml)
         .await
         .map_err(|e| format!("write profile: {e}"))?;
-    tokio::fs::rename(&tmp, &path)
+    tokio::fs::rename(&tmp, path)
         .await
         .map_err(|e| format!("commit profile: {e}"))?;
-    Ok(path)
+    Ok(path.to_path_buf())
 }
 
 /// Persist an imported profile to a *draft* file instead of overwriting
@@ -140,25 +147,24 @@ fn confirm_profile_import_at(draft: &Path, target: &Path) -> Result<PathBuf, Str
 }
 
 pub fn get_profile_file_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("profile")
-        .join("profile.yaml")
+    let root = careerai_core::paths::resolve_root_env();
+    careerai_core::paths::profile_path(&root)
 }
 
 pub fn get_profile_draft_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("profile")
-        .join("profile.draft.yaml")
+    let root = careerai_core::paths::resolve_root_env();
+    careerai_core::paths::profile_draft_path(&root)
 }
 
 pub fn load_profile_view() -> Option<crate::view::ProfileView> {
-    let path = get_profile_file_path();
+    load_profile_view_at(&get_profile_file_path())
+}
+
+pub fn load_profile_view_at(path: &Path) -> Option<crate::view::ProfileView> {
     if !path.exists() {
         return None;
     }
-    let raw = std::fs::read_to_string(&path).ok()?;
+    let raw = std::fs::read_to_string(path).ok()?;
     let p = serde_yaml::from_str::<careerai_profile::schema::Profile>(&raw).ok()?;
     let target_roles: Vec<String> = if p.summary.starts_with("Target Roles:") {
         p.summary["Target Roles:".len()..]
@@ -246,5 +252,56 @@ mod tests {
         let parsed: Profile =
             serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed.personal.name, "Alice");
+    }
+
+    #[tokio::test]
+    async fn save_profile_to_disk_at_backs_up_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("profile.yaml");
+        std::fs::write(&target, "personal:\n  name: OldName\n").unwrap();
+
+        let mut profile = Profile::default();
+        profile.personal.name = "NewName".to_string();
+
+        let written = save_profile_to_disk_at(&profile, &target).await.unwrap();
+        assert_eq!(written, target);
+
+        let bak = tmp.path().join("profile.yaml.bak");
+        assert!(bak.exists(), "backup must exist");
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            "personal:\n  name: OldName\n"
+        );
+
+        let current = std::fs::read_to_string(&target).unwrap();
+        assert!(current.contains("NewName"));
+    }
+
+    #[test]
+    fn load_profile_view_at_parses_existing_profile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("profile.yaml");
+        let yaml = r#"
+personal:
+  name: Kamal Pandey
+  email: pandeykamal13526@gmail.com
+  phone: "+91 7767984205"
+  location: Gurugram, Haryana, India
+summary: "Target Roles: Senior Embedded Lead, Rust SWE"
+skills:
+  languages:
+    - Rust
+    - C++
+  frameworks:
+    - Yocto
+  tools:
+    - OSTree
+"#;
+        std::fs::write(&target, yaml).unwrap();
+        let view = load_profile_view_at(&target).expect("profile view loaded");
+        assert_eq!(view.name, "Kamal Pandey");
+        assert_eq!(view.email, "pandeykamal13526@gmail.com");
+        assert_eq!(view.target_roles, vec!["Senior Embedded Lead", "Rust SWE"]);
+        assert_eq!(view.languages, vec!["Rust", "C++"]);
     }
 }

@@ -48,6 +48,22 @@ mod tests {
 
     const CANNED_COVER_LETTER: &str = "Dear Hiring Team,\n\nI am applying.\n\nRegards.";
 
+    /// A diff that invents an employer ("AcmeCorp") — the safety
+    /// validator must reject it, and the rejected response must not be
+    /// cached. All bullets are covered (as the schema's coverage rule
+    /// requires); only the reword carries the invented noun.
+    const INVALID_TAILOR_JSON: &str = r#"{
+        "prompt_version":"tailor.v1",
+        "summary":{"op":"keep"},
+        "ops":[
+            {"path":"experience[0].bullets[0]","op":"reword","new_text":"Built scalable systems at AcmeCorp."},
+            {"path":"experience[0].bullets[1]","op":"keep"},
+            {"path":"experience[1].bullets[0]","op":"keep"},
+            {"path":"projects[0].bullets[0]","op":"keep"}
+        ],
+        "cover_letter":"I build things."
+    }"#;
+
     #[tokio::test]
     async fn tailor_for_listing_produces_expected_resume_view() {
         // Set cache_dir to an ephemeral path so puts don't hit real disk.
@@ -87,7 +103,7 @@ mod tests {
         llm.insert_fixture("tailor.v1+cover_letter", CANNED_COVER_LETTER);
 
         let profile = fixture_profile();
-        let outcome = tailor_for_listing(&pool, &llm, &listing_id, &profile, &cfg)
+        let outcome = tailor_for_listing(&pool, &llm, &listing_id, &profile, &cfg, tmp.path())
             .await
             .unwrap();
 
@@ -106,5 +122,112 @@ mod tests {
         assert_eq!(listing.state, "tailored");
 
         assert_eq!(outcome.cover_letter.body, CANNED_COVER_LETTER);
+    }
+
+    #[tokio::test]
+    async fn relative_cache_dir_resolves_against_base_dir() {
+        // Regression: `default.yaml` ships `cache_dir: "data/cache/llm"`
+        // (relative). The response cache must land under `base_dir` (the
+        // resolved project root), not the process CWD — a CWD-relative
+        // resolution breaks runs started from `$HOME` with EACCES when a
+        // root-owned `~/data` phantom dir exists.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = fixture_cfg();
+        cfg.cache_dir = "data/cache/llm".into();
+
+        let pool = pool_in_memory().await.unwrap();
+        let new = NewListing {
+            source: "fixture".into(),
+            external_id: "rt-2".into(),
+            title: "Senior Rust Engineer".into(),
+            company: "Beta Corp".into(),
+            location: Some("Remote".into()),
+            url: "https://example.com/rt-2".into(),
+            description: "Build and ship a real-time LLM system.".into(),
+            raw_json: None,
+        };
+        let (listing_id, _) = queries::insert_or_ignore(&pool, &new).await.unwrap();
+        queries::transition(
+            &pool,
+            &listing_id,
+            careerai_core::state::ListingState::Shortlisted,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let mut llm = MockLlm::new();
+        llm.insert_fixture("tailor.v1", CANNED_TAILOR_JSON);
+        llm.insert_fixture("tailor.v1+cover_letter", CANNED_COVER_LETTER);
+
+        let profile = fixture_profile();
+        let outcome = tailor_for_listing(&pool, &llm, &listing_id, &profile, &cfg, tmp.path())
+            .await
+            .unwrap();
+
+        let cache_dir = tmp.path().join("data/cache/llm");
+        let json_entries = std::fs::read_dir(&cache_dir)
+            .unwrap_or_else(|e| panic!("no cache dir under base_dir: {e}"))
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".json"))
+            .count();
+        assert!(
+            json_entries >= 1,
+            "expected a cached LLM response under {}",
+            cache_dir.display()
+        );
+        assert_eq!(outcome.cover_letter.body, CANNED_COVER_LETTER);
+    }
+
+    #[tokio::test]
+    async fn validator_rejected_diff_is_not_cached() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cfg = fixture_cfg();
+        cfg.cache_dir = tmp.path().to_string_lossy().into_owned();
+
+        let pool = pool_in_memory().await.unwrap();
+        let new = NewListing {
+            source: "fixture".into(),
+            external_id: "rt-3".into(),
+            title: "Senior Rust Engineer".into(),
+            company: "Beta Corp".into(),
+            location: Some("Remote".into()),
+            url: "https://example.com/rt-3".into(),
+            description: "Build and ship a real-time LLM system.".into(),
+            raw_json: None,
+        };
+        let (listing_id, _) = queries::insert_or_ignore(&pool, &new).await.unwrap();
+        queries::transition(
+            &pool,
+            &listing_id,
+            careerai_core::state::ListingState::Shortlisted,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let mut llm = MockLlm::new();
+        llm.insert_fixture("tailor.v1", INVALID_TAILOR_JSON);
+        llm.insert_fixture("tailor.v1+cover_letter", CANNED_COVER_LETTER);
+
+        let profile = fixture_profile();
+        let err = tailor_for_listing(&pool, &llm, &listing_id, &profile, &cfg, tmp.path())
+            .await
+            .expect_err("invented employer must fail validation");
+        assert!(
+            matches!(
+                err,
+                careerai_tailor::error::TailorError::InventedContent { .. }
+            ),
+            "got {err:?}"
+        );
+
+        // The rejected response must not land in the cache: caching it
+        // would replay the same deterministic failure on every later run.
+        let entries = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .count();
+        assert_eq!(entries, 0, "validator-rejected diff must not be cached");
     }
 }

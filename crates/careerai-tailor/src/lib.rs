@@ -16,7 +16,7 @@ pub mod model;
 pub mod prompt;
 pub mod schema;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use careerai_core::config::LlmConfig;
 use careerai_db::models::NewApplication;
@@ -40,12 +40,17 @@ pub use crate::model::{CoverLetter, ExperienceView, ProjectView, ResumeView, Tai
 /// See `TailorError`. `InventedContent` / `Schema` indicate the LLM's
 /// output violated the safety invariant; `Db` / `Llm` indicate an
 /// infrastructure failure.
+///
+/// `base_dir` is the resolved project root: relative `cache_dir` values
+/// (e.g. `default.yaml`'s `"data/cache/llm"`) are anchored to it so the
+/// response cache is CWD-independent.
 pub async fn tailor_for_listing(
     pool: &SqlitePool,
     llm: &(dyn Llm + Send + Sync),
     listing_id: &str,
     profile: &Profile,
     cfg: &LlmConfig,
+    base_dir: &Path,
 ) -> Result<TailorOutcome> {
     // 1) Fetch the listing.
     let listing = queries::find_by_id(pool, listing_id).await?;
@@ -55,16 +60,21 @@ pub async fn tailor_for_listing(
 
     // 3) Cache-wrapped LLM call.
     let cache_root = if cfg.cache_dir.is_empty() {
-        PathBuf::from("data/cache/llm")
+        base_dir.join("data").join("cache").join("llm")
     } else {
-        PathBuf::from(&cfg.cache_dir)
+        let p = PathBuf::from(&cfg.cache_dir);
+        if p.is_absolute() {
+            p
+        } else {
+            base_dir.join(p)
+        }
     };
     let cache = Cache::new(cache_root);
     let profile_hash = canonical_profile_hash(profile);
     let jd = jd_hash(&listing.title, &listing.company, &listing.description);
     let key = compose_key(&req.prompt_version, &profile_hash, &jd, &req.model);
 
-    let resp = if let Some(hit) = cache.get(&key).await? {
+    let (resp, from_cache) = if let Some(hit) = cache.get(&key).await? {
         info!(
             target: "tailor",
             cache = "hit",
@@ -72,7 +82,7 @@ pub async fn tailor_for_listing(
             listing_id = %listing.id,
             "tailor cache hit"
         );
-        hit
+        (hit, true)
     } else {
         info!(
             target: "tailor",
@@ -82,14 +92,20 @@ pub async fn tailor_for_listing(
             "tailor calling llm"
         );
         let fresh = llm.complete(&req).await?;
-        cache.put(&key, &fresh).await?;
-        fresh
+        (fresh, false)
     };
 
     // 4) Parse + validate the diff; apply it to produce the ResumeView.
     let doc = schema::parse_and_validate(&resp.text, profile)?;
     let diff_raw_json = resp.text.clone();
     let resume_view = diff::apply(doc, profile.clone())?;
+
+    // Cache the response only after it survives validation: caching a
+    // validator-rejected diff would replay the same failure on every
+    // later run (same key → same invalid body).
+    if !from_cache {
+        cache.put(&key, &resp).await?;
+    }
 
     // 5) Draft the cover letter (separate cache scope with its own
     //    prompt_version suffix in `cover_letter::draft`). Pass the
