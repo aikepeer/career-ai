@@ -237,6 +237,7 @@ fn accepts_proper_noun_from_same_bullet_original() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     forbid_invented_entities(
@@ -273,6 +274,7 @@ fn rejects_proper_noun_only_in_other_bullet() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     let err = forbid_invented_entities(
@@ -314,6 +316,7 @@ fn accepts_proper_noun_from_summary() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     forbid_invented_entities(
@@ -350,6 +353,7 @@ fn accepts_punctuated_employer_name_from_company_field() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     forbid_invented_entities(

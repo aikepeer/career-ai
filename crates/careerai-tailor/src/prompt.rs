@@ -196,6 +196,7 @@ mod tests {
             }],
             education: vec![],
             projects: vec![],
+            ..Default::default()
         }
     }
 

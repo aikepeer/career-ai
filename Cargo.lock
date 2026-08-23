@@ -430,6 +430,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "which 7.0.3",
 ]
 
 [[package]]

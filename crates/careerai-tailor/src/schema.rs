@@ -106,6 +106,7 @@ mod tests {
                 url: String::new(),
                 bullets: vec!["pb0".into()],
             }],
+            ..Default::default()
         }
     }
 
