@@ -120,10 +120,21 @@ pub struct ProfileView {
     pub email: String,
     pub phone: String,
     pub location: String,
+    pub github: String,
+    pub linkedin: String,
+    pub portfolio: String,
+    pub summary: String,
     pub target_roles: Vec<String>,
     pub languages: Vec<String>,
+    pub platforms: Vec<String>,
     pub frameworks: Vec<String>,
+    pub devops: Vec<String>,
     pub tools: Vec<String>,
+    pub debugging: Vec<String>,
+    pub protocols: Vec<String>,
+    pub experience_count: usize,
+    pub education_count: usize,
+    pub raw_yaml: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

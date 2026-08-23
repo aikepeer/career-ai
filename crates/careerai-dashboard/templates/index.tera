@@ -129,6 +129,34 @@
       </ol>
     </section>
 
+    <!-- VISUAL APPLICATION FLOW STEPPER -->
+    <div class="pipeline-stepper">
+      <div class="stepper-step" onclick="filterFunnelStage('discovered', this)">
+        <div class="step-badge accent-cyan">1</div>
+        <div class="step-info"><span class="step-name">1. Discovery</span><span class="step-count">Ingested Feeds</span></div>
+      </div>
+      <div class="stepper-arrow">➔</div>
+      <div class="stepper-step" onclick="filterFunnelStage('shortlisted', this)">
+        <div class="step-badge accent-amber">2</div>
+        <div class="step-info"><span class="step-name">2. Shortlisted</span><span class="step-count">{{ view.state_counts.shortlisted }} active</span></div>
+      </div>
+      <div class="stepper-arrow">➔</div>
+      <div class="stepper-step" onclick="filterFunnelStage('tailored', this)">
+        <div class="step-badge accent-indigo">3</div>
+        <div class="step-info"><span class="step-name">3. LLM Tailored</span><span class="step-count">{{ view.state_counts.tailored }} drafted</span></div>
+      </div>
+      <div class="stepper-arrow">➔</div>
+      <div class="stepper-step" onclick="filterFunnelStage('rendered', this)">
+        <div class="step-badge accent-blue">4</div>
+        <div class="step-info"><span class="step-name">4. Rendered</span><span class="step-count">{{ view.state_counts.rendered }} ready</span></div>
+      </div>
+      <div class="stepper-arrow">➔</div>
+      <div class="stepper-step" onclick="filterFunnelStage('submitted', this)">
+        <div class="step-badge accent-emerald">5</div>
+        <div class="step-info"><span class="step-name">5. Applied</span><span class="step-count">{{ view.kpi.applied_lifetime }} submitted</span></div>
+      </div>
+    </div>
+
     <div class="filter-bar">
       <div class="search-box">
         <span class="search-icon">🔍</span>
@@ -151,14 +179,38 @@
             <span class="stage-dot stage-{{ col.state }}"></span>
             <span class="col-label">{{ col.label }}</span>
           </div>
-          <span class="col-count">{{ col.count }}</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            {% if col.state == "discovered" %}
+            <button type="button" class="btn-primary" onclick="runCliCommand('match', {}, this)" style="padding:2px 8px; font-size:11px;" title="Score & shortlist all discovered listings">🎯 Shortlist All</button>
+            {% elif col.state == "shortlisted" and col.top | length > 0 %}
+            <button type="button" class="btn-primary" onclick="batchTailorAllShortlisted(this)" style="padding:2px 8px; font-size:11px;" title="Tailor all shortlisted listings">🎯 Tailor All</button>
+            {% elif col.state == "tailored" and col.top | length > 0 %}
+            <button type="button" class="btn-primary" onclick="batchRenderAllTailored(this)" style="padding:2px 8px; font-size:11px;" title="Render all tailored applications to PDF/DOCX">📄 Render All</button>
+            {% endif %}
+            <span class="col-count">{{ col.count }}</span>
+          </div>
         </div>
+
+        {% if (col.state == "shortlisted" or col.state == "tailored") and col.top | length > 0 %}
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-elevated); border-bottom:1px solid var(--border); font-size:11.5px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-secondary);">
+            <input type="checkbox" onchange="toggleSelectAllColumn('{{ col.state }}', this)"> Select All
+          </label>
+          <span class="batch-col-hint" style="color:var(--text-muted); font-size:11px;">Batch actions</span>
+        </div>
+        {% endif %}
+
         <div class="col-body">
           {% if col.top | length == 0 %}
           <div class="col-empty">No items</div>
           {% else %}
           {% for card in col.top %}
-          <article class="card" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id | js | safe }}')">
+          <article class="card {% if col.state == 'shortlisted' or col.state == 'tailored' %}card-has-cb{% endif %}" data-stage="{{ col.state }}" data-id="{{ card.id }}" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id | js | safe }}')">
+            {% if col.state == "shortlisted" %}
+            <input type="checkbox" class="card-select-cb batch-cb-shortlisted" data-id="{{ card.id }}" onclick="event.stopPropagation(); updateBatchToolbar();" title="Select for batch tailoring">
+            {% elif col.state == "tailored" %}
+            <input type="checkbox" class="card-select-cb batch-cb-tailored" data-id="{{ card.id }}" onclick="event.stopPropagation(); updateBatchToolbar();" title="Select for batch rendering">
+            {% endif %}
             <div class="card-header">
               <span class="card-title">{{ card.title }}</span>
               {% if card.score %}
@@ -169,7 +221,18 @@
             </div>
             <div class="card-meta">
               <span class="card-company">🏢 {{ card.company }}</span>
-              <button class="detail-link-btn">Inspect →</button>
+              <div style="display:flex; gap:6px; align-items:center;">
+                {% if col.state == "discovered" %}
+                <button type="button" class="card-action-btn" style="color:var(--accent-amber);" onclick="event.stopPropagation(); forceShortlist('{{ card.id | js | safe }}')" title="Shortlist this listing">⚡ Shortlist</button>
+                {% elif col.state == "shortlisted" %}
+                <button type="button" class="card-action-btn btn-tailor" onclick="event.stopPropagation(); tailorListing('{{ card.id | js | safe }}', this)" title="Tailor resume & cover letter">🎯 Tailor</button>
+                {% elif col.state == "tailored" %}
+                <button type="button" class="card-action-btn btn-render" onclick="event.stopPropagation(); renderApplication('{{ card.id | js | safe }}', this)" title="Render PDF & DOCX artifacts">📄 Render</button>
+                {% elif col.state == "rendered" %}
+                <button type="button" class="card-action-btn btn-apply" onclick="event.stopPropagation(); applyApplication('{{ card.id | js | safe }}', this)" title="Submit / Dry-run application">🚀 Apply</button>
+                {% endif %}
+                <button class="detail-link-btn">Inspect →</button>
+              </div>
             </div>
           </article>
           {% endfor %}
@@ -305,27 +368,29 @@
         </div>
         <div class="sources-list" style="max-height: 440px; overflow-y: auto; padding-right: 4px;">
           {% for src in view.config.sources %}
-          <div class="source-item" style="cursor: pointer; transition: background 0.15s ease;" onclick="filterExplorerBySource('{{ src.name | js | safe }}')" title="Click to view all {{ src.name }} jobs in Explorer">
+          <div class="source-item" style="cursor: pointer;" onclick="filterExplorerBySource('{{ src.name | js | safe }}')" title="Click to view all {{ src.name }} jobs in Explorer">
             <div class="source-main">
               <span class="source-name">⚡ {{ src.name }}</span>
               <span class="source-kind">{{ src.kind }}</span>
+              <span class="source-rate-sub">
+                {% if src.max_per_day > 0 %}{{ src.max_per_day }}/day{% else %}50/day{% endif %}
+                {% if src.min_seconds_between > 0 %} · {{ src.min_seconds_between }}s apart{% endif %}
+                {% if src.quiet_hours_utc %} · quiet {{ src.quiet_hours_utc[0] }}–{{ src.quiet_hours_utc[1] }} UTC{% endif %}
+              </span>
             </div>
             <div class="source-stats">
               <span class="source-count">{{ src.listing_count }} jobs</span>
               {% if src.url %}
-              <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="pill pill-info" style="text-decoration:none; font-size:11px; padding:2px 8px;" title="Open {{ src.name }} portal">🌐 Portal ↗</a>
-              {% endif %}
-              <span class="status-pill status-{{ src.status }}">{{ src.status }}</span>
-              {% if src.submit_enabled %}
-              <span class="status-pill status-active" title="Live submission enabled">submit on</span>
+              <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="pill pill-info source-portal-btn" title="Open {{ src.name }} portal">🌐 portal ↗</a>
               {% else %}
-              <span class="status-pill status-ready" title="Live submission disabled (dry-run default)">submit off</span>
+              <span class="source-portal-btn" style="opacity:0.2;">—</span>
               {% endif %}
-              <span class="source-kind" title="Resolved submit rate policy">
-                {% if src.max_per_day > 0 %}{{ src.max_per_day }}/day{% else %}default cap{% endif %}
-                {% if src.min_seconds_between > 0 %} · {{ src.min_seconds_between }}s apart{% endif %}
-                {% if src.quiet_hours_utc %} · quiet {{ src.quiet_hours_utc[0] }}–{{ src.quiet_hours_utc[1] }} UTC{% endif %}
-              </span>
+              <span class="status-pill status-{{ src.status }} status-col-ready">{{ src.status }}</span>
+              {% if src.submit_enabled %}
+              <span class="status-pill status-active status-col-submit" title="Live submission enabled">submit on</span>
+              {% else %}
+              <span class="status-pill status-ready status-col-submit" title="Live submission disabled (dry-run default)">submit off</span>
+              {% endif %}
             </div>
           </div>
           {% endfor %}
@@ -468,43 +533,95 @@
         </div>
         <!-- Inline Editable Profile Form -->
         <div id="profile-editor" style="border-top:1px solid var(--border); padding-top:16px;">
-          <h4 style="margin-bottom:12px; color:var(--text-secondary); font-size:13px; font-weight:600;">PROFILE DETAILS</h4>
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
-            <div class="form-group">
-              <label for="pf-name">Full Name</label>
-              <input type="text" id="pf-name" class="form-control" value="{{ view.config.profile.name | default(value='') }}" placeholder="Your full name">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h4 style="color:var(--text-secondary); font-size:13px; font-weight:600; margin:0;">PROFILE DETAILS &amp; SKILLS MATRIX</h4>
+            <button type="button" class="btn-primary btn-sm" onclick="toggleYamlEditor()" style="background:var(--bg-elevated); border:1px solid var(--border);">📝 Toggle Raw YAML</button>
+          </div>
+
+          <div id="profile-structured-editor">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
+              <div class="form-group">
+                <label for="pf-name">Full Name</label>
+                <input type="text" id="pf-name" class="form-control" value="{{ view.config.profile.name | default(value='') }}" placeholder="Kamal Pandey">
+              </div>
+              <div class="form-group">
+                <label for="pf-email">Email</label>
+                <input type="email" id="pf-email" class="form-control" value="{{ view.config.profile.email | default(value='') }}" placeholder="you@example.com">
+              </div>
+              <div class="form-group">
+                <label for="pf-phone">Phone</label>
+                <input type="text" id="pf-phone" class="form-control" value="{{ view.config.profile.phone | default(value='') }}" placeholder="+91 7767984205">
+              </div>
+              <div class="form-group">
+                <label for="pf-location">Location</label>
+                <input type="text" id="pf-location" class="form-control" value="{{ view.config.profile.location | default(value='') }}" placeholder="Gurugram, Haryana, India">
+              </div>
             </div>
-            <div class="form-group">
-              <label for="pf-email">Email</label>
-              <input type="email" id="pf-email" class="form-control" value="{{ view.config.profile.email | default(value='') }}" placeholder="you@example.com">
+
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
+              <div class="form-group">
+                <label for="pf-github">GitHub URL</label>
+                <input type="text" id="pf-github" class="form-control" value="{{ view.config.profile.github | default(value='') }}" placeholder="https://github.com/justdoGIT">
+              </div>
+              <div class="form-group">
+                <label for="pf-linkedin">LinkedIn URL</label>
+                <input type="text" id="pf-linkedin" class="form-control" value="{{ view.config.profile.linkedin | default(value='') }}" placeholder="https://www.linkedin.com/in/...">
+              </div>
+              <div class="form-group">
+                <label for="pf-portfolio">Portfolio</label>
+                <input type="text" id="pf-portfolio" class="form-control" value="{{ view.config.profile.portfolio | default(value='') }}" placeholder="https://...">
+              </div>
             </div>
-            <div class="form-group">
-              <label for="pf-phone">Phone</label>
-              <input type="text" id="pf-phone" class="form-control" value="{{ view.config.profile.phone | default(value='') }}" placeholder="+91-XXXXXXXXXX">
+
+            <div class="form-group" style="margin-bottom:12px;">
+              <label for="pf-summary">Professional Summary</label>
+              <textarea id="pf-summary" class="form-control" rows="3" placeholder="Senior Embedded System Architect with expertise in Qualcomm-based embedded Linux, Yocto BSP...">{{ view.config.profile.summary | default(value='') }}</textarea>
             </div>
-            <div class="form-group">
-              <label for="pf-location">Location</label>
-              <input type="text" id="pf-location" class="form-control" value="{{ view.config.profile.location | default(value='') }}" placeholder="Gurugram, India">
+
+            <div class="form-group" style="margin-bottom:12px;">
+              <label for="pf-roles">Target Roles (comma-separated)</label>
+              <input type="text" id="pf-roles" class="form-control" value="{{ view.config.profile.target_roles | default(value=[]) | join(sep=', ') }}" placeholder="Senior Embedded Developer, Software Architect, AI Solution Architect">
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:12px; margin-top:12px;">
+              <div class="form-group">
+                <label for="pf-languages">Languages (comma-separated)</label>
+                <input type="text" id="pf-languages" class="form-control" value="{{ view.config.profile.languages | default(value=[]) | join(sep=', ') }}" placeholder="C, C++, Rust, Python, Bash, QT/QML">
+              </div>
+              <div class="form-group">
+                <label for="pf-platforms">Platforms &amp; Silicon Hardware</label>
+                <input type="text" id="pf-platforms" class="form-control" value="{{ view.config.profile.platforms | default(value=[]) | join(sep=', ') }}" placeholder="Qualcomm QCM2290, TI AM665x, NXP i.MX8, Xilinx ZynqMP">
+              </div>
+              <div class="form-group">
+                <label for="pf-frameworks">Frameworks &amp; Board Bring-Up</label>
+                <input type="text" id="pf-frameworks" class="form-control" value="{{ view.config.profile.frameworks | default(value=[]) | join(sep=', ') }}" placeholder="Yocto BSP, Device Drivers, U-Boot, Kernel, Device Trees">
+              </div>
+              <div class="form-group">
+                <label for="pf-devops">DevOps &amp; OTA Updates</label>
+                <input type="text" id="pf-devops" class="form-control" value="{{ view.config.profile.devops | default(value=[]) | join(sep=', ') }}" placeholder="OSTree, SOTA, Docker, Kubernetes, CI/CD">
+              </div>
+              <div class="form-group">
+                <label for="pf-tools">Lab Tools &amp; Hardware Instruments</label>
+                <input type="text" id="pf-tools" class="form-control" value="{{ view.config.profile.tools | default(value=[]) | join(sep=', ') }}" placeholder="Oscilloscopes, Logic Analyzers, Multimeters, PCB Design">
+              </div>
+              <div class="form-group">
+                <label for="pf-debugging">Low-Level Debugging &amp; Tracing</label>
+                <input type="text" id="pf-debugging" class="form-control" value="{{ view.config.profile.debugging | default(value=[]) | join(sep=', ') }}" placeholder="JTAG, Kernel Tracing (ftrace), GDB, Valgrind">
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="pf-protocols">Protocols &amp; Buses</label>
+                <input type="text" id="pf-protocols" class="form-control" value="{{ view.config.profile.protocols | default(value=[]) | join(sep=', ') }}" placeholder="CAN Bus (J1939), MQTT, WebRTC, RTSP/RTP, TCP/IP, UART, I2C/I3C, SPI, USB/Modbus">
+              </div>
             </div>
           </div>
-          <div class="form-group">
-            <label for="pf-roles">Target Roles (comma-separated)</label>
-            <input type="text" id="pf-roles" class="form-control" value="{{ view.config.profile.target_roles | default(value=[]) | join(sep=', ') }}" placeholder="Embedded Systems Engineer, Robotics SWE">
-          </div>
-          <div style="display:grid; grid-template-columns: 1fr; gap:12px; margin-top:12px;">
+
+          <div id="profile-yaml-editor" style="display:none; margin-top:12px;">
             <div class="form-group">
-              <label for="pf-languages">Languages / Stack (comma-separated)</label>
-              <input type="text" id="pf-languages" class="form-control" value="{{ view.config.profile.languages | default(value=[]) | join(sep=', ') }}" placeholder="Rust, Python, C++">
-            </div>
-            <div class="form-group">
-              <label for="pf-frameworks">Frameworks &amp; Platforms</label>
-              <input type="text" id="pf-frameworks" class="form-control" value="{{ view.config.profile.frameworks | default(value=[]) | join(sep=', ') }}" placeholder="ROS2, Linux, Yocto, PyTorch">
-            </div>
-            <div class="form-group">
-              <label for="pf-tools">Tools &amp; DevOps</label>
-              <input type="text" id="pf-tools" class="form-control" value="{{ view.config.profile.tools | default(value=[]) | join(sep=', ') }}" placeholder="Git, Docker, GDB, Jira">
+              <label for="pf-raw-yaml">Raw Profile YAML (<code>profile/profile.yaml</code>)</label>
+              <textarea id="pf-raw-yaml" class="form-control" rows="18" style="font-family:var(--mono); font-size:12px; line-height:1.45; tab-size:2;" placeholder="personal:\n  name: ...">{{ view.config.profile.raw_yaml | default(value='') }}</textarea>
             </div>
           </div>
+
           <div class="form-actions" style="margin-top:16px;">
             <button type="button" class="btn-primary" onclick="saveProfile()">💾 Save Profile</button>
             <span id="profile-save-status" class="save-status"></span>
@@ -778,6 +895,18 @@ careerai service uninstall                 disable + remove the systemd unit</pr
           <span>📤 Send</span>
         </button>
       </form>
+    </div>
+  </div>
+
+  <!-- FLOATING BATCH ACTION BAR (FAB) -->
+  <div id="batch-action-bar" class="batch-action-bar" style="display:none;">
+    <div class="batch-bar-content">
+      <span id="batch-bar-count" class="batch-bar-count">0 items selected</span>
+      <div class="batch-bar-actions">
+        <button type="button" id="batch-tailor-btn" class="btn-primary" onclick="batchTailorSelected(this)">🎯 Tailor Selected</button>
+        <button type="button" id="batch-render-btn" class="btn-primary" onclick="batchRenderSelected(this)">📄 Render Selected</button>
+        <button type="button" class="btn-secondary" onclick="deselectAllBatch()" style="padding:6px 12px; font-size:12px;">✕ Clear</button>
+      </div>
     </div>
   </div>
 </main>
@@ -1204,33 +1333,47 @@ function resetExplorerFilters() {
   filterExplorerTable();
 }
 
+function toggleYamlEditor() {
+  var structEl = document.getElementById('profile-structured-editor');
+  var yamlEl = document.getElementById('profile-yaml-editor');
+  if (!structEl || !yamlEl) return;
+  if (yamlEl.style.display === 'none') {
+    yamlEl.style.display = 'block';
+    structEl.style.display = 'none';
+  } else {
+    yamlEl.style.display = 'none';
+    structEl.style.display = 'block';
+  }
+}
+
 function saveProfile() {
   var statusEl = document.getElementById('profile-save-status');
   statusEl.innerText = 'Saving...';
   var splitCsv = function(s) {
     return (s || '').split(',').map(function(x) { return x.trim(); }).filter(Boolean);
   };
+  var yamlEl = document.getElementById('profile-yaml-editor');
+  var isYamlActive = yamlEl && yamlEl.style.display !== 'none';
+  
   var payload = {
-    name: document.getElementById('pf-name').value.trim(),
-    email: document.getElementById('pf-email').value.trim(),
-    phone: document.getElementById('pf-phone').value.trim(),
-    location: document.getElementById('pf-location').value.trim(),
-    target_roles: splitCsv(document.getElementById('pf-roles').value),
-    languages: splitCsv(document.getElementById('pf-languages').value),
-    frameworks: splitCsv(document.getElementById('pf-frameworks').value),
-    tools: splitCsv(document.getElementById('pf-tools').value),
+    name: (document.getElementById('pf-name') ? document.getElementById('pf-name').value : '').trim(),
+    email: (document.getElementById('pf-email') ? document.getElementById('pf-email').value : '').trim(),
+    phone: (document.getElementById('pf-phone') ? document.getElementById('pf-phone').value : '').trim(),
+    location: (document.getElementById('pf-location') ? document.getElementById('pf-location').value : '').trim(),
+    github: (document.getElementById('pf-github') ? document.getElementById('pf-github').value : '').trim(),
+    linkedin: (document.getElementById('pf-linkedin') ? document.getElementById('pf-linkedin').value : '').trim(),
+    portfolio: (document.getElementById('pf-portfolio') ? document.getElementById('pf-portfolio').value : '').trim(),
+    summary: (document.getElementById('pf-summary') ? document.getElementById('pf-summary').value : '').trim(),
+    target_roles: splitCsv(document.getElementById('pf-roles') ? document.getElementById('pf-roles').value : ''),
+    languages: splitCsv(document.getElementById('pf-languages') ? document.getElementById('pf-languages').value : ''),
+    platforms: splitCsv(document.getElementById('pf-platforms') ? document.getElementById('pf-platforms').value : ''),
+    frameworks: splitCsv(document.getElementById('pf-frameworks') ? document.getElementById('pf-frameworks').value : ''),
+    devops: splitCsv(document.getElementById('pf-devops') ? document.getElementById('pf-devops').value : ''),
+    tools: splitCsv(document.getElementById('pf-tools') ? document.getElementById('pf-tools').value : ''),
+    debugging: splitCsv(document.getElementById('pf-debugging') ? document.getElementById('pf-debugging').value : ''),
+    protocols: splitCsv(document.getElementById('pf-protocols') ? document.getElementById('pf-protocols').value : ''),
+    raw_yaml: isYamlActive ? (document.getElementById('pf-raw-yaml') ? document.getElementById('pf-raw-yaml').value : null) : null
   };
-
-  try {
-    localStorage.setItem('careerai-pf-name', payload.name);
-    localStorage.setItem('careerai-pf-email', payload.email);
-    localStorage.setItem('careerai-pf-phone', payload.phone);
-    localStorage.setItem('careerai-pf-location', payload.location);
-    localStorage.setItem('careerai-pf-roles', document.getElementById('pf-roles').value);
-    localStorage.setItem('careerai-pf-languages', document.getElementById('pf-languages').value);
-    localStorage.setItem('careerai-pf-frameworks', document.getElementById('pf-frameworks').value);
-    localStorage.setItem('careerai-pf-tools', document.getElementById('pf-tools').value);
-  } catch(e) {}
 
   fetch('/api/v1/profile/save', {
     method: 'POST',
@@ -1239,10 +1382,214 @@ function saveProfile() {
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
-    statusEl.innerText = d.status === 'success' ? '✅ Profile Saved!' : '❌ ' + (d.error || 'Unknown error');
-    setTimeout(function() { statusEl.innerText = ''; }, 3000);
+    if (d.status === 'success') {
+      statusEl.innerText = '✅ Profile Saved to profile/profile.yaml!';
+      setTimeout(function() { statusEl.innerText = ''; }, 3000);
+    } else {
+      statusEl.innerText = '❌ ' + (d.error || 'Unknown error');
+    }
   })
   .catch(function(err) { statusEl.innerText = '❌ ' + err; });
+}
+
+function updateBatchToolbar() {
+  var shortlistedCbs = Array.from(document.querySelectorAll('.batch-cb-shortlisted:checked'));
+  var tailoredCbs = Array.from(document.querySelectorAll('.batch-cb-tailored:checked'));
+  var totalSelected = shortlistedCbs.length + tailoredCbs.length;
+
+  var bar = document.getElementById('batch-action-bar');
+  if (!bar) return;
+
+  if (totalSelected > 0) {
+    bar.style.display = 'block';
+    document.getElementById('batch-bar-count').innerText = totalSelected + ' item(s) selected';
+    var tailorBtn = document.getElementById('batch-tailor-btn');
+    var renderBtn = document.getElementById('batch-render-btn');
+    if (tailorBtn) tailorBtn.style.display = shortlistedCbs.length > 0 ? 'inline-block' : 'none';
+    if (renderBtn) renderBtn.style.display = tailoredCbs.length > 0 ? 'inline-block' : 'none';
+  } else {
+    bar.style.display = 'none';
+  }
+
+  // Highlight selected cards
+  document.querySelectorAll('.card').forEach(function(c) {
+    var cb = c.querySelector('.card-select-cb');
+    if (cb && cb.checked) {
+      c.classList.add('card-selected');
+    } else {
+      c.classList.remove('card-selected');
+    }
+  });
+}
+
+function deselectAllBatch() {
+  document.querySelectorAll('.card-select-cb').forEach(function(cb) { cb.checked = false; });
+  document.querySelectorAll('.col-head input[type="checkbox"]').forEach(function(cb) { cb.checked = false; });
+  updateBatchToolbar();
+}
+
+function toggleSelectAllColumn(stage, masterCb) {
+  var cbs = document.querySelectorAll('.batch-cb-' + stage);
+  cbs.forEach(function(cb) { cb.checked = masterCb.checked; });
+  updateBatchToolbar();
+}
+
+function tailorListing(id, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'tailor', args: { listing_id: id } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ Tailored!';
+      setTimeout(function() { location.reload(); }, 1000);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
+}
+
+function batchTailorSelected(btn) {
+  var cbs = Array.from(document.querySelectorAll('.batch-cb-shortlisted:checked'));
+  if (cbs.length === 0) return;
+  var ids = cbs.map(function(cb) { return cb.getAttribute('data-id'); });
+  runBatchTailorSequence(ids, btn);
+}
+
+function batchTailorAllShortlisted(btn) {
+  var cbs = Array.from(document.querySelectorAll('.batch-cb-shortlisted'));
+  if (cbs.length === 0) return;
+  var ids = cbs.map(function(cb) { return cb.getAttribute('data-id'); });
+  runBatchTailorSequence(ids, btn);
+}
+
+function runBatchTailorSequence(ids, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring ' + ids.length + '...'; }
+  var nextIndex = 0;
+  function processNext() {
+    if (nextIndex >= ids.length) {
+      if (btn) btn.innerHTML = '✅ All Tailored!';
+      setTimeout(function() { location.reload(); }, 1200);
+      return;
+    }
+    var id = ids[nextIndex];
+    if (btn) btn.innerHTML = '⏳ Tailoring (' + (nextIndex + 1) + '/' + ids.length + ')...';
+    fetch('/api/v1/cli/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'tailor', args: { listing_id: id } })
+    })
+    .then(function() {
+      nextIndex++;
+      processNext();
+    })
+    .catch(function() {
+      nextIndex++;
+      processNext();
+    });
+  }
+  processNext();
+}
+
+function renderApplication(id, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rendering...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'render', args: { application_id: id } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ Rendered!';
+      setTimeout(function() { location.reload(); }, 1000);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
+}
+
+function batchRenderSelected(btn) {
+  var cbs = Array.from(document.querySelectorAll('.batch-cb-tailored:checked'));
+  if (cbs.length === 0) return;
+  var ids = cbs.map(function(cb) { return cb.getAttribute('data-id'); });
+  runBatchRenderSequence(ids, btn);
+}
+
+function batchRenderAllTailored(btn) {
+  var cbs = Array.from(document.querySelectorAll('.batch-cb-tailored'));
+  if (cbs.length === 0) return;
+  var ids = cbs.map(function(cb) { return cb.getAttribute('data-id'); });
+  runBatchRenderSequence(ids, btn);
+}
+
+function runBatchRenderSequence(ids, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rendering ' + ids.length + '...'; }
+  var nextIndex = 0;
+  function processNext() {
+    if (nextIndex >= ids.length) {
+      if (btn) btn.innerHTML = '✅ All Rendered!';
+      setTimeout(function() { location.reload(); }, 1200);
+      return;
+    }
+    var id = ids[nextIndex];
+    if (btn) btn.innerHTML = '⏳ Rendering (' + (nextIndex + 1) + '/' + ids.length + ')...';
+    fetch('/api/v1/cli/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'render', args: { application_id: id } })
+    })
+    .then(function() {
+      nextIndex++;
+      processNext();
+    })
+    .catch(function() {
+      nextIndex++;
+      processNext();
+    });
+  }
+  processNext();
+}
+
+function applyApplication(id, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'apply', args: { application_id: id } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ Applied!';
+      setTimeout(function() { location.reload(); }, 1000);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
 }
 
 function toggleKeyword(kw) {

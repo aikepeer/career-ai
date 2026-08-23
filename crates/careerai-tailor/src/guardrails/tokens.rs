@@ -86,13 +86,7 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
     }
 
     let mut skill_tokens = HashSet::new();
-    for s in profile
-        .skills
-        .languages
-        .iter()
-        .chain(profile.skills.frameworks.iter())
-        .chain(profile.skills.tools.iter())
-    {
+    for s in profile.skills.all_skill_names() {
         for w in split_words_lowercase(s) {
             skill_tokens.insert(w);
         }

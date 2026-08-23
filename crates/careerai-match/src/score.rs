@@ -34,13 +34,7 @@ pub fn flatten_profile(p: &Profile) -> String {
     out.push('\n');
     out.push_str(&p.summary);
     out.push('\n');
-    for s in p
-        .skills
-        .languages
-        .iter()
-        .chain(&p.skills.frameworks)
-        .chain(&p.skills.tools)
-    {
+    for s in p.skills.all_skill_names() {
         out.push_str(s);
         out.push(' ');
     }

@@ -15,6 +15,7 @@ fn fixture() -> Profile {
             languages: vec!["Rust".into(), "Python".into(), "C#".into()],
             frameworks: vec!["Kubernetes".into(), "Tokio".into()],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "SWE".into(),
@@ -29,6 +30,7 @@ fn fixture() -> Profile {
             institution: "Waterloo".into(),
             start: "2014".into(),
             end: "2018".into(),
+            ..Default::default()
         }],
         projects: vec![Project {
             name: "OpenLLM".into(),
@@ -223,6 +225,7 @@ fn accepts_proper_noun_from_same_bullet_original() {
             languages: vec!["C".into()],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -258,6 +261,7 @@ fn rejects_proper_noun_only_in_other_bullet() {
             languages: vec!["C".into()],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -298,6 +302,7 @@ fn accepts_proper_noun_from_summary() {
             languages: vec!["C".into()],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -333,6 +338,7 @@ fn accepts_punctuated_employer_name_from_company_field() {
             languages: vec![],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),

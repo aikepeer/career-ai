@@ -47,19 +47,9 @@ pub fn generate_config_yaml(profile: &Profile) -> String {
     ];
 
     // Extract skills from candidate profile
-    for lang in &profile.skills.languages {
-        if !lang.trim().is_empty() && !p1_keywords.contains(lang) {
-            p1_keywords.push(lang.clone());
-        }
-    }
-    for framework in &profile.skills.frameworks {
-        if !framework.trim().is_empty() && !p1_keywords.contains(framework) {
-            p1_keywords.push(framework.clone());
-        }
-    }
-    for tool in &profile.skills.tools {
-        if !tool.trim().is_empty() && !p1_keywords.contains(tool) {
-            p1_keywords.push(tool.clone());
+    for skill in profile.skills.all_skill_names() {
+        if !skill.trim().is_empty() && !p1_keywords.contains(skill) {
+            p1_keywords.push(skill.clone());
         }
     }
 

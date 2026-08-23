@@ -18,6 +18,15 @@ pub struct Profile {
     #[serde(default)]
     pub summary: String,
 
+    #[serde(
+        default,
+        alias = "target_roles",
+        alias = "target roles",
+        alias = "target-roles",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub target_roles: Vec<String>,
+
     #[serde(default)]
     pub skills: Skills,
 
@@ -63,14 +72,45 @@ pub struct Links {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skills {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub languages: Vec<String>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub platforms: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frameworks: Vec<String>,
 
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "devops",
+        alias = "devOps",
+        alias = "DevOps",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub devops: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub debugging: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocols: Vec<String>,
+}
+
+impl Skills {
+    pub fn all_skill_names(&self) -> impl Iterator<Item = &String> {
+        self.languages
+            .iter()
+            .chain(self.platforms.iter())
+            .chain(self.frameworks.iter())
+            .chain(self.devops.iter())
+            .chain(self.tools.iter())
+            .chain(self.debugging.iter())
+            .chain(self.protocols.iter())
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,6 +141,15 @@ pub struct Education {
 
     #[serde(default)]
     pub end: String,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hobbies: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub achievements: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

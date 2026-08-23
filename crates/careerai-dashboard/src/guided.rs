@@ -187,10 +187,21 @@ mod tests {
             email: "ada@example.com".into(),
             phone: String::new(),
             location: String::new(),
+            github: String::new(),
+            linkedin: String::new(),
+            portfolio: String::new(),
+            summary: String::new(),
             target_roles: vec![],
             languages: vec![],
             frameworks: vec![],
             tools: vec![],
+            platforms: vec![],
+            devops: vec![],
+            debugging: vec![],
+            protocols: vec![],
+            experience_count: 0,
+            education_count: 0,
+            raw_yaml: String::new(),
         }
     }
 

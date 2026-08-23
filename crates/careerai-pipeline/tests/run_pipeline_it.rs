@@ -46,6 +46,7 @@ fn fixture_profile() -> Profile {
             languages: vec!["Rust".into(), "Python".into()],
             frameworks: vec!["Tokio".into()],
             tools: vec!["SQLite".into()],
+            ..Default::default()
         },
         experience: vec![
             Experience {
@@ -76,6 +77,7 @@ fn fixture_profile() -> Profile {
             institution: "Analytical Engine University".into(),
             start: "2012".into(),
             end: "2016".into(),
+            ..Default::default()
         }],
         projects: vec![Project {
             name: "openLLM".into(),

@@ -26,6 +26,7 @@ axum = { version = "0.7", features = ["multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace"] }
 bytes = "1"
+which = "7"
 
 [dev-dependencies]
 tokio = { workspace = true }

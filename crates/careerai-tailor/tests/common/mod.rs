@@ -16,6 +16,7 @@ pub fn fixture_profile() -> Profile {
             languages: vec!["Rust".into(), "Python".into()],
             frameworks: vec!["Tokio".into(), "Kubernetes".into()],
             tools: vec!["SQLite".into()],
+            ..Default::default()
         },
         experience: vec![
             Experience {

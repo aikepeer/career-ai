@@ -148,6 +148,7 @@ mod tests {
                 languages: vec!["Rust".into(), "Python".into()],
                 frameworks: vec!["Tokio".into()],
                 tools: vec!["Docker".into()],
+                ..Default::default()
             },
             experience: vec![ExperienceView {
                 title: "Senior Engineer".into(),
@@ -162,6 +163,7 @@ mod tests {
                 institution: "State U".into(),
                 start: "2015".into(),
                 end: "2019".into(),
+                ..Default::default()
             }],
             projects: vec![ProjectView {
                 name: "careerai".into(),

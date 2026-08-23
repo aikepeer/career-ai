@@ -7,16 +7,38 @@ use std::path::{Path, PathBuf};
 
 use super::util::{backup_file, unique_tmp_path};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct SaveProfileRequest {
     pub name: String,
     pub email: String,
     pub phone: String,
     pub location: String,
+    #[serde(default)]
+    pub github: String,
+    #[serde(default)]
+    pub linkedin: String,
+    #[serde(default)]
+    pub portfolio: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
     pub target_roles: Vec<String>,
+    #[serde(default)]
     pub languages: Vec<String>,
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    #[serde(default)]
     pub frameworks: Vec<String>,
+    #[serde(default)]
+    pub devops: Vec<String>,
+    #[serde(default)]
     pub tools: Vec<String>,
+    #[serde(default)]
+    pub debugging: Vec<String>,
+    #[serde(default)]
+    pub protocols: Vec<String>,
+    #[serde(default)]
+    pub raw_yaml: Option<String>,
 }
 
 pub async fn api_profile_save(Json(payload): Json<SaveProfileRequest>) -> impl IntoResponse {
@@ -38,20 +60,31 @@ pub async fn api_profile_save(Json(payload): Json<SaveProfileRequest>) -> impl I
 }
 
 async fn save_profile_edits(payload: SaveProfileRequest) -> Result<PathBuf, String> {
+    if let Some(raw) = payload.raw_yaml.filter(|s| !s.trim().is_empty()) {
+        let profile = Profile::from_yaml(&raw).map_err(|e| format!("invalid YAML: {e}"))?;
+        return save_profile_to_disk(&profile).await;
+    }
     let mut profile = load_profile_for_edit().await?;
     profile.personal.name = payload.name;
     profile.personal.email = payload.email;
     profile.personal.phone = payload.phone;
     profile.personal.location = payload.location;
-    // Only populate summary when it's empty: an imported/hand-written
-    // summary must not be clobbered on every save. (A dedicated
-    // `target_roles` field would be cleaner than overloading `summary`.)
-    if !payload.target_roles.is_empty() && profile.summary.is_empty() {
-        profile.summary = format!("Target Roles: {}", payload.target_roles.join(", "));
+    profile.personal.links.github = payload.github;
+    profile.personal.links.linkedin = payload.linkedin;
+    profile.personal.links.portfolio = payload.portfolio;
+    if !payload.summary.trim().is_empty() {
+        profile.summary = payload.summary;
+    }
+    if !payload.target_roles.is_empty() {
+        profile.target_roles = payload.target_roles;
     }
     profile.skills.languages = payload.languages;
+    profile.skills.platforms = payload.platforms;
     profile.skills.frameworks = payload.frameworks;
+    profile.skills.devops = payload.devops;
     profile.skills.tools = payload.tools;
+    profile.skills.debugging = payload.debugging;
+    profile.skills.protocols = payload.protocols;
     save_profile_to_disk(&profile).await
 }
 
@@ -76,6 +109,18 @@ pub async fn save_profile_to_disk(profile: &Profile) -> Result<PathBuf, String> 
     save_profile_to_disk_at(profile, &get_profile_file_path()).await
 }
 
+#[cfg(unix)]
+fn fix_sudo_ownership(path: &Path) {
+    if let (Ok(uid_s), Ok(gid_s)) = (std::env::var("SUDO_UID"), std::env::var("SUDO_GID")) {
+        if let (Ok(uid), Ok(gid)) = (uid_s.parse::<u32>(), gid_s.parse::<u32>()) {
+            let _ = std::process::Command::new("chown")
+                .arg(format!("{uid}:{gid}"))
+                .arg(path)
+                .status();
+        }
+    }
+}
+
 /// Write a profile YAML document atomically to an arbitrary path, creating
 /// parent directory and backing up any existing target file first.
 pub async fn save_profile_to_disk_at(profile: &Profile, path: &Path) -> Result<PathBuf, String> {
@@ -85,8 +130,14 @@ pub async fn save_profile_to_disk_at(profile: &Profile, path: &Path) -> Result<P
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| format!("create profile dir: {e}"))?;
+    #[cfg(unix)]
+    fix_sudo_ownership(dir);
     if path.exists() {
         backup_file(path)?;
+        #[cfg(unix)]
+        if let Some(bak) = path.parent().map(|p| p.join("profile.yaml.bak")) {
+            fix_sudo_ownership(&bak);
+        }
     }
     let yaml = serde_yaml::to_string(profile).map_err(|e| format!("serialize profile: {e}"))?;
     let tmp = unique_tmp_path(path);
@@ -96,6 +147,8 @@ pub async fn save_profile_to_disk_at(profile: &Profile, path: &Path) -> Result<P
     tokio::fs::rename(&tmp, path)
         .await
         .map_err(|e| format!("commit profile: {e}"))?;
+    #[cfg(unix)]
+    fix_sudo_ownership(path);
     Ok(path.to_path_buf())
 }
 
@@ -116,6 +169,8 @@ async fn save_profile_at(profile: &Profile, path: &Path) -> Result<PathBuf, Stri
     tokio::fs::create_dir_all(dir)
         .await
         .map_err(|e| format!("create profile dir: {e}"))?;
+    #[cfg(unix)]
+    fix_sudo_ownership(dir);
     let yaml = serde_yaml::to_string(profile).map_err(|e| format!("serialize profile: {e}"))?;
     let tmp = unique_tmp_path(path);
     tokio::fs::write(&tmp, &yaml)
@@ -124,6 +179,8 @@ async fn save_profile_at(profile: &Profile, path: &Path) -> Result<PathBuf, Stri
     tokio::fs::rename(&tmp, path)
         .await
         .map_err(|e| format!("commit profile draft: {e}"))?;
+    #[cfg(unix)]
+    fix_sudo_ownership(path);
     Ok(path.to_path_buf())
 }
 
@@ -143,6 +200,8 @@ fn confirm_profile_import_at(draft: &Path, target: &Path) -> Result<PathBuf, Str
         backup_file(target)?;
     }
     std::fs::rename(draft, target).map_err(|e| format!("apply profile import: {e}"))?;
+    #[cfg(unix)]
+    fix_sudo_ownership(target);
     Ok(target.to_path_buf())
 }
 
@@ -166,7 +225,9 @@ pub fn load_profile_view_at(path: &Path) -> Option<crate::view::ProfileView> {
     }
     let raw = std::fs::read_to_string(path).ok()?;
     let p = serde_yaml::from_str::<careerai_profile::schema::Profile>(&raw).ok()?;
-    let target_roles: Vec<String> = if p.summary.starts_with("Target Roles:") {
+    let target_roles: Vec<String> = if !p.target_roles.is_empty() {
+        p.target_roles.clone()
+    } else if p.summary.starts_with("Target Roles:") {
         p.summary["Target Roles:".len()..]
             .split(',')
             .map(|s| s.trim().to_string())
@@ -180,128 +241,25 @@ pub fn load_profile_view_at(path: &Path) -> Option<crate::view::ProfileView> {
         email: p.personal.email,
         phone: p.personal.phone,
         location: p.personal.location,
+        github: p.personal.links.github,
+        linkedin: p.personal.links.linkedin,
+        portfolio: p.personal.links.portfolio,
+        summary: p.summary,
         target_roles,
         languages: p.skills.languages,
+        platforms: p.skills.platforms,
         frameworks: p.skills.frameworks,
+        devops: p.skills.devops,
         tools: p.skills.tools,
+        debugging: p.skills.debugging,
+        protocols: p.skills.protocols,
+        experience_count: p.experience.len(),
+        education_count: p.education.len(),
+        raw_yaml: raw,
     })
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn confirm_profile_import_at_promotes_draft_and_backs_up_target() {
-        let tmp = tempfile::tempdir().unwrap();
-        let draft = tmp.path().join("profile.draft.yaml");
-        let target = tmp.path().join("profile.yaml");
-        std::fs::write(&draft, "name: Draft\n").unwrap();
-        std::fs::write(&target, "name: Previous\n").unwrap();
-
-        let applied = confirm_profile_import_at(&draft, &target).unwrap();
-
-        assert_eq!(applied, target);
-        assert!(!draft.exists(), "draft should be consumed");
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "name: Draft\n");
-        assert_eq!(
-            std::fs::read_to_string(tmp.path().join("profile.yaml.bak")).unwrap(),
-            "name: Previous\n"
-        );
-    }
-
-    #[test]
-    fn confirm_profile_import_at_missing_draft_errors() {
-        let tmp = tempfile::tempdir().unwrap();
-        let draft = tmp.path().join("profile.draft.yaml");
-        let target = tmp.path().join("profile.yaml");
-        std::fs::write(&target, "name: Previous\n").unwrap();
-
-        let err = confirm_profile_import_at(&draft, &target).unwrap_err();
-        assert!(err.contains("no pending profile import"), "{err}");
-        assert_eq!(
-            std::fs::read_to_string(&target).unwrap(),
-            "name: Previous\n"
-        );
-    }
-
-    #[test]
-    fn confirm_profile_import_at_creates_target_without_backup_when_absent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let draft = tmp.path().join("profile.draft.yaml");
-        let target = tmp.path().join("profile.yaml");
-        std::fs::write(&draft, "name: Draft\n").unwrap();
-
-        confirm_profile_import_at(&draft, &target).unwrap();
-
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "name: Draft\n");
-        assert!(!tmp.path().join("profile.yaml.bak").exists());
-    }
-
-    #[tokio::test]
-    async fn save_profile_at_writes_atomically_and_creates_parent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("nested").join("profile.yaml");
-        let mut profile = Profile::default();
-        profile.personal.name = "Alice".to_string();
-
-        let written = save_profile_at(&profile, &path).await.unwrap();
-
-        assert_eq!(written, path);
-        let parsed: Profile =
-            serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(parsed.personal.name, "Alice");
-    }
-
-    #[tokio::test]
-    async fn save_profile_to_disk_at_backs_up_existing_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("profile.yaml");
-        std::fs::write(&target, "personal:\n  name: OldName\n").unwrap();
-
-        let mut profile = Profile::default();
-        profile.personal.name = "NewName".to_string();
-
-        let written = save_profile_to_disk_at(&profile, &target).await.unwrap();
-        assert_eq!(written, target);
-
-        let bak = tmp.path().join("profile.yaml.bak");
-        assert!(bak.exists(), "backup must exist");
-        assert_eq!(
-            std::fs::read_to_string(&bak).unwrap(),
-            "personal:\n  name: OldName\n"
-        );
-
-        let current = std::fs::read_to_string(&target).unwrap();
-        assert!(current.contains("NewName"));
-    }
-
-    #[test]
-    fn load_profile_view_at_parses_existing_profile() {
-        let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("profile.yaml");
-        let yaml = r#"
-personal:
-  name: Kamal Pandey
-  email: pandeykamal13526@gmail.com
-  phone: "+91 7767984205"
-  location: Gurugram, Haryana, India
-summary: "Target Roles: Senior Embedded Lead, Rust SWE"
-skills:
-  languages:
-    - Rust
-    - C++
-  frameworks:
-    - Yocto
-  tools:
-    - OSTree
-"#;
-        std::fs::write(&target, yaml).unwrap();
-        let view = load_profile_view_at(&target).expect("profile view loaded");
-        assert_eq!(view.name, "Kamal Pandey");
-        assert_eq!(view.email, "pandeykamal13526@gmail.com");
-        assert_eq!(view.target_roles, vec!["Senior Embedded Lead", "Rust SWE"]);
-        assert_eq!(view.languages, vec!["Rust", "C++"]);
-    }
-}
+#[path = "profile_tests.rs"]
+mod tests;

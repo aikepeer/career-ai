@@ -33,6 +33,21 @@ pub async fn api_chat_agent(
             .into_response();
     }
 
+    let root = careerai_core::paths::resolve_root_env();
+
+    // Try executing via the local system agy AI agent if available
+    if let Some(agent_reply) = run_agy_agent(&root, msg).await {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "ok",
+                "source": "agy",
+                "reply": agent_reply,
+            })),
+        )
+            .into_response();
+    }
+
     let lower = msg.to_lowercase();
     let reply = if lower.contains("keyword") || lower.contains("config") || lower.contains("focus")
     {
@@ -83,17 +98,59 @@ pub async fn api_chat_agent(
     } else if lower.contains("prep") || lower.contains("interview") || lower.contains("question") {
         "📝 **Interview Preparation Guide**\n\nBased on your candidate stack (Embedded Systems, Linux Kernel, RTOS, Rust, AI/ML):\n\n**Top Technical Focus Areas:**\n1. **Concurrency & Real-time Constraints**: Mutex/Semaphore mechanics, priority inversion, ISRs.\n2. **Memory Management**: Zero-copy buffer sharing, DMA transfers, memory mapping (`mmap`).\n3. **Edge AI & Acceleration**: Quantization (INT8/FP16), TensorRT/ONNX runtime optimization, latency benchmarks.\n\nCheck your **Action & Interview Center** tab for generated company-specific study sheets!".to_string()
     } else {
-        "🤖 **Career-AI Assistant**\n\nI'm ready to assist with your automated job pipeline! You can ask me to:\n- 💡 Extract and suggest target keywords (`\"Suggest keywords for Remote Robotics\"`)\n- 📊 Analyze current match scores & pipeline stats (`\"Analyze job matches\"`)\n- 📝 Provide tailored interview prep strategies (`\"Interview prep for Embedded Engineer\"`)\n- ⚙️ Help configure LLM backends or job sources.".to_string()
+        "🤖 **Career-AI Agent**\n\nI'm ready to assist with your automated job pipeline! You can ask me to:\n- 💡 Extract and suggest target keywords (`\"Suggest keywords for Remote Robotics\"`)\n- 📊 Analyze current match scores & pipeline stats (`\"Analyze job matches\"`)\n- 📝 Provide tailored interview prep strategies (`\"Interview prep for Embedded Engineer\"`)\n- ⚙️ Help configure LLM backends or job sources.".to_string()
     };
 
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "status": "ok",
+            "source": "builtin",
             "reply": reply,
         })),
     )
         .into_response()
+}
+
+async fn run_agy_agent(root: &std::path::Path, prompt: &str) -> Option<String> {
+    let bin = which::which("agy")
+        .ok()
+        .or_else(|| {
+            let p = std::path::PathBuf::from("/home/miniblues/.local/bin/agy");
+            if p.is_file() {
+                Some(p)
+            } else {
+                None
+            }
+        })?;
+
+    let system_context = format!(
+        "You are Career-AI Agent embedded in the job pipeline dashboard at {}. \
+        Answer the operator concisely with actionable insights for their job search, resume tailoring, \
+        and application strategy.\n\nOperator: {}",
+        root.display(),
+        prompt
+    );
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::process::Command::new(bin)
+            .arg("-p")
+            .arg(&system_context)
+            .current_dir(root)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+
+    if output.status.success() {
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    None
 }
 
 fn matching_analysis_reply(total: u64, shortlisted: u64, threshold: f32) -> String {

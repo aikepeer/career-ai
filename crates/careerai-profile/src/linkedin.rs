@@ -51,12 +51,12 @@ fn parse_archive<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Pro
         summary: profile_row.summary.unwrap_or_default(),
         skills: Skills {
             languages: skills,
-            frameworks: Vec::new(),
-            tools: Vec::new(),
+            ..Default::default()
         },
         experience: positions,
         education,
         projects,
+        ..Default::default()
     })
 }
 
@@ -205,6 +205,7 @@ fn read_education<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Ve
             institution: r.school_name,
             start: dates::normalize(&r.start_date),
             end: dates::normalize(&r.end_date),
+            ..Default::default()
         })
         .collect())
 }

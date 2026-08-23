@@ -19,6 +19,11 @@ pub fn merge_pair(base: Profile, other: Profile) -> Profile {
         experience: merge_experience(base.experience, other.experience),
         education: merge_education(base.education, other.education),
         projects: merge_projects(base.projects, other.projects),
+        target_roles: {
+            let mut roles = dedup_keep_order_ci(merge_vecs(base.target_roles, other.target_roles));
+            roles.dedup();
+            roles
+        },
     }
 }
 
@@ -44,6 +49,10 @@ fn merge_skills(base: Skills, other: Skills) -> Skills {
         languages: dedup_keep_order_ci(merge_vecs(base.languages, other.languages)),
         frameworks: dedup_keep_order_ci(merge_vecs(base.frameworks, other.frameworks)),
         tools: dedup_keep_order_ci(merge_vecs(base.tools, other.tools)),
+        platforms: dedup_keep_order_ci(merge_vecs(base.platforms, other.platforms)),
+        devops: dedup_keep_order_ci(merge_vecs(base.devops, other.devops)),
+        debugging: dedup_keep_order_ci(merge_vecs(base.debugging, other.debugging)),
+        protocols: dedup_keep_order_ci(merge_vecs(base.protocols, other.protocols)),
     }
 }
 

@@ -27,6 +27,7 @@ fn fixture_view() -> ResumeView {
             languages: vec!["Rust".into(), "Python".into(), "Go".into()],
             frameworks: vec!["Tokio".into(), "Actix".into()],
             tools: vec!["Docker".into(), "Kubernetes".into(), "Postgres".into()],
+            ..Default::default()
         },
         experience: vec![
             ExperienceView {
@@ -59,12 +60,14 @@ fn fixture_view() -> ResumeView {
                 institution: "State University".into(),
                 start: "2015".into(),
                 end: "2019".into(),
+                ..Default::default()
             },
             Education {
                 degree: "Advanced Algorithms Cert".into(),
                 institution: "MOOC Academy".into(),
                 start: "2020".into(),
                 end: "2020".into(),
+                ..Default::default()
             },
         ],
         projects: vec![ProjectView {
