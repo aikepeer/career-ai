@@ -37,6 +37,7 @@ fn fixture() -> Profile {
             url: String::new(),
             bullets: vec!["tokenizer in Rust".into()],
         }],
+        ..Default::default()
     }
 }
 

@@ -205,3 +205,81 @@ fn fallback_error_page() -> String {
      </body></html>"
         .to_string()
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SaveThresholdRequest {
+    pub score_threshold: f32,
+}
+
+/// `POST /api/config/threshold` — update `matching.score_threshold` in
+/// `config/local.yaml`. Preserves all other config keys.
+pub async fn api_save_threshold(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<SaveThresholdRequest>,
+) -> impl IntoResponse {
+    let cwd = careerai_core::paths::resolve_root_env();
+    let config_path = cwd.join("config").join("local.yaml");
+
+    match crate::profile_handler::update_threshold_in_config(
+        &config_path,
+        payload.score_threshold,
+    ) {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "success",
+                "message": format!(
+                    "score_threshold set to {:.2} in {}",
+                    payload.score_threshold,
+                    config_path.display()
+                ),
+                "score_threshold": payload.score_threshold,
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/match/rematch-shortlisted` — re-score shortlisted listings
+/// and demote those that fall below the current threshold to filtered_out.
+pub async fn api_rematch_shortlisted(
+    State(_state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let cwd = careerai_core::paths::resolve_root_env();
+    let cfg = match careerai_core::config::CoreConfig::load(&cwd) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("load config: {e}") })),
+            )
+                .into_response();
+        }
+    };
+    match careerai_pipeline::rematch_shortlisted(&cwd, &cfg).await {
+        Ok(report) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "success",
+                "message": format!(
+                    "Re-scored {} listings, demoted {} below threshold ({:.2})",
+                    report.rescored, report.demoted, cfg.matching.score_threshold
+                ),
+                "rescored": report.rescored,
+                "demoted": report.demoted,
+                "threshold": cfg.matching.score_threshold,
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}

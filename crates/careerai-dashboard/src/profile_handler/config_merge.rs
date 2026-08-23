@@ -166,6 +166,43 @@ pub fn update_llm_settings_in_config(
     atomic_write(cfg_path, &yaml)
 }
 
+/// Write `matching.score_threshold` into `config/local.yaml` without
+/// touching any other key. Safe to call while the daemon is running —
+/// the daemon re-reads config on the next cron tick.
+pub fn update_threshold_in_config(cfg_path: &Path, threshold: f32) -> Result<(), String> {
+    if !(0.0..=1.0).contains(&threshold) {
+        return Err(format!("threshold {threshold} out of range [0, 1]"));
+    }
+    let mut doc: serde_yaml::Value = if cfg_path.exists() {
+        let raw = std::fs::read_to_string(cfg_path)
+            .map_err(|e| format!("read {}: {e}", cfg_path.display()))?;
+        serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", cfg_path.display()))?
+    } else {
+        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+    };
+
+    let root = doc
+        .as_mapping_mut()
+        .ok_or_else(|| "config root must be a YAML mapping".to_string())?;
+
+    // Upsert matching.score_threshold, preserving all other matching keys.
+    let matching = root
+        .entry(serde_yaml::Value::String("matching".into()))
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let mm = matching
+        .as_mapping_mut()
+        .ok_or_else(|| "`matching` must be a YAML mapping".to_string())?;
+    mm.insert(
+        serde_yaml::Value::String("score_threshold".into()),
+        serde_yaml::Value::Number(
+            serde_yaml::Number::from(f64::from(threshold)),
+        ),
+    );
+
+    let yaml = serde_yaml::to_string(&doc).map_err(|e| format!("serialize config: {e}"))?;
+    atomic_write(cfg_path, &yaml)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -294,5 +331,29 @@ mod tests {
             "llm:\n  api_key: sk-secret\n"
         );
         assert!(std::fs::read_to_string(&cfg).unwrap().contains("rust"));
+    }
+
+    #[test]
+    fn update_threshold_preserves_other_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config").join("local.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        std::fs::write(&cfg, "llm:\n  backend: auto\nmatching:\n  must_include_skills: [Rust]\n").unwrap();
+
+        update_threshold_in_config(&cfg, 0.65).unwrap();
+
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        assert!(text.contains("score_threshold: 0.65"), "threshold missing: {text}");
+        assert!(text.contains("backend: auto"), "llm.backend lost: {text}");
+        assert!(text.contains("must_include_skills"), "must_include_skills lost: {text}");
+    }
+
+    #[test]
+    fn update_threshold_rejects_out_of_range() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config").join("local.yaml");
+        std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        assert!(update_threshold_in_config(&cfg, 1.5).is_err());
+        assert!(update_threshold_in_config(&cfg, -0.1).is_err());
     }
 }

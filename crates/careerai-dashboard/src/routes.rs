@@ -57,6 +57,15 @@ pub fn build(state: Arc<AppState>) -> Router {
             post(handlers::api_force_shortlist),
         )
         .route("/api/v1/chat", post(crate::chat::api_chat_agent))
+        // Threshold management
+        .route(
+            "/api/config/threshold",
+            post(handlers::api_save_threshold),
+        )
+        .route(
+            "/api/match/rematch-shortlisted",
+            post(handlers::api_rematch_shortlisted),
+        )
         .layer(axum::middleware::from_fn(
             crate::security::enforce_same_origin,
         ))
