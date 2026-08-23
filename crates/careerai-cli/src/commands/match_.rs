@@ -16,8 +16,8 @@ pub async fn run(cwd: &Path, tune: bool, rematch_shortlisted: bool) -> Result<()
     if rematch_shortlisted {
         let report = pipeline::rematch_shortlisted(cwd, &cfg).await?;
         println!(
-            "rematch-shortlisted: re-scored {}, demoted {} below threshold ({:.2})",
-            report.rescored, report.demoted, cfg.matching.score_threshold,
+            "rematch: re-scored {}, demoted {}, promoted {} (threshold: {:.3})",
+            report.rescored, report.demoted, report.promoted, cfg.matching.score_threshold,
         );
         return Ok(());
     }

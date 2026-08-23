@@ -267,11 +267,12 @@ pub async fn api_rematch_shortlisted(
             Json(serde_json::json!({
                 "status": "success",
                 "message": format!(
-                    "Re-scored {} listings, demoted {} below threshold ({:.2})",
-                    report.rescored, report.demoted, cfg.matching.score_threshold
+                    "Re-scored {} listings, demoted {}, promoted {} (threshold: {:.3})",
+                    report.rescored, report.demoted, report.promoted, cfg.matching.score_threshold
                 ),
                 "rescored": report.rescored,
                 "demoted": report.demoted,
+                "promoted": report.promoted,
                 "threshold": cfg.matching.score_threshold,
             })),
         )
