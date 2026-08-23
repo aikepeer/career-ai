@@ -185,14 +185,21 @@ pub fn update_threshold_in_config(cfg_path: &Path, threshold: f32) -> Result<(),
         .as_mapping_mut()
         .ok_or_else(|| "config root must be a YAML mapping".to_string())?;
 
-    // Upsert matching.score_threshold, preserving all other matching keys.
+    // Upsert match.score_threshold (or matching.score_threshold if legacy key exists).
+    let match_key = if root.contains_key(&serde_yaml::Value::String("match".into())) {
+        serde_yaml::Value::String("match".into())
+    } else if root.contains_key(&serde_yaml::Value::String("matching".into())) {
+        serde_yaml::Value::String("matching".into())
+    } else {
+        serde_yaml::Value::String("match".into())
+    };
     let matching = root
-        .entry(serde_yaml::Value::String("matching".into()))
+        .entry(match_key)
         .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
     let mm = matching
         .as_mapping_mut()
-        .ok_or_else(|| "`matching` must be a YAML mapping".to_string())?;
-    let rounded: f64 = format!("{threshold:.2}").parse().unwrap_or(0.70);
+        .ok_or_else(|| "`match` must be a YAML mapping".to_string())?;
+    let rounded: f64 = format!("{threshold:.4}").parse().unwrap_or(0.003);
     mm.insert(
         serde_yaml::Value::String("score_threshold".into()),
         serde_yaml::Value::Number(serde_yaml::Number::from(rounded)),
@@ -337,12 +344,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = tmp.path().join("config").join("local.yaml");
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-        std::fs::write(&cfg, "llm:\n  backend: auto\nmatching:\n  must_include_skills: [Rust]\n").unwrap();
+        std::fs::write(&cfg, "llm:\n  backend: auto\nmatch:\n  must_include_skills: [Rust]\n").unwrap();
 
-        update_threshold_in_config(&cfg, 0.65).unwrap();
+        update_threshold_in_config(&cfg, 0.003).unwrap();
 
         let text = std::fs::read_to_string(&cfg).unwrap();
-        assert!(text.contains("score_threshold: 0.65"), "threshold missing: {text}");
+        assert!(text.contains("score_threshold: 0.003"), "threshold missing: {text}");
         assert!(text.contains("backend: auto"), "llm.backend lost: {text}");
         assert!(text.contains("must_include_skills"), "must_include_skills lost: {text}");
     }

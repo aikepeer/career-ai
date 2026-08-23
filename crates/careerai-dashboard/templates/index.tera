@@ -429,26 +429,25 @@
       <!-- Matching Score Threshold Card -->
       <div class="config-card">
         <div class="config-card-header">
-          <h3>🎚️ Match Score Threshold</h3>
-          <span class="pill pill-info" id="threshold-status-pill">{{ view.config.score_threshold | round(precision=2) }}</span>
+          <h3>🎚️ Jaccard Match Threshold</h3>
+          <span class="pill pill-info" id="threshold-status-pill">{{ view.config.score_threshold }}</span>
         </div>
         <div class="config-details" style="gap:12px;">
           <p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">
-            Listings with a Jaccard similarity score below this value are moved to
-            <em>Filtered Out</em>. Raise it to tighten the shortlist; lower it to
-            widen discovery. Re-run <strong>Rematch Shortlisted</strong> after
-            changing to prune jobs already in your shortlist.
+            Weighted token Jaccard similarity threshold. Listings below this score are moved to
+            <em>Filtered Out</em>. Typical range: <strong>0.003</strong> (broad match) to <strong>0.035+</strong> (top-tier match).
+            Click <strong>🔄 Rematch Shortlisted</strong> to re-evaluate and restore or prune listings.
           </p>
 
           <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
             <label style="font-size:12px; color:var(--text-muted); white-space:nowrap;">Threshold</label>
-            <input type="range" id="threshold-slider" min="0.05" max="0.95" step="0.01"
+            <input type="range" id="threshold-slider" min="0.001" max="0.050" step="0.001"
               value="{{ view.config.score_threshold }}"
               style="flex:1; accent-color: hsl(160 84% 39%);"
               oninput="syncThresholdInput(this.value)">
-            <input type="number" id="threshold-input" min="0.05" max="0.95" step="0.01"
-              value="{{ view.config.score_threshold | round(precision=2) }}"
-              style="width:68px; text-align:center; font-size:13px; font-weight:600; padding:4px 6px;"
+            <input type="number" id="threshold-input" min="0.001" max="0.050" step="0.001"
+              value="{{ view.config.score_threshold }}"
+              style="width:78px; text-align:center; font-size:13px; font-weight:600; padding:4px 6px;"
               class="form-control"
               oninput="syncThresholdSlider(this.value)">
           </div>
@@ -1152,7 +1151,7 @@ function configGenStatus() {
 // ── Matching Score Threshold ──────────────────────────────────────────────
 function syncThresholdInput(val) {
   const inp = document.getElementById('threshold-input');
-  if (inp) inp.value = parseFloat(val).toFixed(2);
+  if (inp) inp.value = parseFloat(val).toFixed(3);
 }
 function syncThresholdSlider(val) {
   const sl = document.getElementById('threshold-slider');
@@ -1163,9 +1162,9 @@ function saveThreshold() {
   const inp = document.getElementById('threshold-input');
   const msg = document.getElementById('threshold-msg');
   const pill = document.getElementById('threshold-status-pill');
-  const val = parseFloat(inp ? inp.value : '0.70');
-  if (isNaN(val) || val < 0.05 || val > 0.95) {
-    if (msg) msg.textContent = 'Value must be between 0.05 and 0.95.';
+  const val = parseFloat(inp ? inp.value : '0.003');
+  if (isNaN(val) || val < 0.0001 || val > 0.50) {
+    if (msg) msg.textContent = 'Value must be between 0.001 and 0.50.';
     return;
   }
   if (msg) msg.textContent = 'Saving…';
@@ -1177,7 +1176,7 @@ function saveThreshold() {
   .then(r => r.json())
   .then(d => {
     if (msg) msg.textContent = d.message || 'Threshold updated.';
-    if (pill) pill.textContent = val.toFixed(2);
+    if (pill) pill.textContent = val.toFixed(3);
   })
   .catch(e => { if (msg) msg.textContent = 'Error: ' + e; });
 }

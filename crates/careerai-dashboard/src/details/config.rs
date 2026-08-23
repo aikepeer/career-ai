@@ -19,7 +19,7 @@ pub(crate) fn load_core_config() -> Option<careerai_core::config::CoreConfig> {
 /// Falls back to the historical display default when config is
 /// unavailable, so the API never lies about a configured value.
 pub(crate) fn resolve_score_threshold(core_cfg: Option<&careerai_core::config::CoreConfig>) -> f32 {
-    core_cfg.map_or(0.70, |c| c.matching.score_threshold)
+    core_cfg.map_or(0.003, |c| c.matching.score_threshold)
 }
 
 pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
