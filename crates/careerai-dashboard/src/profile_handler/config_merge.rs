@@ -192,11 +192,10 @@ pub fn update_threshold_in_config(cfg_path: &Path, threshold: f32) -> Result<(),
     let mm = matching
         .as_mapping_mut()
         .ok_or_else(|| "`matching` must be a YAML mapping".to_string())?;
+    let rounded: f64 = format!("{threshold:.2}").parse().unwrap_or(0.70);
     mm.insert(
         serde_yaml::Value::String("score_threshold".into()),
-        serde_yaml::Value::Number(
-            serde_yaml::Number::from(f64::from(threshold)),
-        ),
+        serde_yaml::Value::Number(serde_yaml::Number::from(rounded)),
     );
 
     let yaml = serde_yaml::to_string(&doc).map_err(|e| format!("serialize config: {e}"))?;
