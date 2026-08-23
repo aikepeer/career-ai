@@ -415,6 +415,7 @@ dependencies = [
  "careerai-core",
  "careerai-db",
  "careerai-llm",
+ "careerai-pipeline",
  "careerai-profile",
  "chromiumoxide",
  "chrono",
