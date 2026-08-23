@@ -113,6 +113,10 @@ pub async fn api_chat_agent(
 }
 
 async fn run_agy_agent(root: &std::path::Path, prompt: &str) -> Option<String> {
+    if std::env::var_os("CAREERAI_DISABLE_AGY").is_some() {
+        return None;
+    }
+
     let bin = which::which("agy")
         .ok()
         .or_else(|| {

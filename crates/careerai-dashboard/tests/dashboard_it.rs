@@ -210,8 +210,10 @@ async fn new_api_endpoints_respond() {
     );
 
     // POST /api/v1/chat — interactive LLM assistant endpoint
+    std::env::set_var("CAREERAI_DISABLE_AGY", "1");
     let chat_body = r#"{"message":"Analyze my current job match pipeline statistics"}"#;
     let chat_res = curl_post_json(&format!("{base}/api/v1/chat"), chat_body).await;
+    std::env::remove_var("CAREERAI_DISABLE_AGY");
     assert!(
         chat_res.contains("reply") || chat_res.contains("status"),
         "chat endpoint unexpected: {chat_res}"
