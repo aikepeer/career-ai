@@ -1,5 +1,7 @@
 //! `careerai match` — run filters + scoring against discovered listings.
 //! `--tune` prints the score histogram instead of persisting matches.
+//! `--rematch-shortlisted` re-scores shortlisted listings and demotes
+//! those below the current threshold back to filtered_out.
 
 use std::path::Path;
 
@@ -8,8 +10,18 @@ use anyhow::{Context, Result};
 use careerai_core::config::CoreConfig;
 use careerai_pipeline as pipeline;
 
-pub async fn run(cwd: &Path, tune: bool) -> Result<()> {
+pub async fn run(cwd: &Path, tune: bool, rematch_shortlisted: bool) -> Result<()> {
     let cfg = CoreConfig::load(cwd).context("load config")?;
+
+    if rematch_shortlisted {
+        let report = pipeline::rematch_shortlisted(cwd, &cfg).await?;
+        println!(
+            "rematch-shortlisted: re-scored {}, demoted {} below threshold ({:.2})",
+            report.rescored, report.demoted, cfg.matching.score_threshold,
+        );
+        return Ok(());
+    }
+
     let report = pipeline::match_all(cwd, &cfg, tune).await?;
     if tune {
         println!(

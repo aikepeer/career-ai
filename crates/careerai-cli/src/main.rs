@@ -64,7 +64,9 @@ async fn main() -> Result<()> {
         }
         Command::Profile { command } => commands::profile::run(command, backend_override)?,
         Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
-        Command::Match { tune } => commands::match_::run(&cwd, tune).await?,
+        Command::Match { tune, rematch_shortlisted } => {
+            commands::match_::run(&cwd, tune, rematch_shortlisted).await?
+        }
         Command::Run { auto_submit } => {
             let cfg = load_cfg(&cwd)?;
             commands::run::run(&cwd, &cfg, auto_submit).await?;

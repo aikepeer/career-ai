@@ -58,6 +58,11 @@ pub(crate) enum Command {
     Match {
         #[arg(long)]
         tune: bool,
+        /// Re-score already-shortlisted listings and demote any that fall
+        /// below the current threshold back to filtered_out. Useful after
+        /// raising score_threshold in local.yaml.
+        #[arg(long = "rematch-shortlisted")]
+        rematch_shortlisted: bool,
     },
     /// Run the full pipeline (match → tailor → render → apply) in one shot.
     Run {
