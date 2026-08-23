@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use tracing::{info, warn};
+use tracing::info;
 
 use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
@@ -47,7 +47,7 @@ pub async fn rematch_shortlisted(root: &Path, cfg: &CoreConfig) -> Result<Rematc
         .await
         .context("list filtered_out")?;
 
-    let mut rescored = shortlisted.len() + filtered_out.len();
+    let rescored = shortlisted.len() + filtered_out.len();
     let mut demoted = 0usize;
     let mut promoted = 0usize;
 
