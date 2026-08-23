@@ -381,7 +381,7 @@
             <div class="source-stats">
               <span class="source-count">{{ src.listing_count }} jobs</span>
               {% if src.url %}
-              <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="pill pill-info source-portal-btn" title="Open {{ src.name }} portal">🌐 portal ↗</a>
+              <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="source-portal-btn" title="Open {{ src.name }} portal">🌐 portal ↗</a>
               {% else %}
               <span class="source-portal-btn" style="opacity:0.2;">—</span>
               {% endif %}
