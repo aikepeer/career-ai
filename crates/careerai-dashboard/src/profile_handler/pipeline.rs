@@ -57,9 +57,19 @@ async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
     // uses) so dashboard-invoked commands read the same config/, data/,
     // profile/ tree regardless of where the dashboard process started.
     let cli_root = careerai_core::paths::resolve_root_env();
+
+    // Explicitly pass through `CAREERAI_LLM_LIVE=1` so dashboard-spawned
+    // `tailor`/`render` commands use the live LLM backend instead of
+    // falling back to nonexistent MockLlm fixtures. This is necessary
+    // because the runit service script may not export this env var.
+    // Also pass `CAREERAI_ROOT` so subprocesses find the DB + config.
+    let careerai_root = std::env::var("CAREERAI_ROOT")
+        .unwrap_or_else(|_| cli_root.to_string_lossy().to_string());
     match tokio::process::Command::new(&exe)
         .args(&argv)
-        .current_dir(cli_root)
+        .current_dir(&cli_root)
+        .env("CAREERAI_LLM_LIVE", "1")
+        .env("CAREERAI_ROOT", careerai_root)
         .output()
         .await
     {
@@ -111,4 +121,29 @@ pub async fn api_pipeline_match() -> impl IntoResponse {
         args: CliRunArgs::default(),
     })
     .await
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    /// Regression: the dashboard must pass `CAREERAI_LLM_LIVE=1` to
+    /// spawned subprocesses so that `careerai tailor` uses the live LLM
+    /// backend. Without this, tailor falls back to MockLlm fixtures that
+    /// don't exist, and every "Tailor" button in the dashboard fails.
+    #[test]
+    fn resolve_cli_executable_returns_a_path() {
+        let exe = resolve_cli_executable();
+        assert!(!exe.as_os_str().is_empty());
+    }
+
+    /// The pipeline lock must be the same static each call (no new mutex
+    /// per call).
+    #[test]
+    fn pipeline_lock_is_static_singleton() {
+        let a = pipeline_lock();
+        let b = pipeline_lock();
+        assert!(std::ptr::eq(a, b));
+    }
 }

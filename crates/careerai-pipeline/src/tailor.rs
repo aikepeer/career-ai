@@ -112,11 +112,26 @@ pub async fn tailor_one(
                             });
                         }
                         Err(e) => {
-                            tracing::warn!(
-                                target = "tailor",
-                                error = %format_args!("{e:#}"),
-                                "live tailoring failed; falling back to MockLlm fixtures"
-                            );
+                            // Only fall back to MockLlm fixtures for
+                            // transport/upstream LLM failures (network,
+                            // auth, timeout). Content validation errors
+                            // (invented content, schema, cover letter too
+                            // long) are quality issues that fixtures
+                            // won't fix either — surface them so the
+                            // operator sees the real problem instead of
+                            // a misleading "no fixtures" error.
+                            if matches!(
+                                e,
+                                careerai_tailor::TailorError::Llm(_)
+                            ) {
+                                tracing::warn!(
+                                    target = "tailor",
+                                    error = %format_args!("{e:#}"),
+                                    "live LLM call failed; falling back to MockLlm fixtures"
+                                );
+                            } else {
+                                return Err(e.into());
+                            }
                         }
                     }
                 }
