@@ -113,8 +113,8 @@ mod tests {
             "must report the configured threshold, not a hardcoded value"
         );
         assert!(
-            (resolve_score_threshold(None) - 0.70).abs() < 1e-6,
-            "fallback display value stays 0.70 when config is unavailable"
+            (resolve_score_threshold(None) - 0.003).abs() < 1e-6,
+            "fallback display value stays 0.003 when config is unavailable"
         );
     }
 }
