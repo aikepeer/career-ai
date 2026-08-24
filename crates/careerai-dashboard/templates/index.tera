@@ -545,6 +545,20 @@
         </div>
       </div>
 
+      <!-- Config Prompt Assistant — RIGHT of Generate Config from Profile -->
+      <div class="config-card">
+        <div class="config-card-header">
+          <h3>💬 Config Prompt Assistant</h3>
+          <span class="pill pill-info">AI Suggestions</span>
+        </div>
+        <p class="card-subtitle" style="margin-bottom:12px; color:var(--text-secondary); font-size:13px;">Describe your target jobs in plain language to get keyword suggestions for <code>config/local.yaml</code></p>
+        <div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+          <input type="text" id="config-chat-input" class="form-control" placeholder='e.g. "Focus on Remote Embedded Linux and Freelance AI jobs in India"' style="flex:1; min-width:240px;">
+          <button onclick="sendConfigPrompt()" class="btn-primary" style="flex-shrink:0;">💡 Get Suggestions</button>
+        </div>
+        <div id="config-chat-response" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px; font-family:var(--mono); font-size:12px; white-space:pre-wrap; color:var(--text-secondary); display:none;"></div>
+      </div>
+
       <!-- Profile Import + Editable Profile Card — FULL WIDTH -->
       <div class="config-card config-card-full">
         <div class="config-card-header">
@@ -668,20 +682,6 @@
             <span id="profile-save-status" class="save-status"></span>
           </div>
         </div>
-      </div>
-
-      <!-- LLM Config Prompt Chat Assistant — FULL WIDTH -->
-      <div class="config-card config-card-full">
-        <div class="config-card-header">
-          <h3>💬 Config Prompt Assistant</h3>
-          <span class="pill pill-info">AI Suggestions</span>
-        </div>
-        <p class="card-subtitle" style="margin-bottom:12px; color:var(--text-secondary); font-size:13px;">Describe your target jobs in plain language to get keyword suggestions for <code>config/local.yaml</code></p>
-        <div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
-          <input type="text" id="config-chat-input" class="form-control" placeholder='e.g. "Focus on Remote Embedded Linux and Freelance AI jobs in India"' style="flex:1; min-width:240px;">
-          <button onclick="sendConfigPrompt()" class="btn-primary" style="flex-shrink:0;">💡 Get Suggestions</button>
-        </div>
-        <div id="config-chat-response" style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px; font-family:var(--mono); font-size:12px; white-space:pre-wrap; color:var(--text-secondary); display:none;"></div>
       </div>
     </div>
   </div>
@@ -1563,10 +1563,16 @@ function runBatchTailorSequence(ids, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring ' + ids.length + '...'; }
   var nextIndex = 0;
+  var failed = [];
   function processNext() {
     if (nextIndex >= ids.length) {
-      if (btn) btn.innerHTML = '✅ All Tailored!';
-      setTimeout(function() { location.reload(); }, 1200);
+      if (failed.length === 0) {
+        if (btn) btn.innerHTML = '✅ All ' + ids.length + ' Tailored!';
+      } else {
+        if (btn) btn.innerHTML = '⚠️ ' + failed.length + '/' + ids.length + ' failed';
+        console.warn('Batch tailor failures:', failed);
+      }
+      setTimeout(function() { location.reload(); }, 1500);
       return;
     }
     var id = ids[nextIndex];
@@ -1576,11 +1582,17 @@ function runBatchTailorSequence(ids, btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: 'tailor', args: { listing_id: id } })
     })
-    .then(function() {
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.status !== 'success') {
+        failed.push({ id: id, error: d.error || d.message || 'unknown' });
+        console.error('Tailor failed for', id, ':', d.error || d.message);
+      }
       nextIndex++;
       processNext();
     })
-    .catch(function() {
+    .catch(function(err) {
+      failed.push({ id: id, error: String(err) });
       nextIndex++;
       processNext();
     });
