@@ -100,8 +100,8 @@ html[data-theme="light"] body::before { opacity: 0.55; }
 a { color: var(--accent-cyan); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.title-link { color: var(--accent-cyan); font-weight: 600; }
-.title-link:hover { text-decoration: underline; }
+.title-link { color: var(--accent-amber); font-weight: 600; text-decoration: underline; text-decoration-color: rgba(251, 191, 36, 0.35); text-underline-offset: 2px; }
+.title-link:hover { text-decoration: underline; text-decoration-color: var(--accent-amber); }
 
 code {
   font-family: var(--mono);
@@ -705,7 +705,7 @@ header {
 .detail-link-btn {
   background: transparent;
   border: none;
-  color: var(--accent-cyan);
+  color: var(--accent-amber);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -836,7 +836,7 @@ header {
 .code-link {
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--accent-cyan);
+  color: var(--accent-amber);
   cursor: pointer;
 }
 .code-link:hover { text-decoration: underline; }
@@ -858,8 +858,8 @@ header {
   vertical-align: middle;
 }
 .listing-id-cell:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan);
+  color: var(--accent-amber);
+  border-color: var(--accent-amber);
 }
 
 .transition-pill {
@@ -970,9 +970,9 @@ header {
   padding: 2px 8px;
   border-radius: 999px;
   text-decoration: none;
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -984,9 +984,9 @@ header {
   transition: all 0.15s ease;
 }
 .source-portal-btn:hover {
-  background: rgba(56, 189, 248, 0.24);
-  border-color: #38bdf8;
-  color: #7dd3fc;
+  background: rgba(245, 158, 11, 0.28);
+  border-color: #f59e0b;
+  color: #fbbf24;
   text-decoration: none;
 }
 span.source-portal-btn {
