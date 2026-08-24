@@ -103,6 +103,12 @@ impl ClaudeCliLlm {
         // and `--output-format json` but has no `--append-system-prompt-file`
         // flag and reports a different envelope — both handled below.
         let is_agy = bin_str.contains("agy");
+        // `goose` is an agentic AI CLI driven in headless single-turn
+        // mode (`goose run --no-tui --no-session --quiet --output-format
+        // json --max-turns 1`). It has no `--append-system-prompt-file`
+        // flag and emits a different JSON envelope (`messages` array +
+        // `metadata`), both handled below.
+        let is_goose = bin_str.contains("goose");
 
         // SECURITY: the system prompt + profile block can carry PII
         // (rendered profile YAML). Passing them via argv would expose
@@ -114,7 +120,9 @@ impl ClaudeCliLlm {
         // argv argument (stdin prompts make it print flag help instead
         // of responding), so its system text + profile must ride in the
         // prompt argument — an accepted agy-specific trade-off the
-        // operator opts into by configuring the backend.
+        // operator opts into by configuring the backend. `goose` reads
+        // the prompt from stdin, so folding system + profile into the
+        // stdin prompt keeps PII out of argv entirely.
         let combined = if req.system.is_empty() && req.profile_block.is_empty() {
             String::new()
         } else if req.profile_block.is_empty() {
@@ -124,7 +132,11 @@ impl ClaudeCliLlm {
         } else {
             format!("{}\n\n{}", req.system, req.profile_block)
         };
-        let agy_prompt = if !is_agy {
+        // Backends that fold system + profile into the prompt instead of
+        // using `--append-system-prompt-file`. `agy` delivers the folded
+        // prompt via argv; `goose` delivers it via stdin.
+        let folded = is_agy || is_goose;
+        let folded_prompt = if !folded {
             String::new()
         } else if combined.is_empty() {
             req.user.clone()
@@ -146,7 +158,7 @@ impl ClaudeCliLlm {
             // real binary — flags before the prompt make agy print its
             // `--output-format` help instead of responding).
             cmd.arg("-p")
-                .arg(agy_prompt)
+                .arg(&folded_prompt)
                 .arg("--output-format")
                 .arg("json");
             // Empty model -> let agy fall back to its own default.
@@ -155,8 +167,28 @@ impl ClaudeCliLlm {
             if !model.is_empty() {
                 cmd.arg("--model").arg(model);
             }
-        } else if bin_str.contains("goose") {
-            cmd.arg("run");
+        } else if is_goose {
+            // goose is an agentic CLI; drive it in headless single-turn
+            // mode so it behaves like a one-shot completion:
+            //   `--no-session` keeps it non-interactive (no session file),
+            //   `--no-profile` disables all MCP extensions/tools so goose
+            //     can't loop on tool calls (without it, goose wastes turns
+            //     on denied tool attempts or hangs indefinitely),
+            //   `--quiet` suppresses the banner so stdout is pure JSON,
+            //   `--output-format json` produces a parseable envelope,
+            //   `--max-turns 3` is a safety cap (goose finishes in one turn
+            //     with `--no-profile`, but the cap prevents any runaway),
+            //   `-i -` reads the folded prompt from stdin.
+            cmd.arg("run")
+                .arg("--no-session")
+                .arg("--no-profile")
+                .arg("--quiet")
+                .arg("--output-format")
+                .arg("json")
+                .arg("--max-turns")
+                .arg("3")
+                .arg("-i")
+                .arg("-");
         } else if bin_str.contains("aider") {
             cmd.arg("--message");
         } else {
@@ -166,7 +198,7 @@ impl ClaudeCliLlm {
         // The temp file is held alive until after `wait_with_output`
         // returns; `_prompt_guard` keeps the `NamedTempFile` in scope so
         // its destructor does not unlink before claude reads it.
-        let _prompt_guard: Option<tempfile::NamedTempFile> = if is_agy || combined.is_empty() {
+        let _prompt_guard: Option<tempfile::NamedTempFile> = if folded || combined.is_empty() {
             None
         } else {
             let tmp = write_private_prompt_file(&combined).map_err(|e| {
@@ -191,10 +223,15 @@ impl ClaudeCliLlm {
         // path that prints its JSON and exits before reading stdin).
         // Surface the child's exit + stdout instead of failing the
         // write. agy receives its prompt via argv and never reads
-        // stdin; still drop the pipe so it sees EOF.
+        // stdin; still drop the pipe so it sees EOF. goose reads the
+        // folded (system + profile + user) prompt from stdin.
         if let Some(mut stdin) = child.stdin.take() {
             if !is_agy {
-                let user = req.user.clone();
+                let user = if is_goose {
+                    folded_prompt.clone()
+                } else {
+                    req.user.clone()
+                };
                 match stdin.write_all(user.as_bytes()).await {
                     Ok(()) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
@@ -272,6 +309,36 @@ impl ClaudeCliLlm {
                 });
             }
             return Err(classify_error_payload(&parsed));
+        }
+
+        // goose's envelope: a `messages` array where the last assistant
+        // message carries the reply text, plus a `metadata` object with
+        // token counts. Produced by `goose run --output-format json`.
+        if !parsed.messages.is_empty() {
+            let text = parsed
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.role == "assistant")
+                .and_then(|m| {
+                    m.content
+                        .iter()
+                        .rev()
+                        .find_map(|c| (!c.text.is_empty()).then(|| c.text.clone()))
+                })
+                .ok_or_else(|| {
+                    ClaudeCliError::ParseJson(
+                        "goose: no assistant text found in messages".into(),
+                    )
+                })?;
+            let usage = parsed.goose_metadata.unwrap_or_default();
+            return Ok(LlmResponse {
+                text,
+                prompt_tokens: clamp_u64_u32(usage.input_tokens),
+                completion_tokens: clamp_u64_u32(usage.output_tokens),
+                cache_hit: false,
+                cached_prompt_tokens: 0,
+            });
         }
 
         if parsed.is_error.unwrap_or(false) {
