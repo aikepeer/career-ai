@@ -1,7 +1,6 @@
 //! Re-match stage — re-score shortlisted listings against a new threshold.
 //! Extracted from `match_.rs` to keep file sizes under the project cap.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -10,7 +9,7 @@ use tracing::info;
 use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
 use careerai_db::queries;
-use careerai_match::{flatten_profile, rank_all, split_at_threshold, JaccardScorer};
+use careerai_match::{flatten_profile, JaccardScorer};
 use careerai_sources::RawListing;
 
 use crate::{load_profile, open_pool};
@@ -51,48 +50,49 @@ pub async fn rematch_shortlisted(root: &Path, cfg: &CoreConfig) -> Result<Rematc
     let mut demoted = 0usize;
     let mut promoted = 0usize;
 
-    // 1. Demote shortlisted listings below threshold
+    // 1. Demote shortlisted listings that fail classifier rules or fall below threshold
     if !shortlisted.is_empty() {
-        let raws: Vec<RawListing> = shortlisted
-            .iter()
-            .map(|l| RawListing {
-                source: l.source.clone(),
-                external_id: l.external_id.clone(),
-                title: l.title.clone(),
-                company: l.company.clone(),
-                location: l.location.clone(),
-                url: l.url.clone(),
-                description: l.description.clone(),
-                raw_json: l.raw_json.clone(),
-            })
-            .collect();
-
-        let ranked = rank_all(&JaccardScorer, &profile_text, &raws);
-        let (_, drop) = split_at_threshold(ranked, threshold);
-
-        let id_map: HashMap<(String, String), &careerai_db::models::Listing> = shortlisted
-            .iter()
-            .map(|l| ((l.source.clone(), l.external_id.clone()), l))
-            .collect();
-
-        for scored in &drop {
-            let Some(db_row) = id_map.get(&(
-                scored.listing.source.clone(),
-                scored.listing.external_id.clone(),
-            )) else {
-                continue;
+        for db_row in &shortlisted {
+            let raw = RawListing {
+                source: db_row.source.clone(),
+                external_id: db_row.external_id.clone(),
+                title: db_row.title.clone(),
+                company: db_row.company.clone(),
+                location: db_row.location.clone(),
+                url: db_row.url.clone(),
+                description: db_row.description.clone(),
+                raw_json: db_row.raw_json.clone(),
             };
-            queries::transition(
-                &pool,
-                &db_row.id,
-                ListingState::FilteredOut,
-                Some(&format!(
-                    "rematch: score {:.3} below new threshold {:.3}",
-                    scored.score, threshold
-                )),
-            )
-            .await?;
-            demoted += 1;
+
+            match careerai_match::classify(&raw, cfg, &rules) {
+                careerai_match::Decision::Reject(reason) => {
+                    queries::transition(
+                        &pool,
+                        &db_row.id,
+                        ListingState::FilteredOut,
+                        Some(&format!("rematch filter reject: {reason}")),
+                    )
+                    .await?;
+                    demoted += 1;
+                }
+                careerai_match::Decision::Keep => {
+                    let score = careerai_match::Scorer::score(&JaccardScorer, &profile_text, &raw);
+                    let _ = queries::set_score(&pool, &db_row.id, f64::from(score)).await;
+                    if score < threshold {
+                        queries::transition(
+                            &pool,
+                            &db_row.id,
+                            ListingState::FilteredOut,
+                            Some(&format!(
+                                "rematch: score {:.3} below threshold {:.3}",
+                                score, threshold
+                            )),
+                        )
+                        .await?;
+                        demoted += 1;
+                    }
+                }
+            }
         }
     }
 

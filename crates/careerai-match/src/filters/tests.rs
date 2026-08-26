@@ -233,3 +233,51 @@ mod must_include_tests {
         assert!(apply_must_include_filter(&listing, &cfg));
     }
 }
+
+mod boundary_keyword_tests {
+    use super::super::classify::contains_keyword_boundary;
+
+    #[test]
+    fn single_letter_c_does_not_match_inside_words() {
+        assert!(!contains_keyword_boundary(
+            "we are looking for a candidate to scale our company",
+            "c"
+        ));
+        assert!(contains_keyword_boundary(
+            "requires experience in c and assembly",
+            "c"
+        ));
+        assert!(contains_keyword_boundary("c, c++, linux", "c"));
+        assert!(contains_keyword_boundary("c/c++ embedded", "c"));
+    }
+
+    #[test]
+    fn ai_ml_does_not_match_inside_english_words() {
+        assert!(!contains_keyword_boundary(
+            "maintain email detail contain claims",
+            "ai"
+        ));
+        assert!(!contains_keyword_boundary(
+            "html yaml xml seamless workflow",
+            "ml"
+        ));
+        assert!(contains_keyword_boundary(
+            "senior ai engineer building llms",
+            "ai"
+        ));
+        assert!(contains_keyword_boundary("hands-on ml experience", "ml"));
+        assert!(contains_keyword_boundary("edge ai/ml applications", "ai"));
+    }
+
+    #[test]
+    fn go_does_not_match_algorithm_or_ongoing() {
+        assert!(!contains_keyword_boundary(
+            "designing algorithms for ongoing projects",
+            "go"
+        ));
+        assert!(contains_keyword_boundary(
+            "backend services in go and rust",
+            "go"
+        ));
+    }
+}

@@ -70,7 +70,7 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
         && !rules
             .require_any_keyword_in_jd
             .iter()
-            .any(|k| desc_lc.contains(k.as_str()))
+            .any(|k| contains_keyword_boundary(&desc_lc, k.as_str()))
     {
         return Decision::Reject("no required JD keyword");
     }
@@ -82,15 +82,50 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
             .flat_map(|d| &d.keywords_any)
             .map(|k| k.to_lowercase())
             .collect();
-        if !domain_kws_lc
-            .iter()
-            .any(|k| title_lc.contains(k.as_str()) || desc_lc.contains(k.as_str()))
-        {
+        if !domain_kws_lc.iter().any(|k| {
+            contains_keyword_boundary(&title_lc, k.as_str())
+                || contains_keyword_boundary(&desc_lc, k.as_str())
+        }) {
             return Decision::Reject("no configured domain keyword in title or JD");
         }
     }
 
     Decision::Keep
+}
+
+/// Check if `haystack` contains `needle` with word boundaries (non-alphanumeric
+/// characters or start/end of string). This prevents short keywords like "C",
+/// "AI", "ML", "Go" from false-matching within unrelated words like "company",
+/// "detail", "email", "html", "algorithm".
+pub fn contains_keyword_boundary(haystack: &str, needle: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    let mut search_from = 0;
+    while let Some(rel_pos) = haystack[search_from..].find(needle) {
+        let start = search_from + rel_pos;
+        let end = start + needle.len();
+
+        let left_ok = start == 0
+            || haystack[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|c| !c.is_alphanumeric());
+
+        let right_ok = end >= haystack.len()
+            || haystack[end..]
+                .chars()
+                .next()
+                .is_some_and(|c| !c.is_alphanumeric() || (needle.ends_with('+') && c == '+'));
+
+        if left_ok && right_ok {
+            return true;
+        }
+
+        search_from = start + needle.chars().next().map_or(1, char::len_utf8);
+    }
+    false
 }
 
 fn location_ok(listing: &RawListing, allowlist_lc: &[String]) -> bool {
