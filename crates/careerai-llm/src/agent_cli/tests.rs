@@ -7,6 +7,12 @@ use crate::error::LlmError;
 
 use crate::ENV_LOCK;
 
+#[cfg(unix)]
+mod agy_tests;
+#[cfg(unix)]
+mod goose_backend_tests;
+#[cfg(unix)]
+mod goose_tests;
 mod stub_binary_tests;
 
 pub(crate) fn fixture_path(name: &str) -> PathBuf {
@@ -26,6 +32,44 @@ fn parse_real_fixture_shape() {
     let u = parsed.usage.expect("usage present");
     assert_eq!(u.input_tokens, 3);
     assert_eq!(u.output_tokens, 4);
+}
+
+#[test]
+fn parse_goose_fixture_shape_and_usage() {
+    let body = std::fs::read_to_string(fixture_path("goose_run.json")).unwrap();
+    let parsed: ClaudeCliResult = serde_json::from_str(&body).unwrap();
+    let assistant = parsed
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "assistant")
+        .unwrap();
+    assert_eq!(assistant.content[0].text, "GOOSE_OK");
+    let metadata = parsed.goose_metadata.unwrap();
+    assert_eq!(metadata.input_tokens, Some(2988));
+    assert_eq!(metadata.output_tokens, Some(5));
+    assert_eq!(metadata.total_tokens, Some(2993));
+    assert_eq!(metadata.status.as_deref(), Some("completed"));
+}
+
+#[test]
+fn goose_fixture_without_usage_is_valid_but_reports_zero() {
+    let body = r#"{"messages":[{"role":"assistant","content":[{"text":"OK"}]}],"metadata":{"total_tokens":null,"status":"completed"}}"#;
+    let parsed: ClaudeCliResult = serde_json::from_str(body).unwrap();
+    let metadata = parsed.goose_metadata.unwrap();
+    assert_eq!(metadata.input_tokens, None);
+    assert_eq!(metadata.output_tokens, None);
+    assert_eq!(metadata.status.as_deref(), Some("completed"));
+}
+
+#[test]
+fn goose_non_completed_status_is_not_success() {
+    let body = r#"{"messages":[{"role":"assistant","content":[{"text":"partial"}]}],"metadata":{"status":"failed"}}"#;
+    let parsed: ClaudeCliResult = serde_json::from_str(body).unwrap();
+    assert_eq!(
+        parsed.goose_metadata.unwrap().status.as_deref(),
+        Some("failed")
+    );
 }
 
 #[test]
@@ -123,6 +167,37 @@ fn locate_binary_rejects_missing_override() {
         other => panic!("expected BinaryUnusable, got {other:?}"),
     }
     std::env::remove_var("CAREERAI_CLAUDE_BIN");
+}
+
+#[cfg(unix)]
+#[test]
+fn named_binary_ignores_claude_override() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let claude_override = dir.path().join("claude-override");
+    let goose = dir.path().join("goose");
+    for path in [&claude_override, &goose] {
+        std::fs::write(path, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let previous_override = std::env::var("CAREERAI_CLAUDE_BIN").ok();
+    let previous_path = std::env::var("PATH").ok();
+    std::env::set_var("CAREERAI_CLAUDE_BIN", &claude_override);
+    std::env::set_var("PATH", dir.path());
+    let resolved = super::binary_locator::locate_named_binary("goose").unwrap();
+    assert_eq!(resolved, goose);
+    match previous_override {
+        Some(value) => std::env::set_var("CAREERAI_CLAUDE_BIN", value),
+        None => std::env::remove_var("CAREERAI_CLAUDE_BIN"),
+    }
+    match previous_path {
+        Some(value) => std::env::set_var("PATH", value),
+        None => std::env::remove_var("PATH"),
+    }
 }
 
 /// `CAREERAI_CLAUDE_BIN` pointing at a non-executable file (e.g. a

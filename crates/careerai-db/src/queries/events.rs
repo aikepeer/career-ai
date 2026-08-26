@@ -33,6 +33,41 @@ pub async fn list_recent_events(pool: &SqlitePool, limit: u32, offset: u32) -> R
     Ok(rows)
 }
 
+/// Count submissions for a given source since a specific UTC timestamp.
+pub async fn count_submissions_since(
+    pool: &SqlitePool,
+    source: &str,
+    since: chrono::DateTime<chrono::Utc>,
+) -> Result<u32> {
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM events e
+         JOIN listings l ON e.listing_id = l.id
+         WHERE l.source = ? AND e.to_state = 'submitted' AND e.created_at >= ?",
+    )
+    .bind(source)
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
+    Ok(u32::try_from(row.0).unwrap_or(u32::MAX))
+}
+
+/// Fetch the most recent submission event timestamp for a given source.
+pub async fn latest_submission_time(
+    pool: &SqlitePool,
+    source: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    let row: Option<(chrono::DateTime<chrono::Utc>,)> = sqlx::query_as(
+        "SELECT e.created_at FROM events e
+         JOIN listings l ON e.listing_id = l.id
+         WHERE l.source = ? AND e.to_state = 'submitted'
+         ORDER BY e.created_at DESC LIMIT 1",
+    )
+    .bind(source)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| r.0))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

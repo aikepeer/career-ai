@@ -19,7 +19,7 @@ use tracing::info;
 use crate::cache::Cache;
 
 #[cfg(feature = "live-llm-cli")]
-use crate::claude_cli::{locate_claude_binary, ClaudeCliError, ClaudeCliLlm};
+use crate::agent_cli::{locate_claude_binary, AgentCliError, AgentCliLlm};
 #[cfg(feature = "live-llm-api")]
 use crate::rig::{Provider, RigLlm};
 
@@ -45,11 +45,13 @@ pub(super) async fn resolve_auto(
                     "auto-resolved backend: claude-cli"
                 );
                 let model = pick_default_model(cfg, Provider::Anthropic);
-                return Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
+                return Ok(Backend::ClaudeCli(AgentCliLlm::new_with_options(
                     bin,
                     model,
+                    cfg.provider.clone(),
                     cache,
                     cfg.timeout_seconds.max(1),
+                    cfg.max_retries,
                 )));
             }
             debug!(
@@ -82,7 +84,7 @@ pub(super) async fn build_cli(
     cache: Arc<Cache>,
 ) -> std::result::Result<Backend, BackendError> {
     let bin = locate_claude_binary().map_err(|e| match e {
-        ClaudeCliError::NotInstalled => BackendError::CliMissing,
+        AgentCliError::NotInstalled => BackendError::CliMissing,
         other => BackendError::Llm(crate::error::LlmError::from(other)),
     })?;
 
@@ -91,11 +93,13 @@ pub(super) async fn build_cli(
     }
 
     let model = pick_default_model(cfg, Provider::Anthropic);
-    Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
+    Ok(Backend::ClaudeCli(AgentCliLlm::new_with_options(
         bin,
         model,
+        cfg.provider.clone(),
         cache,
         cfg.timeout_seconds.max(1),
+        cfg.max_retries,
     )))
 }
 
@@ -105,17 +109,19 @@ pub(super) fn build_named_cli(
     cfg: &LlmConfig,
     cache: Arc<Cache>,
 ) -> std::result::Result<Backend, BackendError> {
-    let bin = crate::claude_cli::locate_named_binary(name).map_err(|e| match e {
-        ClaudeCliError::NotInstalled => BackendError::CliMissing,
+    let bin = crate::agent_cli::locate_named_binary(name).map_err(|e| match e {
+        AgentCliError::NotInstalled => BackendError::CliMissing,
         other => BackendError::Llm(crate::error::LlmError::from(other)),
     })?;
 
     let model = pick_default_model(cfg, Provider::Anthropic);
-    Ok(Backend::ClaudeCli(ClaudeCliLlm::new(
+    Ok(Backend::ClaudeCli(AgentCliLlm::new_with_options(
         bin,
         model,
+        cfg.provider.clone(),
         cache,
         cfg.timeout_seconds.max(1),
+        cfg.max_retries,
     )))
 }
 
@@ -155,13 +161,14 @@ pub(super) fn build_api(
         .ok_or(BackendError::ApiKeyMissing)?;
     let provider = provider_from_config(&cfg.provider).unwrap_or_else(detect_provider);
     let model = pick_default_model(cfg, provider);
-    let llm = RigLlm::with_api_key_and_base_url(
+    let llm = RigLlm::with_api_key_and_base_url_with_retries(
         provider,
         key,
         model,
         cfg.api_base_url.clone(),
         cache,
         cfg.timeout_seconds.max(1),
+        cfg.max_retries,
     )
     .map_err(BackendError::Llm)?;
     info!(

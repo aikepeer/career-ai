@@ -6,46 +6,60 @@ use crate::error::LlmError;
 
 use super::response::ClaudeCliResult;
 
-/// Errors specific to the `claude` CLI subprocess driver.
+/// Errors specific to CLI and agent subprocess drivers.
 #[derive(Debug, thiserror::Error)]
-pub enum ClaudeCliError {
-    #[error("`claude` binary not found on PATH (install Claude Code or set CAREERAI_CLAUDE_BIN)")]
+pub enum AgentCliError {
+    #[error("CLI binary not found on PATH (install agent CLI or set binary override)")]
     NotInstalled,
 
-    #[error("`claude` binary at {path} is not usable: {reason}")]
+    #[error("CLI binary at {path} is not usable: {reason}")]
     BinaryUnusable { path: String, reason: String },
 
-    #[error("claude CLI session is not authenticated; run `claude login` (or `/login` in claude)")]
+    #[error("CLI session is not authenticated; run `login` command")]
     AuthExpired,
 
-    #[error("claude CLI rate-limited; retry after {retry_after_seconds}s")]
+    #[error("CLI rate-limited; retry after {retry_after_seconds}s")]
     RateLimited { retry_after_seconds: u64 },
 
-    #[error("claude CLI transport error: {0}")]
+    #[error("CLI transport error: {0}")]
     Transport(String),
 
-    #[error("claude CLI returned malformed JSON: {0}")]
+    #[error("CLI returned malformed JSON: {0}")]
     ParseJson(String),
 
-    #[error("claude CLI timed out after {seconds}s")]
+    #[error("CLI timed out after {seconds}s")]
     Timeout { seconds: u64 },
 }
 
-impl From<ClaudeCliError> for LlmError {
-    fn from(value: ClaudeCliError) -> Self {
+/// Backwards-compatible type alias for `AgentCliError`.
+pub type ClaudeCliError = AgentCliError;
+
+impl AgentCliError {
+    pub(crate) fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::RateLimited { .. } | Self::Timeout { .. } | Self::Transport(_)
+        )
+    }
+}
+
+impl From<AgentCliError> for LlmError {
+    fn from(value: AgentCliError) -> Self {
         match value {
-            ClaudeCliError::NotInstalled | ClaudeCliError::AuthExpired => {
+            AgentCliError::NotInstalled | AgentCliError::AuthExpired => {
                 LlmError::Upstream(value.to_string())
             }
-            ClaudeCliError::BinaryUnusable { .. } => LlmError::Upstream(value.to_string()),
-            ClaudeCliError::RateLimited {
+            AgentCliError::BinaryUnusable { .. } => LlmError::Upstream(value.to_string()),
+            AgentCliError::RateLimited {
                 retry_after_seconds,
             } => LlmError::RateLimited {
                 retry_after_seconds,
             },
-            ClaudeCliError::Transport(msg) => LlmError::Upstream(format!("claude-cli: {msg}")),
-            ClaudeCliError::ParseJson(msg) => LlmError::Schema(format!("claude-cli: {msg}")),
-            ClaudeCliError::Timeout { seconds } => LlmError::Timeout { seconds },
+            AgentCliError::Transport(msg) => LlmError::Upstream(format!("cli: {msg}")),
+            AgentCliError::ParseJson(msg) => {
+                LlmError::Schema(format!("claude-cli returned malformed JSON: {msg}"))
+            }
+            AgentCliError::Timeout { seconds } => LlmError::Timeout { seconds },
         }
     }
 }

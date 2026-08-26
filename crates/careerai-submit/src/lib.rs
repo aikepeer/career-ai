@@ -22,6 +22,7 @@ pub mod linkedin_selectors;
 pub mod naukri;
 pub mod naukri_selectors;
 pub mod rate_limiter;
+pub mod rate_policy;
 mod submit;
 
 pub use ats_http::{

@@ -120,12 +120,25 @@ pub struct LlmConfig {
     /// `--llm-backend=<choice>`.
     #[serde(default)]
     pub backend: BackendChoice,
+    /// Tailor strategy: "llm" | "local" | "hybrid" (Phase 1 LLM reduction).
+    #[serde(default = "default_tailor_strategy")]
+    pub strategy: String,
+    /// Bullet relevance threshold for local pruning [0.0, 1.0].
+    #[serde(default = "default_drop_threshold")]
+    pub drop_threshold: f32,
     /// Custom API Base URL for OpenAI/Anthropic/DeepSeek compatible endpoints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
     /// Custom API Key for API backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+}
+
+fn default_tailor_strategy() -> String {
+    "llm".to_string()
+}
+fn default_drop_threshold() -> f32 {
+    0.05
 }
 
 fn default_cache_dir() -> String {

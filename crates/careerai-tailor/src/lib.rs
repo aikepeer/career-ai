@@ -9,12 +9,15 @@
 #![forbid(unsafe_code)]
 
 pub mod cover_letter;
+pub mod cover_skeleton;
 pub mod diff;
 pub mod error;
 pub mod guardrails;
+pub mod local;
 pub mod model;
 pub mod prompt;
 pub mod schema;
+pub mod variants;
 
 use std::path::{Path, PathBuf};
 
@@ -28,8 +31,11 @@ use careerai_profile::schema::Profile;
 use sqlx::SqlitePool;
 use tracing::info;
 
+pub use crate::cover_skeleton::{CoverSkeleton, CoverSlots};
 pub use crate::error::{Result, TailorError};
+pub use crate::local::{tailor_for_listing_local, tailor_local, tailor_local_with_variants};
 pub use crate::model::{CoverLetter, ExperienceView, ProjectView, ResumeView, TailorOutcome};
+pub use crate::variants::{compile_profile_variants, BulletVariant, EntryVariants, ProfileVariants};
 
 /// Tailor a shortlisted listing end-to-end: fetch the listing, call the
 /// LLM (cache-wrapped) for a constrained diff, validate + apply it,

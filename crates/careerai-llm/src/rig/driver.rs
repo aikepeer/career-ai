@@ -29,17 +29,14 @@ use std::time::Duration;
 
 use backon::Retryable;
 use rig::providers::{anthropic, openai};
-use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use crate::cache::Cache;
 use crate::error::{LlmError, Result};
-use crate::retry::llm_backoff;
 use crate::trait_def::Llm;
 use crate::types::{LlmRequest, LlmResponse};
 
-use super::error::{is_retryable, reqwest_to_llm_err};
-use super::response::{parse_anthropic_response, parse_openai_response};
+use super::error::is_retryable;
 
 /// Anthropic prompt-caching beta header value, matches the value used by
 /// rig's own examples and Anthropic's public docs.
@@ -55,24 +52,25 @@ pub enum Provider {
 /// Shared HTTP handle for the two providers. `rig::providers::*::Client`
 /// owns the reqwest client with the right default headers.
 #[derive(Clone)]
-enum Http {
+pub(super) enum Http {
     Anthropic(anthropic::client::Client),
     OpenAi(openai::Client),
 }
 
 /// Real provider impl of [`Llm`]. Only available under `--features live-llm-api`.
 pub struct RigLlm {
-    http: Http,
-    api_key: String,
-    api_base_url: Option<String>,
-    model: String,
+    pub(super) http: Http,
+    pub(super) api_key: String,
+    pub(super) api_base_url: Option<String>,
+    pub(super) model: String,
     /// Carried for future on-disk cache plumbing. The trait's
     /// [`LlmResponse::cache_hit`] field is wired through the `Cache` type,
     /// but the on-disk read/write integration is scheduled for the tailor
     /// crate (Wave 3C). Kept here so construction signatures are stable.
     #[allow(dead_code)]
-    cache: Arc<Cache>,
-    timeout: Duration,
+    pub(super) cache: Arc<Cache>,
+    pub(super) timeout: Duration,
+    pub(super) max_retries: u32,
 }
 
 impl std::fmt::Debug for RigLlm {
@@ -144,6 +142,27 @@ impl RigLlm {
         Self::with_api_key_and_base_url(provider, api_key, model, None, cache, timeout_seconds)
     }
 
+    /// Construct an API driver with an explicit retry budget.
+    pub fn with_api_key_and_base_url_with_retries(
+        provider: Provider,
+        api_key: String,
+        model: impl Into<String>,
+        base_url_override: Option<String>,
+        cache: Arc<Cache>,
+        timeout_seconds: u64,
+        max_retries: u32,
+    ) -> Result<Self> {
+        Self::with_api_key_and_base_url_internal(
+            provider,
+            api_key,
+            model,
+            base_url_override,
+            cache,
+            timeout_seconds,
+            max_retries,
+        )
+    }
+
     /// Like [`Self::with_api_key`] but accepts an explicit base URL override
     /// (e.g. `config.local.yaml`'s `llm.api_base_url`). When `None`, the base
     /// URL is resolved from the standard env vars.
@@ -155,6 +174,26 @@ impl RigLlm {
         base_url_override: Option<String>,
         cache: Arc<Cache>,
         timeout_seconds: u64,
+    ) -> Result<Self> {
+        Self::with_api_key_and_base_url_internal(
+            provider,
+            api_key,
+            model,
+            base_url_override,
+            cache,
+            timeout_seconds,
+            3,
+        )
+    }
+
+    fn with_api_key_and_base_url_internal(
+        provider: Provider,
+        api_key: String,
+        model: impl Into<String>,
+        base_url_override: Option<String>,
+        cache: Arc<Cache>,
+        timeout_seconds: u64,
+        max_retries: u32,
     ) -> Result<Self> {
         let base_url = base_url_override
             .filter(|s| !s.trim().is_empty())
@@ -193,7 +232,8 @@ impl RigLlm {
             api_base_url: base_url,
             model: model.into(),
             cache,
-            timeout: Duration::from_secs(timeout_seconds),
+            timeout: Duration::from_secs(crate::normalized_timeout_seconds(timeout_seconds)),
+            max_retries,
         })
     }
 
@@ -207,103 +247,11 @@ impl RigLlm {
     /// The model to actually send: the per-request model (e.g.
     /// `tailor_model` / `cover_letter_model`) wins, falling back to the
     /// backend default resolved at construction time.
-    fn effective_model<'a>(&'a self, req: &'a LlmRequest) -> &'a str {
+    pub(crate) fn effective_model<'a>(&'a self, req: &'a LlmRequest) -> &'a str {
         if req.model.trim().is_empty() {
             &self.model
         } else {
             &req.model
-        }
-    }
-
-    /// Build the Anthropic `/v1/messages` request body. When `cache_profile`
-    /// is true, the profile_block is sent as its own user message whose
-    /// single content block carries `cache_control: {type: "ephemeral"}`,
-    /// which is the documented form for prompt caching.
-    pub(crate) fn anthropic_body(&self, req: &LlmRequest) -> Value {
-        let mut user_content: Vec<Value> = Vec::new();
-
-        if !req.profile_block.is_empty() {
-            let mut block = json!({
-                "type": "text",
-                "text": req.profile_block,
-            });
-            if req.cache_profile {
-                block["cache_control"] = json!({ "type": "ephemeral" });
-            }
-            user_content.push(block);
-        }
-
-        user_content.push(json!({
-            "type": "text",
-            "text": req.user,
-        }));
-
-        json!({
-            "model": self.effective_model(req),
-            "max_tokens": req.max_tokens,
-            "temperature": req.temperature,
-            "system": req.system,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": user_content,
-                }
-            ],
-        })
-    }
-
-    /// Build the OpenAI `/v1/chat/completions` request body. Prompt caching
-    /// on OpenAI is automatic server-side (no client hint required on
-    /// chat.completions as of the `gpt-4o-*` family), so `cache_profile`
-    /// is informational only — we still split the profile into its own
-    /// leading user message for parity and to keep the token profile
-    /// comparable across providers.
-    pub(crate) fn openai_body(&self, req: &LlmRequest) -> Value {
-        let mut messages: Vec<Value> = Vec::new();
-        if !req.system.is_empty() {
-            messages.push(json!({ "role": "system", "content": req.system }));
-        }
-        if !req.profile_block.is_empty() {
-            messages.push(json!({ "role": "user", "content": req.profile_block }));
-        }
-        messages.push(json!({ "role": "user", "content": req.user }));
-        json!({
-            "model": self.effective_model(req),
-            "messages": messages,
-            "temperature": req.temperature,
-            "max_tokens": req.max_tokens,
-        })
-    }
-
-    async fn send_once(&self, req: &LlmRequest) -> Result<LlmResponse> {
-        match &self.http {
-            Http::Anthropic(client) => {
-                let body = self.anthropic_body(req);
-                let resp = client
-                    .post("/v1/messages")
-                    .json(&body)
-                    .send()
-                    .await
-                    .map_err(reqwest_to_llm_err)?;
-                parse_anthropic_response(resp).await
-            }
-            Http::OpenAi(_client) => {
-                let body = self.openai_body(req);
-                let endpoint_url = match &self.api_base_url {
-                    Some(base) => join_chat_completions_url(base),
-                    None => "https://api.openai.com/v1/chat/completions".to_string(),
-                };
-
-                let http = reqwest::Client::new();
-                let resp = http
-                    .post(&endpoint_url)
-                    .bearer_auth(&self.api_key)
-                    .json(&body)
-                    .send()
-                    .await
-                    .map_err(reqwest_to_llm_err)?;
-                parse_openai_response(resp).await
-            }
         }
     }
 }
@@ -332,7 +280,10 @@ impl Llm for RigLlm {
                 }))
         };
 
-        let response = call.retry(llm_backoff()).when(is_retryable).await?;
+        let response = call
+            .retry(crate::retry::llm_backoff_with_retries(self.max_retries))
+            .when(is_retryable)
+            .await?;
 
         info!(
             target: "llm",

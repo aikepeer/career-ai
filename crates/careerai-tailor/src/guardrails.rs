@@ -18,6 +18,6 @@ mod tests;
 mod tokens;
 mod validator;
 
-pub(crate) use tokens::{build_token_sets, flat_profile_text};
+pub(crate) use tokens::{build_token_sets, flat_profile_text, ProfileTokenSets};
 pub use validator::forbid_invented_entities;
 pub(crate) use validator::forbid_invented_entities_with;

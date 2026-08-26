@@ -59,6 +59,12 @@ pub enum ProfileCommand {
     Show,
     /// Validate `profile/profile.yaml` against the schema.
     Validate,
+    /// Pre-compute and cache bullet emphasis variants (Phase 2 LLM reduction).
+    CompileVariants {
+        /// Force re-generation even if cache exists.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

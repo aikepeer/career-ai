@@ -41,8 +41,8 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
     // no-whitespace blob and pass as "1 word".
     let cl_chars = doc.cover_letter.chars().count();
     if cl_chars > MAX_COVER_LETTER_CHARS {
-        return Err(TailorError::CoverLetterTooLong {
-            words: cl_chars,
+        return Err(TailorError::CoverLetterCharsTooLong {
+            chars: cl_chars,
             cap: MAX_COVER_LETTER_CHARS,
         });
     }

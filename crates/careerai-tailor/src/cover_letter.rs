@@ -64,8 +64,8 @@ pub async fn draft(
     let body = resp.text.trim().to_string();
     let chars = body.chars().count();
     if chars > COVER_LETTER_CHAR_CAP {
-        return Err(TailorError::CoverLetterTooLong {
-            words: chars,
+        return Err(TailorError::CoverLetterCharsTooLong {
+            chars,
             cap: COVER_LETTER_CHAR_CAP,
         });
     }
@@ -104,6 +104,7 @@ mod tests {
             prompt_version: "tailor.v1".into(),
             anthropic_prompt_cache: true,
             backend: careerai_core::config::BackendChoice::default(),
+            ..Default::default()
         }
     }
 

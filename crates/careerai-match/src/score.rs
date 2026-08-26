@@ -96,7 +96,7 @@ impl Scorer for JaccardScorer {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
+pub(crate) fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
@@ -111,7 +111,7 @@ fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
     }
 }
 
-fn tokenize(text: &str) -> HashSet<String> {
+pub(crate) fn tokenize(text: &str) -> HashSet<String> {
     text.split(|c: char| !c.is_alphanumeric() && c != '+' && c != '#')
         .filter_map(|t| {
             let lower = t.trim().to_lowercase();

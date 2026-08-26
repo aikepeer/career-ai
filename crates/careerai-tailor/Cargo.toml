@@ -10,6 +10,7 @@ description = "Constrained-diff resume tailoring and cover-letter drafting"
 [dependencies]
 careerai-core = { path = "../careerai-core" }
 careerai-profile = { path = "../careerai-profile" }
+careerai-match = { path = "../careerai-match" }
 careerai-llm = { path = "../careerai-llm" }
 careerai-db = { path = "../careerai-db" }
 thiserror.workspace = true

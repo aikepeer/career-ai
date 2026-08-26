@@ -18,6 +18,7 @@
 //! `careerai_db::queries::find_by_id` working unchanged for every
 //! caller in the workspace.
 
+pub mod analytics;
 pub mod applications;
 pub mod applications_sync;
 pub mod artifacts;
@@ -26,6 +27,10 @@ pub mod linkedin;
 pub mod listings;
 pub mod payloads;
 
+pub use analytics::{
+    query_intelligence_records, query_source_performance, ApplicationIntelligenceRecord,
+    SourcePerformance,
+};
 pub use applications::{
     create_application, find_application_by_id, find_latest_application_for_listing,
     list_applications_by_state, set_application_state,
@@ -34,7 +39,9 @@ pub use applications_sync::{
     list_applications_by_state_and_source, transition_application_and_listing,
 };
 pub use artifacts::{attach_artifact, list_artifacts};
-pub use events::{events_for, list_recent_events};
+pub use events::{
+    count_submissions_since, events_for, latest_submission_time, list_recent_events,
+};
 pub use linkedin::{claim_drafted_application, list_drafted_linkedin};
 pub use listings::{
     find_by_external_id, find_by_id, insert_or_ignore, list_by_state, set_score, transition,

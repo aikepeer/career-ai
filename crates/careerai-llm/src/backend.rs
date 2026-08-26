@@ -35,7 +35,7 @@ use crate::trait_def::Llm;
 use crate::types::{LlmRequest, LlmResponse};
 
 #[cfg(feature = "live-llm-cli")]
-use crate::claude_cli::{locate_claude_binary, ClaudeCliLlm};
+use crate::agent_cli::{locate_claude_binary, AgentCliLlm};
 #[cfg(feature = "live-llm-api")]
 use crate::rig::RigLlm;
 
@@ -47,9 +47,9 @@ mod tests;
 
 /// Resolved backend, ready to issue LLM calls.
 pub enum Backend {
-    /// `claude` CLI subprocess.
+    /// Subprocess agent CLI backend (`claude`, `agy`, `goose`, `codex`, `pi`, `grok`, etc.).
     #[cfg(feature = "live-llm-cli")]
-    ClaudeCli(ClaudeCliLlm),
+    ClaudeCli(AgentCliLlm),
     /// rig-core Anthropic API client.
     #[cfg(feature = "live-llm-api")]
     Api(RigLlm),

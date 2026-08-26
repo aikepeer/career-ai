@@ -117,16 +117,16 @@ async fn run_agy_agent(root: &std::path::Path, prompt: &str) -> Option<String> {
         return None;
     }
 
-    let bin = which::which("agy")
-        .ok()
-        .or_else(|| {
-            let p = std::path::PathBuf::from("/home/miniblues/.local/bin/agy");
+    let bin = which::which("agy").ok().or_else(|| {
+        std::env::var_os("HOME").and_then(|home| {
+            let p = std::path::PathBuf::from(home).join(".local").join("bin").join("agy");
             if p.is_file() {
                 Some(p)
             } else {
                 None
             }
-        })?;
+        })
+    })?;
 
     let system_context = format!(
         "You are Career-AI Agent embedded in the job pipeline dashboard at {}. \

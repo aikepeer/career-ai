@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep the service independent of runit's working directory and PATH.
+APP_ROOT="${CAREERAI_ROOT:-/home/miniblues/projects/career-ai}"
+CAREERAI_BIN="${CAREERAI_BIN:-careerai}"
+CAREERAI_USER="${CAREERAI_USER:-miniblues}"
+CAREERAI_PORT="${CAREERAI_DASHBOARD_PORT:-8787}"
+
+cd "${APP_ROOT}"
+export CAREERAI_ROOT="${APP_ROOT}"
+exec chpst -u "${CAREERAI_USER}" "${CAREERAI_BIN}" status serve --port "${CAREERAI_PORT}"

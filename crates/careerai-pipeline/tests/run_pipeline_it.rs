@@ -232,6 +232,9 @@ fn has_pandoc_and_pdf_engine() -> bool {
 
 #[tokio::test]
 async fn run_pipeline_shortlists_tailors_and_optionally_renders_applies() {
+    let _prev_live = std::env::var("CAREERAI_LLM_LIVE").ok();
+    std::env::remove_var("CAREERAI_LLM_LIVE");
+
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     scaffold_project(root);

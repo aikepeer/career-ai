@@ -15,7 +15,7 @@ use serde_json::Value;
 /// object), produced by `goose run --output-format json`. Goose's
 /// reply text lives in the last `assistant` message's `content[].text`.
 #[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct ClaudeCliResult {
+pub(crate) struct AgentCliResult {
     #[serde(default)]
     pub(crate) is_error: Option<bool>,
     #[serde(default)]
@@ -32,7 +32,7 @@ pub(crate) struct ClaudeCliResult {
     #[serde(default)]
     pub(crate) error: Option<String>,
     #[serde(default)]
-    pub(crate) usage: Option<ClaudeCliUsage>,
+    pub(crate) usage: Option<AgentCliUsage>,
     /// goose: conversation messages (user + assistant turns). The
     /// last `assistant` message carries the reply text.
     #[serde(default)]
@@ -47,6 +47,8 @@ pub(crate) struct ClaudeCliResult {
     #[allow(dead_code)]
     pub(crate) extra: std::collections::BTreeMap<String, Value>,
 }
+
+pub(crate) type ClaudeCliResult = AgentCliResult;
 
 /// goose `--output-format json` message entry. Only `role` and the
 /// `text` content blocks are needed; other fields (id, created,
@@ -68,16 +70,21 @@ pub(crate) struct GooseContent {
 
 /// goose run metadata: token usage + completion status.
 #[derive(Debug, Clone, Default, Deserialize)]
+#[allow(dead_code)]
 pub(crate) struct GooseMetadata {
     #[serde(default)]
-    pub(crate) input_tokens: u64,
+    pub(crate) input_tokens: Option<u64>,
     #[serde(default)]
-    pub(crate) output_tokens: u64,
+    pub(crate) output_tokens: Option<u64>,
+    #[serde(default)]
+    pub(crate) total_tokens: Option<u64>,
+    #[serde(default)]
+    pub(crate) status: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[allow(clippy::struct_field_names)] // mirrors the upstream JSON shape
-pub(crate) struct ClaudeCliUsage {
+pub(crate) struct AgentCliUsage {
     #[serde(default)]
     pub(crate) input_tokens: u64,
     #[serde(default)]
@@ -89,6 +96,9 @@ pub(crate) struct ClaudeCliUsage {
     #[allow(dead_code)]
     pub(crate) cache_creation_input_tokens: u64,
 }
+
+#[allow(dead_code)]
+pub(crate) type ClaudeCliUsage = AgentCliUsage;
 
 pub(crate) fn clamp_u64_u32(v: u64) -> u32 {
     u32::try_from(v).unwrap_or(u32::MAX)

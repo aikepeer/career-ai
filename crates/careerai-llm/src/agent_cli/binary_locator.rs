@@ -15,10 +15,12 @@ pub(crate) fn locate_claude_binary() -> std::result::Result<PathBuf, ClaudeCliEr
 }
 
 pub(crate) fn locate_named_binary(name: &str) -> std::result::Result<PathBuf, ClaudeCliError> {
-    if let Ok(p) = std::env::var("CAREERAI_CLAUDE_BIN") {
-        if !p.is_empty() {
-            let path = PathBuf::from(&p);
-            return validate_claude_binary(path);
+    if name == "claude" {
+        if let Ok(p) = std::env::var("CAREERAI_CLAUDE_BIN") {
+            if !p.is_empty() {
+                let path = PathBuf::from(&p);
+                return validate_claude_binary(path);
+            }
         }
     }
 

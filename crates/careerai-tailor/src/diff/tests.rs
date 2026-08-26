@@ -314,7 +314,7 @@ fn rejects_cover_letter_over_char_cap_even_with_low_word_count() {
     };
     let err = validate(&doc, &profile).unwrap_err();
     assert!(
-        matches!(err, TailorError::CoverLetterTooLong { .. }),
+        matches!(err, TailorError::CoverLetterCharsTooLong { .. }),
         "got {err:?}"
     );
 }

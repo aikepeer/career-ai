@@ -75,75 +75,59 @@ pub async fn tailor_one(
         listing_id = %listing.id,
         title = %listing.title,
         company = %listing.company,
+        strategy = %cfg.llm.strategy,
         "tailoring listing"
     );
 
-    // Backend selection rules:
-    //
-    // * `CAREERAI_LLM_LIVE=1` → resolve a live backend (CLI or API per
-    //   `cfg.llm.backend`). Falls back to fixtures only on resolve error.
-    // * Unset → use `MockLlm::from_dir(<fixtures>)` deterministically.
-    //   This keeps integration tests (e.g. `tailor_render_it.rs`) on a
-    //   fixed code path even on dev boxes that have an authed `claude`
-    //   binary or a populated `ANTHROPIC_API_KEY`.
-    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+    // Fast-path: Phase 1 Local Deterministic Tailoring (zero LLM calls).
+    if cfg.llm.strategy == "local"
+        || std::env::var("CAREERAI_TAILOR_STRATEGY").as_deref() == Ok("local")
     {
-        if live_llm_opt_in() {
-            use std::sync::Arc;
-            let cache_root = if cfg.llm.cache_dir.is_empty() {
-                root.join("data").join("cache").join("llm")
+        let outcome = careerai_tailor::tailor_for_listing_local(
+            &pool,
+            &listing.id,
+            &profile,
+            cfg.llm.drop_threshold,
+        )
+        .await
+        .context("local tailor_for_listing")?;
+
+        return Ok(TailoredOutcome {
+            application_id: outcome.application_id,
+            listing_title: listing.title,
+            company: listing.company,
+        });
+    }
+
+    // A live opt-in is fail-closed: backend resolution and every live
+    // tailoring hop must succeed. Fixtures are an explicit offline mode,
+    // never a recovery path for a requested live run. This prevents stale
+    // fixture output from being persisted or inserted into the live cache.
+    #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+    if live_llm_opt_in() {
+        use std::sync::Arc;
+        let cache_root = if cfg.llm.cache_dir.is_empty() {
+            root.join("data").join("cache").join("llm")
+        } else {
+            let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
+            if p.is_absolute() {
+                p
             } else {
-                let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
-                if p.is_absolute() {
-                    p
-                } else {
-                    root.join(p)
-                }
-            };
-            let cache = Arc::new(careerai_llm::Cache::new(cache_root));
-            match careerai_llm::Backend::resolve(cfg.llm.backend.clone(), &cfg.llm, cache).await {
-                Ok(backend) => {
-                    match tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm, root).await {
-                        Ok(outcome) => {
-                            return Ok(TailoredOutcome {
-                                application_id: outcome.application_id,
-                                listing_title: listing.title,
-                                company: listing.company,
-                            });
-                        }
-                        Err(e) => {
-                            // Only fall back to MockLlm fixtures for
-                            // transport/upstream LLM failures (network,
-                            // auth, timeout). Content validation errors
-                            // (invented content, schema, cover letter too
-                            // long) are quality issues that fixtures
-                            // won't fix either — surface them so the
-                            // operator sees the real problem instead of
-                            // a misleading "no fixtures" error.
-                            if matches!(
-                                e,
-                                careerai_tailor::TailorError::Llm(_)
-                            ) {
-                                tracing::warn!(
-                                    target = "tailor",
-                                    error = %format_args!("{e:#}"),
-                                    "live LLM call failed; falling back to MockLlm fixtures"
-                                );
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target = "tailor",
-                        error = %e,
-                        "live backend unavailable; falling back to MockLlm fixtures"
-                    );
-                }
+                root.join(p)
             }
-        }
+        };
+        let cache = Arc::new(careerai_llm::Cache::new(cache_root));
+        let backend = careerai_llm::Backend::resolve(cfg.llm.backend.clone(), &cfg.llm, cache)
+            .await
+            .map_err(|e| anyhow::anyhow!("resolve live LLM backend: {e}"))?;
+        let outcome = tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm, root)
+            .await
+            .context("live tailor_for_listing")?;
+        return Ok(TailoredOutcome {
+            application_id: outcome.application_id,
+            listing_title: listing.title,
+            company: listing.company,
+        });
     }
 
     let fixtures = fixtures_dir(root);

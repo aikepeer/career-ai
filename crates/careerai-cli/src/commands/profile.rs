@@ -27,7 +27,42 @@ pub fn run(
         } => import(&paths, force, use_llm, backend_override),
         ProfileCommand::Show => show(),
         ProfileCommand::Validate => validate(),
+        ProfileCommand::CompileVariants { force } => compile_variants_cmd(force),
     }
+}
+
+fn compile_variants_cmd(force: bool) -> Result<()> {
+    let out = profile_yaml_path();
+    let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
+    let profile = careerai_profile::Profile::from_yaml(&text).context("parse profile")?;
+    let profile_hash = careerai_llm::hashing::canonical_profile_hash(&profile);
+
+    let root = careerai_core::paths::resolve_root_env();
+    let variants_file = root
+        .join("data")
+        .join("cache")
+        .join("variants")
+        .join(format!("{profile_hash}.json"));
+
+    if variants_file.exists() && !force {
+        println!(
+            "Variants cache already exists at: {}",
+            variants_file.display()
+        );
+        println!("Pass --force to re-generate.");
+        return Ok(());
+    }
+
+    println!("Compiling bullet emphasis variants for profile (hash={profile_hash})...");
+    let variants = careerai_tailor::ProfileVariants::from_profile_identity(&profile);
+    variants.save_to_file(&variants_file)?;
+    println!(
+        "Saved {} experience and {} project entry variants to {}",
+        variants.experience.len(),
+        variants.projects.len(),
+        variants_file.display()
+    );
+    Ok(())
 }
 
 fn import(
@@ -165,7 +200,11 @@ fn default_resume_sources(home: &Path) -> Result<Vec<PathBuf>> {
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_owned();
-        (name != "Resume-Kamal-Pandey.pdf", name)
+        let is_canonical = name == "Resume.pdf"
+            || name == "Resume.docx"
+            || name == "CV.pdf"
+            || name == "Resume-Kamal-Pandey.pdf";
+        (!is_canonical, name)
     });
     if resumes.is_empty() {
         anyhow::bail!(
@@ -236,109 +275,5 @@ fn detect_stale_skills_schema(text: &str) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn detect_stale_skills_flags_legacy_flat_list() {
-        let yaml = "personal:\n  name: Alice\nskills:\n  - Rust\n  - Python\n";
-        assert!(detect_stale_skills_schema(yaml));
-    }
-
-    #[test]
-    fn detect_stale_skills_passes_current_mapping_shape() {
-        let yaml = "personal:\n  name: Alice\nskills:\n  languages:\n    - Rust\n";
-        assert!(!detect_stale_skills_schema(yaml));
-    }
-
-    #[test]
-    fn detect_stale_skills_handles_missing_skills_block() {
-        let yaml = "personal:\n  name: Alice\nsummary: hi\n";
-        assert!(!detect_stale_skills_schema(yaml));
-    }
-
-    #[test]
-    fn detect_stale_skills_ignores_blank_lines_and_comments() {
-        let yaml = "personal:\n  name: Alice\nskills:\n\n  # a comment\n  languages:\n    - Rust\n";
-        assert!(!detect_stale_skills_schema(yaml));
-    }
-
-    fn personal_dir(home: &Path) -> PathBuf {
-        let dir = home.join("Documents").join("personal");
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn touch(dir: &Path, name: &str) {
-        std::fs::write(dir.join(name), b"resume").unwrap();
-    }
-
-    #[test]
-    fn default_resume_sources_picks_canonical_resume_first() {
-        let home = tempfile::tempdir().unwrap();
-        let dir = personal_dir(home.path());
-        touch(&dir, "Resume-Kamal-Pandey-Honeywell.pdf");
-        touch(&dir, "Resume-Kamal-Pandey.pdf");
-        touch(&dir, "electricity-bill.pdf");
-        let sources = default_resume_sources(home.path()).unwrap();
-        let names: Vec<String> = sources
-            .iter()
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .collect();
-        assert_eq!(
-            names,
-            vec![
-                "Resume-Kamal-Pandey.pdf",
-                "Resume-Kamal-Pandey-Honeywell.pdf"
-            ]
-        );
-    }
-
-    #[test]
-    fn default_resume_sources_falls_back_to_other_resume_files() {
-        let home = tempfile::tempdir().unwrap();
-        let dir = personal_dir(home.path());
-        touch(&dir, "Resume-Kamal-Pandey-Honeywell.pdf");
-        touch(&dir, "DHBVN.pdf");
-        let sources = default_resume_sources(home.path()).unwrap();
-        let names: Vec<String> = sources
-            .iter()
-            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .collect();
-        assert_eq!(names, vec!["Resume-Kamal-Pandey-Honeywell.pdf"]);
-    }
-
-    #[test]
-    fn default_resume_sources_accepts_docx_resumes() {
-        let home = tempfile::tempdir().unwrap();
-        let dir = personal_dir(home.path());
-        touch(&dir, "Resume-Kamal-Pandey.docx");
-        let sources = default_resume_sources(home.path()).unwrap();
-        assert_eq!(sources.len(), 1);
-        assert!(sources[0].ends_with("Resume-Kamal-Pandey.docx"));
-    }
-
-    #[test]
-    fn default_resume_sources_errors_when_dir_missing() {
-        let home = tempfile::tempdir().unwrap();
-        let err = default_resume_sources(home.path()).unwrap_err();
-        assert!(format!("{err:#}").contains("Documents/personal"));
-    }
-
-    #[test]
-    fn default_resume_sources_errors_when_no_resume_found() {
-        let home = tempfile::tempdir().unwrap();
-        let dir = personal_dir(home.path());
-        touch(&dir, "DHBVN.pdf");
-        touch(&dir, "electricity-bill.pdf");
-        let err = default_resume_sources(home.path()).unwrap_err();
-        assert!(format!("{err:#}").contains("Documents/personal"));
-    }
-
-    #[test]
-    fn profile_yaml_path_resolves_profile_yaml_under_root() {
-        let p = profile_yaml_path();
-        assert!(p.ends_with("profile/profile.yaml"));
-    }
-}
+#[path = "profile_tests.rs"]
+mod tests;

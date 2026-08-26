@@ -28,14 +28,20 @@ pub async fn api_profile_import(
     State(_state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
-    let upload_dir = std::env::temp_dir().join("careerai_uploads");
-    if let Err(e) = tokio::fs::create_dir_all(&upload_dir).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("upload dir create failed: {e}") })),
-        )
-            .into_response();
-    }
+    let upload_dir_guard = match tempfile::Builder::new()
+        .prefix("careerai_uploads_")
+        .tempdir()
+    {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("upload dir create failed: {e}") })),
+            )
+                .into_response();
+        }
+    };
+    let upload_dir = upload_dir_guard.path();
     let mut saved_paths = Vec::new();
 
     while let Some(mut field) = multipart.next_field().await.unwrap_or(None) {

@@ -470,6 +470,7 @@ dependencies = [
  "tokio",
  "tracing",
  "which 7.0.3",
+ "wiremock",
 ]
 
 [[package]]
@@ -679,6 +680,7 @@ dependencies = [
  "careerai-core",
  "careerai-db",
  "careerai-llm",
+ "careerai-match",
  "careerai-profile",
  "chrono",
  "insta",

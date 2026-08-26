@@ -78,3 +78,20 @@ fn openai_body_shapes_system_and_user() {
     assert_eq!(msgs[2]["role"], "user");
     assert_eq!(msgs[2]["content"], "USER");
 }
+
+#[test]
+fn api_driver_clamps_zero_timeout_and_honors_retry_budget() {
+    let cache = Arc::new(Cache::new("/tmp/cache"));
+    let llm = RigLlm::with_api_key_and_base_url_with_retries(
+        Provider::OpenAI,
+        "sk-test".into(),
+        "model",
+        Some("http://127.0.0.1:9/v1".into()),
+        cache,
+        0,
+        4,
+    )
+    .expect("construct");
+    assert_eq!(llm.timeout, std::time::Duration::from_secs(1));
+    assert_eq!(llm.max_retries, 4);
+}

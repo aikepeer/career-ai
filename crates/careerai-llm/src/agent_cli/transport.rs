@@ -1,89 +1,28 @@
-//! Subprocess-backed `Llm` impl that shells out to the user's
-//! `claude` CLI (`--print --output-format json`). Also supports
-//! `agy`, a Claude-Code-compatible Go CLI configured as
-//! `llm.backend: agy` (see `send_once` for its flag + envelope
-//! differences).
+//! Subprocess transport and prompt-file handling for CLI-backed LLMs.
 
-use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::timeout;
-use tracing::{debug, trace};
+use tokio::time::{sleep, timeout};
+use tracing::trace;
 
-use crate::cache::Cache;
 use crate::error::{LlmError, Result};
 use crate::trait_def::Llm;
 use crate::types::{LlmRequest, LlmResponse};
 
-use super::binary_locator::locate_claude_binary;
-use super::error::{classify_error_payload, classify_failure_stderr, ClaudeCliError};
-use super::response::{clamp_u64_u32, ClaudeCliResult};
-
-/// Subprocess-backed `Llm` impl that shells out to the user's
-/// `claude` CLI (`--print --output-format json`).
-pub struct ClaudeCliLlm {
-    binary: PathBuf,
-    model: String,
-    cache: Arc<Cache>,
-    timeout: Duration,
-}
-
-impl std::fmt::Debug for ClaudeCliLlm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClaudeCliLlm")
-            .field("binary", &self.binary)
-            .field("model", &self.model)
-            .field("timeout", &self.timeout)
-            .finish_non_exhaustive()
-    }
-}
+use super::driver::{log_no_prompt_cache_once, ClaudeCliLlm};
+use super::error::ClaudeCliError;
 
 impl ClaudeCliLlm {
-    /// Construct a driver pointing at `binary` (typically
-    /// `which("claude")` resolved). `model` may be either an alias
-    /// (`sonnet`, `haiku`, `opus`) or a full model id
-    /// (`claude-sonnet-4-6`); the CLI accepts both via `--model`.
-    pub fn new(
-        binary: impl Into<PathBuf>,
-        model: impl Into<String>,
-        cache: Arc<Cache>,
-        timeout_seconds: u64,
-    ) -> Self {
-        Self {
-            binary: binary.into(),
-            model: model.into(),
-            cache,
-            timeout: Duration::from_secs(timeout_seconds.max(1)),
-        }
-    }
-
-    /// Convenience constructor: probe `PATH` for `claude` (or honor the
-    /// `CAREERAI_CLAUDE_BIN` env override used by tests).
-    ///
-    /// # Errors
-    /// Returns [`ClaudeCliError::NotInstalled`] when the binary cannot be
-    /// resolved, or [`ClaudeCliError::BinaryUnusable`] when the resolved
-    /// path is not a regular executable file.
-    pub fn discover(
-        model: impl Into<String>,
-        cache: Arc<Cache>,
-        timeout_seconds: u64,
-    ) -> std::result::Result<Self, ClaudeCliError> {
-        let binary = locate_claude_binary()?;
-        Ok(Self::new(binary, model, cache, timeout_seconds))
-    }
-
     /// Spawn the subprocess once and capture its parsed JSON result.
     /// Caching is the caller's job (the outer `tailor_for_listing`
     /// `Cache` wrap is the canonical layer; this driver is a thin
     /// transport).
     #[allow(clippy::too_many_lines)]
-    async fn send_once(
+    pub(crate) async fn send_once(
         &self,
         req: &LlmRequest,
     ) -> std::result::Result<LlmResponse, ClaudeCliError> {
@@ -98,17 +37,23 @@ impl ClaudeCliLlm {
         // here.
         let model = model_raw.split_once('/').map_or(model_raw, |(_, r)| r);
 
-        let bin_str = self.binary.to_string_lossy().to_lowercase();
+        let file_name = self
+            .binary
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         // `agy` (a Claude-Code-compatible Go CLI) accepts `-p/--print`
         // and `--output-format json` but has no `--append-system-prompt-file`
         // flag and reports a different envelope — both handled below.
-        let is_agy = bin_str.contains("agy");
+        let is_agy = file_name.contains("agy");
         // `goose` is an agentic AI CLI driven in headless single-turn
         // mode (`goose run --no-tui --no-session --quiet --output-format
         // json --max-turns 1`). It has no `--append-system-prompt-file`
         // flag and emits a different JSON envelope (`messages` array +
         // `metadata`), both handled below.
-        let is_goose = bin_str.contains("goose");
+        let is_goose = file_name.contains("goose");
+        let is_claude = file_name.contains("claude");
 
         // SECURITY: the system prompt + profile block can carry PII
         // (rendered profile YAML). Passing them via argv would expose
@@ -132,21 +77,35 @@ impl ClaudeCliLlm {
         } else {
             format!("{}\n\n{}", req.system, req.profile_block)
         };
-        // Backends that fold system + profile into the prompt instead of
-        // using `--append-system-prompt-file`. `agy` delivers the folded
-        // prompt via argv; `goose` delivers it via stdin.
+        // Goose receives trusted system instructions through its dedicated
+        // system option. Profile data and the untrusted listing request are
+        // kept as explicit data segments in stdin rather than concatenated
+        // with the system instruction.
         let folded = is_agy || is_goose;
-        let folded_prompt = if !folded {
-            String::new()
-        } else if combined.is_empty() {
-            req.user.clone()
+        let folded_prompt = if is_goose {
+            [
+                (!req.profile_block.is_empty())
+                    .then(|| format!("<PROFILE_BLOCK>\n{}\n</PROFILE_BLOCK>", req.profile_block)),
+                (!req.user.is_empty())
+                    .then(|| format!("<USER_REQUEST>\n{}\n</USER_REQUEST>", req.user)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n\n")
+        } else if is_agy {
+            if combined.is_empty() {
+                req.user.clone()
+            } else {
+                format!("{combined}\n\n{}", req.user)
+            }
         } else {
-            format!("{combined}\n\n{}", req.user)
+            String::new()
         };
 
         let mut cmd = Command::new(&self.binary);
 
-        if bin_str.contains("claude") {
+        if is_claude {
             cmd.arg("--print")
                 .arg("--output-format")
                 .arg("json")
@@ -176,9 +135,9 @@ impl ClaudeCliLlm {
             //     on denied tool attempts or hangs indefinitely),
             //   `--quiet` suppresses the banner so stdout is pure JSON,
             //   `--output-format json` produces a parseable envelope,
-            //   `--max-turns 3` is a safety cap (goose finishes in one turn
-            //     with `--no-profile`, but the cap prevents any runaway),
-            //   `-i -` reads the folded prompt from stdin.
+            //   `--max-turns 1` enforces one completion rather than an
+            //     agent continuation,
+            //   `-i -` reads the profile + user data from stdin.
             cmd.arg("run")
                 .arg("--no-session")
                 .arg("--no-profile")
@@ -186,10 +145,18 @@ impl ClaudeCliLlm {
                 .arg("--output-format")
                 .arg("json")
                 .arg("--max-turns")
-                .arg("3")
-                .arg("-i")
-                .arg("-");
-        } else if bin_str.contains("aider") {
+                .arg("1");
+            if !req.system.is_empty() {
+                cmd.arg("--system").arg(&req.system);
+            }
+            if !self.provider.trim().is_empty() {
+                cmd.arg("--provider").arg(self.provider.trim());
+            }
+            if !model.is_empty() {
+                cmd.arg("--model").arg(model);
+            }
+            cmd.arg("-i").arg("-");
+        } else if file_name.contains("aider") {
             cmd.arg("--message");
         } else {
             cmd.arg("--print");
@@ -273,92 +240,7 @@ impl ClaudeCliLlm {
             "claude --print returned"
         );
 
-        // The CLI emits its result JSON on stdout even on error
-        // (`is_error: true`). Parse first; fall back to stderr-based
-        // classification only if stdout isn't valid JSON.
-        let parsed: ClaudeCliResult = match serde_json::from_str::<ClaudeCliResult>(stdout.trim()) {
-            Ok(p) => p,
-            Err(e) => {
-                if !output.status.success() {
-                    // No JSON at all: most likely binary missing or
-                    // crashed before printing.
-                    return Err(classify_failure_stderr(&stderr));
-                }
-                return Err(ClaudeCliError::ParseJson(format!(
-                    "{e}; stdout={}",
-                    stdout.chars().take(256).collect::<String>()
-                )));
-            }
-        };
-
-        // agy's envelope carries `status`/`response`/`error` instead of
-        // claude's `is_error`/`result`. Handle it before the claude
-        // fields, which are `None` for agy.
-        if let Some(status) = parsed.status.as_deref() {
-            if status == "SUCCESS" {
-                let text = parsed.response.clone().ok_or_else(|| {
-                    ClaudeCliError::ParseJson("agy missing `response` field".into())
-                })?;
-                let usage = parsed.usage.unwrap_or_default();
-                return Ok(LlmResponse {
-                    text,
-                    prompt_tokens: clamp_u64_u32(usage.input_tokens),
-                    completion_tokens: clamp_u64_u32(usage.output_tokens),
-                    cache_hit: false,
-                    cached_prompt_tokens: clamp_u64_u32(usage.cache_read_input_tokens),
-                });
-            }
-            return Err(classify_error_payload(&parsed));
-        }
-
-        // goose's envelope: a `messages` array where the last assistant
-        // message carries the reply text, plus a `metadata` object with
-        // token counts. Produced by `goose run --output-format json`.
-        if !parsed.messages.is_empty() {
-            let text = parsed
-                .messages
-                .iter()
-                .rev()
-                .find(|m| m.role == "assistant")
-                .and_then(|m| {
-                    m.content
-                        .iter()
-                        .rev()
-                        .find_map(|c| (!c.text.is_empty()).then(|| c.text.clone()))
-                })
-                .ok_or_else(|| {
-                    ClaudeCliError::ParseJson(
-                        "goose: no assistant text found in messages".into(),
-                    )
-                })?;
-            let usage = parsed.goose_metadata.unwrap_or_default();
-            return Ok(LlmResponse {
-                text,
-                prompt_tokens: clamp_u64_u32(usage.input_tokens),
-                completion_tokens: clamp_u64_u32(usage.output_tokens),
-                cache_hit: false,
-                cached_prompt_tokens: 0,
-            });
-        }
-
-        if parsed.is_error.unwrap_or(false) {
-            return Err(classify_error_payload(&parsed));
-        }
-
-        let text = parsed
-            .result
-            .clone()
-            .ok_or_else(|| ClaudeCliError::ParseJson("missing `result` field".into()))?;
-
-        let usage = parsed.usage.unwrap_or_default();
-
-        Ok(LlmResponse {
-            text,
-            prompt_tokens: clamp_u64_u32(usage.input_tokens),
-            completion_tokens: clamp_u64_u32(usage.output_tokens),
-            cache_hit: false,
-            cached_prompt_tokens: clamp_u64_u32(usage.cache_read_input_tokens),
-        })
+        super::output::parse_cli_output(&stdout, &stderr, output.status.success())
     }
 }
 
@@ -387,8 +269,19 @@ impl Llm for ClaudeCliLlm {
         // unused at the call site below.
         let _ = &self.cache;
 
-        let resp = self.send_once(req).await.map_err(LlmError::from)?;
-        Ok(resp)
+        let mut retries = 0_u32;
+        loop {
+            match self.send_once(req).await {
+                Ok(resp) => return Ok(resp),
+                Err(err) if err.is_retryable() && retries < self.max_retries => {
+                    let exponent = retries.min(4);
+                    let delay_ms = 500_u64 * (1_u64 << exponent);
+                    retries += 1;
+                    sleep(Duration::from_millis(delay_ms)).await;
+                }
+                Err(err) => return Err(LlmError::from(err)),
+            }
+        }
     }
 }
 
@@ -436,17 +329,4 @@ fn write_private_prompt_file(combined: &str) -> std::io::Result<tempfile::NamedT
     tmp.write_all(combined.as_bytes())?;
     tmp.as_file_mut().sync_all()?;
     Ok(tmp)
-}
-
-/// One-shot debug log noting that prompt caching isn't available on the
-/// CLI backend. Repeated `cache_profile=true` requests across the same
-/// process don't spam the log.
-fn log_no_prompt_cache_once() {
-    static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        debug!(
-            target = "careerai_llm::claude_cli",
-            "anthropic prompt cache unavailable on claude-cli backend (cache_profile flag is silently ignored)"
-        );
-    });
 }

@@ -153,6 +153,7 @@ __P__
             // Field added by PR #21. On main the struct is missing this
             // field; see the gate at the top of this file.
             backend: BackendChoice::ClaudeCli,
+            ..Default::default()
         }
     }
 

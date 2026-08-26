@@ -31,6 +31,7 @@ mod tests {
             prompt_version: "tailor.v1".into(),
             anthropic_prompt_cache: true,
             backend: careerai_core::config::BackendChoice::default(),
+            ..Default::default()
         }
     }
 
