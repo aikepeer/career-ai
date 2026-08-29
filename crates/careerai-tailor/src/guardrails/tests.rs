@@ -420,3 +420,46 @@ fn still_rejects_proper_noun_absent_from_both_profile_and_original() {
         "got {err:?}"
     );
 }
+
+#[test]
+fn accepts_jd_proper_noun_via_jd_token_sets() {
+    // Regression: the "tailor top 20" dashboard button failed 100% of
+    // runs because reworded bullets used JD terminology (e.g. "Fleet"
+    // from "fleet management") that was not in the profile. The fix
+    // adds JD-derived tokens to the guardrail allowlist.
+    let p = fixture();
+    let sets = build_token_sets(&p);
+    let jd_text = "Senior Software Engineer, Android Automotive at Waymo. \
+                   Build fleet management systems for autonomous vehicles.";
+    let mut sets = sets;
+    sets.jd_proper_nouns = build_jd_token_sets(jd_text);
+    forbid_invented_entities_with(
+        "Fleet Management: Architected fleet telemetry for Waymo vehicles.",
+        "shipped 35% throughput win",
+        &sets,
+        "x",
+    )
+    .unwrap();
+}
+
+#[test]
+fn still_rejects_invented_noun_not_in_jd_or_profile() {
+    let p = fixture();
+    let sets = build_token_sets(&p);
+    let jd_text = "Senior Software Engineer at Waymo. Build fleet systems.";
+    let mut sets = sets;
+    sets.jd_proper_nouns = build_jd_token_sets(jd_text);
+    let err = forbid_invented_entities_with(
+        "Built the Google Cloud platform.",
+        "shipped 35% throughput win",
+        &sets,
+        "x",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, TailorError::InventedContent { reason, offending_token, .. }
+            if reason == "invented proper noun"
+            && (offending_token.contains("Google") || offending_token.contains("Cloud"))),
+        "got {err:?}"
+    );
+}

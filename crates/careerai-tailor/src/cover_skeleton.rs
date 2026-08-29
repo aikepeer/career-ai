@@ -140,8 +140,7 @@ pub fn pick_best_skeleton<'a>(
             (s, score)
         })
         .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(s, _)| s)
-        .unwrap_or(&skeletons[0])
+        .map_or(&skeletons[0], |(s, _)| s)
 }
 
 #[cfg(test)]

@@ -115,6 +115,15 @@ pub struct KeywordStatus {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CareerStoryItem {
+    pub kind: String,
+    pub era: String,
+    pub title: String,
+    pub organization: String,
+    pub proof: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ProfileView {
     pub name: String,
     pub email: String,
@@ -132,8 +141,10 @@ pub struct ProfileView {
     pub tools: Vec<String>,
     pub debugging: Vec<String>,
     pub protocols: Vec<String>,
+    pub skill_count: usize,
     pub experience_count: usize,
     pub education_count: usize,
+    pub career_story: Vec<CareerStoryItem>,
     pub raw_yaml: String,
 }
 
@@ -150,6 +161,7 @@ pub struct ConfigView {
     pub prompt_version: String,
     pub profile: Option<ProfileView>,
     pub llm_backend: String,
+    pub llm_strategy: String,
     pub llm_api_base: Option<String>,
     pub llm_timeout_seconds: u64,
 }

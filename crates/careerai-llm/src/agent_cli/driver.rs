@@ -21,6 +21,7 @@ pub struct AgentCliLlm {
     pub(crate) binary: PathBuf,
     pub(crate) model: String,
     pub(crate) provider: String,
+    pub(crate) effort: String,
     pub(crate) cache: Arc<Cache>,
     pub(crate) timeout: Duration,
     pub(crate) max_retries: u32,
@@ -50,14 +51,23 @@ impl AgentCliLlm {
         cache: Arc<Cache>,
         timeout_seconds: u64,
     ) -> Self {
-        Self::new_with_options(binary, model, String::new(), cache, timeout_seconds, 3)
+        Self::new_with_options(
+            binary,
+            model,
+            String::new(),
+            String::new(),
+            cache,
+            timeout_seconds,
+            3,
+        )
     }
 
-    /// Construct a driver with provider and retry settings from application configuration.
+    /// Construct a driver with provider, effort and retry settings from application configuration.
     pub fn new_with_options(
         binary: impl Into<PathBuf>,
         model: impl Into<String>,
         provider: impl Into<String>,
+        effort: impl Into<String>,
         cache: Arc<Cache>,
         timeout_seconds: u64,
         max_retries: u32,
@@ -66,6 +76,7 @@ impl AgentCliLlm {
             binary: binary.into(),
             model: model.into(),
             provider: provider.into(),
+            effort: effort.into(),
             cache,
             timeout: Duration::from_secs(crate::normalized_timeout_seconds(timeout_seconds)),
             max_retries,

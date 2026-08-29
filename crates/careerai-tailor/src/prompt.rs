@@ -108,9 +108,47 @@ fn render(
         "listing_location",
         listing.location.as_deref().unwrap_or(""),
     );
-    ctx.insert("listing_description", &listing.description);
+    let cleaned_jd = clean_job_description(&listing.description);
+    ctx.insert("listing_description", &cleaned_jd);
     let rendered = tera.render(name, &ctx)?;
     Ok(rendered)
+}
+
+/// Clean non-technical boilerplate (EEO statements, benefits, legal notices) from JD.
+/// Only drops the boilerplate paragraph itself — content after it is preserved.
+pub fn clean_job_description(raw: &str) -> String {
+    let mut lines = Vec::new();
+    let mut skipping = false;
+    for line in raw.lines() {
+        let lc = line.to_ascii_lowercase();
+        let matches_boilerplate = lc.contains("equal opportunity")
+            || lc.contains("eeo employer")
+            || lc.contains("affirmative action")
+            || lc.contains("privacy policy")
+            || lc.contains("we do not discriminate")
+            || lc.contains("benefits and perks")
+            || lc.contains("compensation package");
+
+        if matches_boilerplate {
+            skipping = true;
+            continue;
+        }
+        // A blank line ends a boilerplate paragraph — resume capturing.
+        if line.trim().is_empty() {
+            skipping = false;
+        }
+        if !skipping {
+            lines.push(line);
+        }
+    }
+    let res = lines.join("\n").trim().to_string();
+    if res.len() > 6000 {
+        res.chars().take(6000).collect()
+    } else if res.is_empty() {
+        raw.to_string()
+    } else {
+        res
+    }
 }
 
 fn split_segments(rendered: &str) -> Result<(String, String, String)> {
@@ -249,6 +287,33 @@ mod tests {
             "tailor prompt must teach the LLM the projects path shape; \
              system block was: {sys}",
             sys = req.system
+        );
+    }
+
+    #[test]
+    fn clean_jd_preserves_content_after_boilerplate() {
+        let jd = "We are hiring a Rust engineer.\n\n\
+                  You will build distributed systems.\n\n\
+                  Equal opportunity employer.\n\
+                  We do not discriminate.\n\n\
+                  Apply now with your portfolio.";
+        let cleaned = clean_job_description(jd);
+        assert!(
+            cleaned.contains("Apply now with your portfolio"),
+            "content after boilerplate was dropped: {cleaned}"
+        );
+        assert!(!cleaned.contains("Equal opportunity employer"));
+        assert!(cleaned.contains("distributed systems"));
+    }
+
+    #[test]
+    fn clean_jd_preserves_accommodations_in_technical_context() {
+        let jd = "Build hardware accommodations for edge devices.\n\n\
+                  Equal opportunity employer.";
+        let cleaned = clean_job_description(jd);
+        assert!(
+            cleaned.contains("hardware accommodations"),
+            "legitimate 'accommodations' usage was dropped: {cleaned}"
         );
     }
 

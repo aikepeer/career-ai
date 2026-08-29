@@ -152,7 +152,7 @@ impl RigLlm {
         timeout_seconds: u64,
         max_retries: u32,
     ) -> Result<Self> {
-        Self::with_api_key_and_base_url_internal(
+        Ok(Self::with_api_key_and_base_url_internal(
             provider,
             api_key,
             model,
@@ -160,7 +160,7 @@ impl RigLlm {
             cache,
             timeout_seconds,
             max_retries,
-        )
+        ))
     }
 
     /// Like [`Self::with_api_key`] but accepts an explicit base URL override
@@ -175,7 +175,7 @@ impl RigLlm {
         cache: Arc<Cache>,
         timeout_seconds: u64,
     ) -> Result<Self> {
-        Self::with_api_key_and_base_url_internal(
+        Ok(Self::with_api_key_and_base_url_internal(
             provider,
             api_key,
             model,
@@ -183,7 +183,7 @@ impl RigLlm {
             cache,
             timeout_seconds,
             3,
-        )
+        ))
     }
 
     fn with_api_key_and_base_url_internal(
@@ -194,7 +194,7 @@ impl RigLlm {
         cache: Arc<Cache>,
         timeout_seconds: u64,
         max_retries: u32,
-    ) -> Result<Self> {
+    ) -> Self {
         let base_url = base_url_override
             .filter(|s| !s.trim().is_empty())
             .or_else(|| {
@@ -226,7 +226,7 @@ impl RigLlm {
                 Http::OpenAi(client)
             }
         };
-        Ok(Self {
+        Self {
             http,
             api_key,
             api_base_url: base_url,
@@ -234,7 +234,7 @@ impl RigLlm {
             cache,
             timeout: Duration::from_secs(crate::normalized_timeout_seconds(timeout_seconds)),
             max_retries,
-        })
+        }
     }
 
     fn provider(&self) -> Provider {

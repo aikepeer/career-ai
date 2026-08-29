@@ -2,6 +2,8 @@
 //! application row + persisted payload.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tracing::info;
@@ -46,6 +48,7 @@ fn live_llm_opt_in() -> bool {
 /// `CAREERAI_LLM_FIXTURES_DIR` (default `<root>/data/cache/llm/fixtures`)
 /// — this keeps integration tests deterministic even on dev boxes with
 /// a real `claude` install or `ANTHROPIC_API_KEY`.
+#[allow(clippy::too_many_lines)]
 pub async fn tailor_one(
     root: &Path,
     cfg: &CoreConfig,
@@ -80,9 +83,41 @@ pub async fn tailor_one(
     );
 
     // Fast-path: Phase 1 Local Deterministic Tailoring (zero LLM calls).
-    if cfg.llm.strategy == "local"
+    let is_live = {
+        #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+        {
+            live_llm_opt_in()
+        }
+        #[cfg(not(any(feature = "live-llm-cli", feature = "live-llm-api")))]
+        {
+            false
+        }
+    };
+
+    #[allow(clippy::cast_possible_truncation)]
+    let score = listing.score.unwrap_or(0.0) as f32;
+    let min_llm_score = cfg.llm.llm_min_score;
+
+    // Fast-path to local deterministic tailoring:
+    // 1. If not in live mode AND strategy is local (or no test fixtures present).
+    // 2. If environment explicitly overrides CAREERAI_TAILOR_STRATEGY=local.
+    // 3. If in live mode with strategy == "hybrid", but the listing score is below llm_min_score.
+    let use_local = (!is_live && (cfg.llm.strategy == "local" || !fixtures_dir(root).is_dir()))
         || std::env::var("CAREERAI_TAILOR_STRATEGY").as_deref() == Ok("local")
-    {
+        || (is_live
+            && cfg.llm.strategy == "hybrid"
+            && listing.score.is_some()
+            && score < min_llm_score);
+
+    if use_local {
+        info!(
+            target = "tailor",
+            listing_id = %listing.id,
+            score = %score,
+            min_llm_score = %min_llm_score,
+            strategy = %cfg.llm.strategy,
+            "routing to local deterministic tailoring"
+        );
         let outcome = careerai_tailor::tailor_for_listing_local(
             &pool,
             &listing.id,
@@ -151,6 +186,76 @@ pub async fn tailor_one(
         listing_title: listing.title,
         company: listing.company,
     })
+}
+
+/// Tailor all currently shortlisted listings in parallel, up to optional limit.
+pub async fn tailor_all(
+    root: &Path,
+    cfg: &CoreConfig,
+    limit: Option<usize>,
+) -> Result<Vec<TailoredOutcome>> {
+    let pool = open_pool(root).await?;
+    let query_str = if let Some(n) = limit {
+        format!("SELECT id FROM listings WHERE state = 'shortlisted' ORDER BY score DESC LIMIT {n}")
+    } else {
+        "SELECT id FROM listings WHERE state = 'shortlisted' ORDER BY score DESC".to_string()
+    };
+    let rows: Vec<(String,)> = sqlx::query_as(&query_str)
+        .fetch_all(&pool)
+        .await
+        .context("fetch shortlisted listings")?;
+
+    let total = rows.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+
+    let completed = Arc::new(AtomicUsize::new(0));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    let cfg_arc = Arc::new(cfg.clone());
+    let mut tasks = Vec::with_capacity(total);
+
+    for (id,) in rows {
+        let sem = Arc::clone(&semaphore);
+        let completed = Arc::clone(&completed);
+        let root_buf = root.to_path_buf();
+        let cfg_clone = Arc::clone(&cfg_arc);
+        tasks.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.ok()?;
+            match tailor_one(&root_buf, &cfg_clone, &id).await {
+                Ok(outcome) => {
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    info!(
+                        done,
+                        total,
+                        title = %outcome.listing_title,
+                        company = %outcome.company,
+                        application_id = %outcome.application_id,
+                        "tailored listing"
+                    );
+                    Some(outcome)
+                }
+                Err(e) => {
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    tracing::warn!(
+                        listing_id = %id,
+                        error = %format_args!("{e:#}"),
+                        progress = format!("{done}/{total}"),
+                        "tailor_all: failed to tailor listing"
+                    );
+                    None
+                }
+            }
+        }));
+    }
+
+    let mut outcomes = Vec::with_capacity(total);
+    for task in tasks {
+        if let Ok(Some(outcome)) = task.await {
+            outcomes.push(outcome);
+        }
+    }
+    Ok(outcomes)
 }
 
 #[cfg(test)]

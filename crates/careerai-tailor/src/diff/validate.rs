@@ -33,8 +33,12 @@ const MAX_COVER_LETTER_CHARS: usize = 3500;
 ///
 /// Nine rules in order (see module docs). Token sets are built ONCE here
 /// and shared across every reword op.
+///
+/// `jd_text` is the job description text (title + company + description).
+/// Proper nouns and vocabulary from the JD are added to the allowed
+/// token set so rewords may legitimately align with JD terminology.
 #[allow(clippy::too_many_lines)]
-pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
+pub fn validate(doc: &DiffDoc, profile: &Profile, jd_text: &str) -> Result<()> {
     // Rule 9 first — cheap, independent of the ops list.
     // Enforce both a word cap and a char cap; the char cap closes a
     // word-only-counting bypass where an LLM could emit one huge
@@ -162,7 +166,8 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
     // Rules 6 + 7 — reword length cap + empty-reword guard + entity
     // guardrails. Token sets are built ONCE here and shared across every
     // reword op (previously rebuilt per bullet, O(ops × profile_size)).
-    let token_sets = guardrails::build_token_sets(profile);
+    let mut token_sets = guardrails::build_token_sets(profile);
+    token_sets.jd_proper_nouns = guardrails::build_jd_token_sets(jd_text);
     for (bp, op) in &parsed_ops {
         if let OpKind::Reword { new_text } = &op.kind {
             if new_text.trim().is_empty() {

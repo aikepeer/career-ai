@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+@page {
+  size: A4;
+  margin: 9mm 13mm 8mm 13mm;
+  @bottom-right {
+    content: counter(page) "/" counter(pages);
+    font-family: "Liberation Sans", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 7.5pt;
+    color: #666;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8.6pt;
+  line-height: 1.26;
+  color: #111;
+  background: #fff;
+}
+
+/* Header */
+.resume-header {
+  display: table;
+  width: 100%;
+  margin-bottom: 6px;
+}
+.header-left {
+  display: table-cell;
+  vertical-align: middle;
+  width: 60%;
+}
+.header-right {
+  display: table-cell;
+  vertical-align: middle;
+  width: 40%;
+  text-align: right;
+  font-size: 8.2pt;
+  line-height: 1.25;
+  color: #222;
+}
+.candidate-name {
+  font-size: 20pt;
+  font-weight: 700;
+  color: #222;
+  letter-spacing: -0.4px;
+  line-height: 1.05;
+  margin-bottom: 2px;
+}
+.candidate-title {
+  font-size: 11pt;
+  font-style: italic;
+  color: #333;
+  font-weight: 500;
+}
+.contact-item {
+  display: block;
+}
+.contact-item a {
+  color: #111;
+  text-decoration: none;
+}
+
+/* Section styling */
+.section {
+  margin-top: 5px;
+}
+.section-title {
+  font-size: 9.8pt;
+  font-weight: 700;
+  color: #000;
+  border-top: 2.5px solid #000;
+  padding-top: 1.5px;
+  margin-bottom: 3px;
+  letter-spacing: -0.2px;
+}
+
+.summary-text {
+  font-size: 8.5pt;
+  line-height: 1.26;
+  color: #1a1a1a;
+  text-align: justify;
+}
+
+/* Timeline Layout for Experience & Education */
+.timeline-entry {
+  display: table;
+  width: 100%;
+  margin-bottom: 4px;
+  page-break-inside: avoid;
+}
+.entry-date {
+  display: table-cell;
+  width: 95px;
+  vertical-align: top;
+  font-size: 8.2pt;
+  font-weight: 500;
+  color: #222;
+  line-height: 1.2;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+.entry-content {
+  display: table-cell;
+  vertical-align: top;
+  width: auto;
+}
+.entry-header {
+  font-size: 8.8pt;
+  margin-bottom: 1.5px;
+}
+.entry-title {
+  font-weight: 700;
+  color: #000;
+}
+.entry-company {
+  font-style: italic;
+  color: #222;
+}
+.entry-location {
+  color: #444;
+}
+
+.bullet-list {
+  list-style-type: none;
+  padding-left: 0;
+  margin-top: 1px;
+}
+.bullet-list li {
+  position: relative;
+  padding-left: 11px;
+  margin-bottom: 1.5px;
+  font-size: 8.3pt;
+  line-height: 1.23;
+  color: #111;
+  text-align: justify;
+}
+.bullet-list li::before {
+  content: "○";
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 6.5pt;
+  color: #444;
+}
+
+/* Technical Skills Table */
+.skills-table {
+  display: table;
+  width: 100%;
+  margin-top: 1px;
+}
+.skill-row {
+  display: table-row;
+}
+.skill-category {
+  display: table-cell;
+  width: 100px;
+  vertical-align: top;
+  font-size: 8.3pt;
+  font-weight: 600;
+  color: #000;
+  padding-right: 8px;
+  padding-bottom: 2px;
+}
+.skill-items {
+  display: table-cell;
+  vertical-align: top;
+  font-size: 8.3pt;
+  color: #111;
+  padding-bottom: 2px;
+  line-height: 1.22;
+}
+</style>
+</head>
+<body>
+
+<div class="resume-header">
+  <div class="header-left">
+    <div class="candidate-name">{{ personal_name }}</div>
+    <div class="candidate-title">{{ candidate_headline | default(value=summary) }}</div>
+  </div>
+  <div class="header-right">
+    {% if personal.location %}<div class="contact-item">{{ personal.location }}</div>{% endif %}
+    {% if personal.phone %}<div class="contact-item">{{ personal.phone }}</div>{% endif %}
+    {% if personal.email %}<div class="contact-item"><a href="mailto:{{ personal.email }}">{{ personal.email }}</a></div>{% endif %}
+    {% if personal.links and personal.links.linkedin %}<div class="contact-item"><a href="{{ personal.links.linkedin }}">in/{{ personal.links.linkedin | split(pat="/") | last }}</a></div>{% endif %}
+    {% if personal.links and personal.links.github %}<div class="contact-item"><a href="{{ personal.links.github }}">{{ personal.links.github | split(pat="/") | last }}</a></div>{% endif %}
+  </div>
+</div>
+
+{% if summary %}
+<div class="section">
+  <div class="section-title">Profile Summary</div>
+  <div class="summary-text">{{ summary | safe }}</div>
+</div>
+{% endif %}
+
+{% if experience | length > 0 %}
+<div class="section">
+  <div class="section-title">Experience</div>
+  {% for exp in experience %}
+  <div class="timeline-entry">
+    <div class="entry-date">{{ exp.start }} –<br>{{ exp.end }}</div>
+    <div class="entry-content">
+      <div class="entry-header">
+        <span class="entry-title">{{ exp.title }}</span>, <span class="entry-company">{{ exp.company }}</span>{% if exp.location %}, <span class="entry-location">{{ exp.location }}</span>{% endif %}
+      </div>
+      {% if exp.bullets | length > 0 %}
+      <ul class="bullet-list">
+        {% for b in exp.bullets %}
+        <li>{{ b | format_bullet | safe }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="section">
+  <div class="section-title">Technical Skills</div>
+  <div class="skills-table">
+    {% if skills.platforms and skills.platforms | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">Platforms</div>
+      <div class="skill-items">{{ skills.platforms | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+    {% if skills.frameworks and skills.frameworks | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">Core Expertise</div>
+      <div class="skill-items">{{ skills.frameworks | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+    {% if skills.devops and skills.devops | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">OTA & Ops</div>
+      <div class="skill-items">{{ skills.devops | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+    {% if skills.protocols and skills.protocols | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">Networking</div>
+      <div class="skill-items">{{ skills.protocols | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+    {% if skills.debugging and skills.debugging | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">Debugging</div>
+      <div class="skill-items">{{ skills.debugging | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+    {% if skills.tools and skills.tools | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">Tools</div>
+      <div class="skill-items">{{ skills.tools | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+    {% if skills.languages and skills.languages | length > 0 %}
+    <div class="skill-row">
+      <div class="skill-category">Languages</div>
+      <div class="skill-items">{{ skills.languages | join(sep=", ") }}</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if education | length > 0 %}
+<div class="section">
+  <div class="section-title">Education</div>
+  {% for ed in education %}
+  <div class="timeline-entry">
+    <div class="entry-date">{{ ed.start }}–{{ ed.end }}</div>
+    <div class="entry-content">
+      <div class="entry-header">
+        <span class="entry-title">{{ ed.degree }}</span>, <span class="entry-company">{{ ed.institution }}</span>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if projects and projects | length > 0 %}
+<div class="section">
+  <div class="section-title">Projects</div>
+  {% for p in projects %}
+  <div class="timeline-entry">
+    <div class="entry-date">Project</div>
+    <div class="entry-content">
+      <div class="entry-header">
+        <span class="entry-title">{{ p.name }}</span>{% if p.url %} · <a href="{{ p.url }}">Link</a>{% endif %}
+      </div>
+      {% if p.bullets | length > 0 %}
+      <ul class="bullet-list">
+        {% for b in p.bullets %}
+        <li>{{ b | format_bullet | safe }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+</body>
+</html>

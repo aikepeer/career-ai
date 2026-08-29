@@ -56,6 +56,9 @@ async fn scrape_pages(
         .set_cookie(COOKIE_NAME, li_at, COOKIE_DOMAIN)
         .await
         .map_err(|e| SourceError::Parse(format!("linkedin-browser cookie install failed: {e}")))?;
+    let _ = session
+        .set_cookie(COOKIE_NAME, li_at, "www.linkedin.com")
+        .await;
 
     let pages = src.cfg.max_pages.max(1);
     let mut all: Vec<RawListing> = Vec::new();

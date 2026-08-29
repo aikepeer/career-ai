@@ -39,9 +39,7 @@ pub use applications_sync::{
     list_applications_by_state_and_source, transition_application_and_listing,
 };
 pub use artifacts::{attach_artifact, list_artifacts};
-pub use events::{
-    count_submissions_since, events_for, latest_submission_time, list_recent_events,
-};
+pub use events::{count_submissions_since, events_for, latest_submission_time, list_recent_events};
 pub use linkedin::{claim_drafted_application, list_drafted_linkedin};
 pub use listings::{
     find_by_external_id, find_by_id, insert_or_ignore, list_by_state, set_score, transition,

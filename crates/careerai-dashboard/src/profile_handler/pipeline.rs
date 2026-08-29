@@ -63,20 +63,31 @@ async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
     // falling back to nonexistent MockLlm fixtures. This is necessary
     // because the runit service script may not export this env var.
     // Also pass `CAREERAI_ROOT` so subprocesses find the DB + config.
-    let careerai_root = std::env::var("CAREERAI_ROOT")
-        .unwrap_or_else(|_| cli_root.to_string_lossy().to_string());
-    match tokio::process::Command::new(&exe)
-        .args(&argv)
-        .current_dir(&cli_root)
-        .env("CAREERAI_LLM_LIVE", "1")
-        .env("CAREERAI_ROOT", careerai_root)
-        .output()
-        .await
+    let careerai_root =
+        std::env::var("CAREERAI_ROOT").unwrap_or_else(|_| cli_root.to_string_lossy().to_string());
+    let run_timeout = std::time::Duration::from_secs(600);
+    match tokio::time::timeout(
+        run_timeout,
+        tokio::process::Command::new(&exe)
+            .args(&argv)
+            .current_dir(&cli_root)
+            .env("CAREERAI_LLM_LIVE", "1")
+            .env("CAREERAI_ROOT", careerai_root)
+            .output(),
+    )
+    .await
     {
-        Ok(out) => {
+        Ok(Ok(out)) => {
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             let message = format!("{stdout}\n{stderr}").trim().to_string();
+            tracing::info!(
+                target = "careerai::dashboard",
+                command = %req.command,
+                success = out.status.success(),
+                exit_code = ?out.status.code(),
+                "dashboard pipeline subprocess completed"
+            );
             if out.status.success() {
                 (
                     StatusCode::OK,
@@ -95,9 +106,17 @@ async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
                     .into_response()
             }
         }
-        Err(e) => (
+        Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "status": "error", "error": e.to_string() })),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(serde_json::json!({
+                "status": "timeout",
+                "error": "Command execution timed out after 10 minutes"
+            })),
         )
             .into_response(),
     }

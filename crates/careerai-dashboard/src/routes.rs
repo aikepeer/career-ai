@@ -23,6 +23,10 @@ pub fn build(state: Arc<AppState>) -> Router {
             "/api/v1/applications/:id",
             get(handlers::api_application_detail),
         )
+        .route(
+            "/api/v1/artifacts/download",
+            get(handlers::api_download_artifact),
+        )
         .route("/api/v1/explorer", get(handlers::api_explorer))
         .route(
             "/api/v1/config/generate",
@@ -58,10 +62,7 @@ pub fn build(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/chat", post(crate::chat::api_chat_agent))
         // Threshold management
-        .route(
-            "/api/config/threshold",
-            post(handlers::api_save_threshold),
-        )
+        .route("/api/config/threshold", post(handlers::api_save_threshold))
         .route(
             "/api/match/rematch-shortlisted",
             post(handlers::api_rematch_shortlisted),

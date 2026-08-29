@@ -57,6 +57,14 @@ pub(crate) struct ProfileTokenSets {
     pub(crate) summary_proper_nouns: HashSet<String>,
     pub(crate) year_tokens: HashSet<String>,
     pub(crate) number_tokens: HashSet<String>,
+    /// Proper-noun tokens extracted from the job description (title +
+    /// company + description). When tailoring for a specific JD, it is
+    /// legitimate to reuse JD terminology in reworded bullets — the LLM
+    /// is *asked* to align the resume with the JD. Without this set,
+    /// every reword that used a JD-specific noun (e.g. "Fleet" from
+    /// "fleet management") was rejected as "invented proper noun",
+    /// causing 100% of `tailor --limit N` runs to fail.
+    pub(crate) jd_proper_nouns: HashSet<String>,
 }
 
 fn split_words_lowercase(s: &str) -> impl Iterator<Item = String> + '_ {
@@ -175,7 +183,35 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         summary_proper_nouns,
         year_tokens,
         number_tokens,
+        jd_proper_nouns: HashSet::new(),
     }
+}
+
+/// Build a set of proper-noun tokens from the job description text
+/// (listing title + company + description). Call this after
+/// `build_token_sets` and merge the result via
+/// `sets.jd_proper_nouns = build_jd_token_sets(jd_text)`.
+pub fn build_jd_token_sets(jd_text: &str) -> HashSet<String> {
+    let mut tokens = HashSet::new();
+    for m in proper_noun_regex().find_iter(jd_text) {
+        for raw in m.as_str().split_whitespace() {
+            let lower = raw.to_lowercase();
+            if lower.len() < 3 {
+                continue;
+            }
+            tokens.insert(strip_for_match(&lower));
+        }
+    }
+    // Also add every word ≥ 3 chars so rewords can freely reuse JD
+    // vocabulary (not just proper nouns). The JD is trusted text
+    // provided by the job board, not LLM-generated content.
+    for w in jd_text.split(|c: char| !c.is_alphanumeric()) {
+        let lower = w.to_lowercase();
+        if lower.len() >= 3 {
+            tokens.insert(strip_for_match(&lower));
+        }
+    }
+    tokens
 }
 
 /// Flatten profile into a single space-separated string for regex scans.

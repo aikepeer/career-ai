@@ -57,8 +57,7 @@ async fn save_profile_at_writes_atomically_and_creates_parent() {
     let written = save_profile_at(&profile, &path).await.unwrap();
 
     assert_eq!(written, path);
-    let parsed: Profile =
-        serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let parsed: Profile = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(parsed.personal.name, "Alice");
 }
 
@@ -104,6 +103,20 @@ skills:
     - Yocto
   tools:
     - OSTree
+experience:
+  - title: Principal Engineer
+    company: Acme Systems
+    start: 2020-01
+    end: present
+    bullets:
+      - Led a production platform from architecture through launch.
+education:
+  - degree: B.E. Computer Engineering
+    institution: Example Institute
+    start: "2014"
+    end: "2018"
+    achievements:
+      - Graduated with distinction.
 "#;
     std::fs::write(&target, yaml).unwrap();
     let view = load_profile_view_at(&target).expect("profile view loaded");
@@ -113,4 +126,10 @@ skills:
     assert_eq!(view.languages, vec!["Rust", "C++"]);
     assert_eq!(view.frameworks, vec!["Yocto"]);
     assert_eq!(view.tools, vec!["OSTree"]);
+    assert_eq!(view.skill_count, 4);
+    assert_eq!(view.experience_count, 1);
+    assert_eq!(view.education_count, 1);
+    assert_eq!(view.career_story.len(), 2);
+    assert_eq!(view.career_story[0].kind, "education");
+    assert_eq!(view.career_story[1].organization, "Acme Systems");
 }

@@ -31,11 +31,11 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "live-llm-cli")]
+pub mod agent_cli;
 #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
 pub mod backend;
 pub mod cache;
-#[cfg(feature = "live-llm-cli")]
-pub mod agent_cli;
 #[cfg(feature = "live-llm-cli")]
 pub use agent_cli as claude_cli;
 pub mod error;
@@ -47,11 +47,11 @@ pub mod rig;
 pub mod trait_def;
 pub mod types;
 
+#[cfg(feature = "live-llm-cli")]
+pub use crate::agent_cli::{AgentCliError, AgentCliLlm, ClaudeCliError, ClaudeCliLlm};
 #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
 pub use crate::backend::{Backend, BackendError, BackendProbe};
 pub use crate::cache::{Cache, CacheKey};
-#[cfg(feature = "live-llm-cli")]
-pub use crate::agent_cli::{AgentCliError, AgentCliLlm, ClaudeCliError, ClaudeCliLlm};
 pub use crate::error::{LlmError, Result};
 pub use crate::hashing::{canonical_profile_hash, compose_key, jd_hash};
 pub use crate::mock::MockLlm;

@@ -24,6 +24,8 @@ pub struct CliRunArgs {
     #[serde(default)]
     pub application_id: Option<String>,
     #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub all: Option<bool>,
     #[serde(default)]
     pub auto_submit: Option<bool>,
@@ -35,6 +37,10 @@ pub struct CliRunArgs {
     pub apply: Option<bool>,
     #[serde(default)]
     pub since: Option<String>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub from_state: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -64,6 +70,7 @@ pub(super) enum WhitelistedCommand {
     Inspect,
     Review,
     Retry,
+    Rollback,
     ConfigGenerate,
     SourcesSync,
     SourcesDiscoverWeb,
@@ -89,6 +96,7 @@ pub(super) fn parse_command(raw: &str) -> Result<WhitelistedCommand, CliRunValid
         "inspect" => WhitelistedCommand::Inspect,
         "review" => WhitelistedCommand::Review,
         "retry" => WhitelistedCommand::Retry,
+        "rollback" => WhitelistedCommand::Rollback,
         "config generate" => WhitelistedCommand::ConfigGenerate,
         "sources sync" => WhitelistedCommand::SourcesSync,
         "sources discover-web" => WhitelistedCommand::SourcesDiscoverWeb,

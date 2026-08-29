@@ -109,9 +109,7 @@ mod tests {
             prompt_version: "v1".into(),
             llm_model: "local".into(),
         };
-        let app_row = applications::create_application(&pool, &app)
-            .await
-            .unwrap();
+        let app_row = applications::create_application(&pool, &app).await.unwrap();
 
         payloads::write_payload(
             &pool,

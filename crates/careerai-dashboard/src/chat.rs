@@ -38,7 +38,9 @@ pub async fn api_chat_agent(
     let core_cfg = crate::details::load_core_config();
 
     // 1. Try running through the configured live LLM backend or local agent CLI
-    if let Some(agent_reply) = run_agent_engine(&root, core_cfg.as_ref(), msg, &payload.history).await {
+    if let Some(agent_reply) =
+        run_agent_engine(&root, core_cfg.as_ref(), msg, &payload.history).await
+    {
         return (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -83,7 +85,10 @@ async fn run_agent_engine(
         .ok()
         .or_else(|| {
             std::env::var_os("HOME").and_then(|home| {
-                let p = std::path::PathBuf::from(home).join(".local").join("bin").join("agy");
+                let p = std::path::PathBuf::from(home)
+                    .join(".local")
+                    .join("bin")
+                    .join("agy");
                 if p.is_file() {
                     Some(p)
                 } else {
@@ -94,10 +99,10 @@ async fn run_agent_engine(
 
     let bin_name = bin.file_name().and_then(|n| n.to_str()).unwrap_or("agent");
     let model = cfg.map_or("gemini-3.7-flash", |c| {
-        if !c.llm.tailor_model.is_empty() {
-            &c.llm.tailor_model
-        } else {
+        if c.llm.tailor_model.is_empty() {
             "gemini-3.7-flash"
+        } else {
+            &c.llm.tailor_model
         }
     });
 
@@ -113,7 +118,10 @@ async fn run_agent_engine(
 
     let mut cmd = tokio::process::Command::new(&bin);
     if bin_name.contains("agy") {
-        cmd.arg("-p").arg(&system_context).arg("--output-format").arg("json");
+        cmd.arg("-p")
+            .arg(&system_context)
+            .arg("--output-format")
+            .arg("json");
     } else if bin_name.contains("claude") {
         cmd.arg("-p").arg(&system_context).arg("--model").arg(model);
     } else {
@@ -154,19 +162,39 @@ async fn answer_with_builtin_intelligence(
 ) -> String {
     let lower = msg.to_lowercase();
 
-    if lower.contains("portal") || lower.contains("search") || lower.contains("company") || lower.contains("source") {
+    if lower.contains("portal")
+        || lower.contains("search")
+        || lower.contains("company")
+        || lower.contains("source")
+    {
         portal_discovery_reply(&lower)
-    } else if lower.contains("token") || lower.contains("cost") || lower.contains("pricing") || lower.contains("usage") {
+    } else if lower.contains("token")
+        || lower.contains("cost")
+        || lower.contains("pricing")
+        || lower.contains("usage")
+    {
         token_cost_reply(core_cfg)
-    } else if lower.contains("keyword") || lower.contains("config") || lower.contains("domain") || lower.contains("focus") {
+    } else if lower.contains("keyword")
+        || lower.contains("config")
+        || lower.contains("domain")
+        || lower.contains("focus")
+    {
         keyword_recommendation_reply(msg)
-    } else if lower.contains("match") || lower.contains("score") || lower.contains("shortlist") || lower.contains("threshold") {
+    } else if lower.contains("match")
+        || lower.contains("score")
+        || lower.contains("shortlist")
+        || lower.contains("threshold")
+    {
         let snap = data::snapshot(&state.pool).await.ok();
         let total = snap.as_ref().map_or(0, |s| s.kpi.today_discovered);
         let shortlisted = snap.as_ref().map_or(0, |s| s.kpi.shortlisted_active);
         let threshold = crate::details::resolve_score_threshold(core_cfg);
         matching_analysis_reply(total, shortlisted, threshold)
-    } else if lower.contains("tailor") || lower.contains("render") || lower.contains("batch") || lower.contains("100") {
+    } else if lower.contains("tailor")
+        || lower.contains("render")
+        || lower.contains("batch")
+        || lower.contains("100")
+    {
         batch_tailor_reply(core_cfg)
     } else if lower.contains("interview") || lower.contains("prep") || lower.contains("question") {
         interview_prep_reply(root)
@@ -185,8 +213,7 @@ fn portal_discovery_reply(query: &str) -> String {
     };
 
     format!(
-        "🌐 **ATS Job Portal Discovery & Recommendations**\n\nBased on your query, here are high-yield tech company slugs with active ATS job feeds:\n\n{}\n\n💡 *Tip: Add these company slugs under `sources.<ats>.companies` in `config/local.yaml`, then run `careerai discover` to index all active openings!*",
-        tech_slugs
+        "🌐 **ATS Job Portal Discovery & Recommendations**\n\nBased on your query, here are high-yield tech company slugs with active ATS job feeds:\n\n{tech_slugs}\n\n💡 *Tip: Add these company slugs under `sources.<ats>.companies` in `config/local.yaml`, then run `careerai discover` to index all active openings!*"
     )
 }
 
@@ -200,9 +227,9 @@ fn token_cost_reply(cfg: Option<&careerai_core::config::CoreConfig>) -> String {
 
 fn keyword_recommendation_reply(msg: &str) -> String {
     let stopwords = [
-        "focus", "on", "and", "for", "jobs", "in", "the", "a", "an", "with", "or", "that",
-        "me", "my", "give", "show", "find", "want", "also", "add", "please", "more", "only",
-        "just", "very", "need",
+        "focus", "on", "and", "for", "jobs", "in", "the", "a", "an", "with", "or", "that", "me",
+        "my", "give", "show", "find", "want", "also", "add", "please", "more", "only", "just",
+        "very", "need",
     ];
     let extracted: Vec<String> = msg
         .split_whitespace()

@@ -117,7 +117,7 @@ pub fn contains_keyword_boundary(haystack: &str, needle: &str) -> bool {
             || haystack[end..]
                 .chars()
                 .next()
-                .is_some_and(|c| !c.is_alphanumeric() || (needle.ends_with('+') && c == '+'));
+                .is_some_and(|c| !c.is_alphanumeric());
 
         if left_ok && right_ok {
             return true;

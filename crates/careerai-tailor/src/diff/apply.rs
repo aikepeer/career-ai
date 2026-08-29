@@ -18,7 +18,7 @@ use super::validate::validate;
 /// the safety gates.
 #[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 pub fn apply(doc: DiffDoc, profile: Profile) -> Result<ResumeView> {
-    validate(&doc, &profile)?;
+    validate(&doc, &profile, "")?;
 
     // Summary.
     let summary = match doc.summary.as_ref() {

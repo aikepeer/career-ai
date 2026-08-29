@@ -37,7 +37,7 @@ pub const RESULTS_LIST: &str = "ul.jobs-search__results-list, ul.scaffold-layout
 /// `(source, external_id)` upsert downstream but inflating the
 /// per-tick "cards scraped" telemetry by 2×.
 pub const JOB_CARD: &str =
-    "li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.base-card";
+    "li:has(div.base-card), li.jobs-search-results__list-item, li.scaffold-layout__list-item, li.base-card, div.job-search-card";
 
 /// Listing title anchor. The `href` is the apply URL; the text is the
 /// job title.

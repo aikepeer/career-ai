@@ -22,6 +22,22 @@
 </script>
 </head>
 <body>
+
+<!-- Loading screen overlay -->
+<div class="loader-overlay" id="loader-overlay">
+  <div class="loader-logo">career-ai</div>
+  <div class="loader-bar"><div class="loader-bar-fill" id="loader-bar-fill"></div></div>
+  <div class="loader-pct" id="loader-pct">0%</div>
+</div>
+
+<!-- Scroll progress bar -->
+<div class="scroll-progress" id="scroll-progress"></div>
+
+<!-- Floating background orbs -->
+<div class="bg-orb bg-orb-1"></div>
+<div class="bg-orb bg-orb-2"></div>
+<div class="bg-orb bg-orb-3"></div>
+
 <header>
   <div class="brand-container">
     <div class="brand-glow"></div>
@@ -31,7 +47,7 @@
 
   <nav class="tab-nav">
     <button class="nav-btn active" id="tab-btn-funnel" onclick="switchTab('funnel')">
-      <span class="nav-icon">📊</span> Pipeline & Funnel
+      <span class="nav-icon">⌁</span> Mission Control
     </button>
     <button class="nav-btn" id="tab-btn-events" onclick="switchTab('events')">
       <span class="nav-icon">⚡</span> Audit Events
@@ -81,6 +97,157 @@
 <main class="main-content">
   <!-- TAB 1: PIPELINE & FUNNEL -->
   <div id="tab-funnel" class="tab-panel active">
+    <section class="mission-hero" aria-labelledby="mission-title">
+      <div class="mission-grid-overlay" aria-hidden="true"></div>
+      <div class="mission-copy">
+        <div class="mission-eyebrow"><span class="live-beacon"></span> Career operating system · live</div>
+        <h1 id="mission-title">Your next role is already <span>in motion.</span></h1>
+        {% if view.config.profile %}
+        <p class="mission-lede">CareerAI turns {{ view.config.profile.name }}’s experience into a continuously improving search, tailored résumé, and interview-ready pipeline.</p>
+        <div class="candidate-signals" aria-label="Candidate profile signals">
+          <span>{{ view.config.profile.experience_count }} career chapters</span>
+          <span>{{ view.config.profile.skill_count }} indexed skills</span>
+          <span>{{ view.config.profile.target_roles | length }} target roles</span>
+        </div>
+        {% else %}
+        <p class="mission-lede">Build your career story once. CareerAI discovers, matches, tailors, renders, and tracks every opportunity from one living profile.</p>
+        <div class="candidate-signals" aria-label="Candidate setup status">
+          <span>Profile waiting</span><span>Local-first</span><span>Human controlled</span>
+        </div>
+        {% endif %}
+        <div class="mission-actions">
+          <button type="button" class="mission-primary" onclick="runCliCommand('run', {}, this)">
+            <span class="mission-primary-icon">↗</span>
+            <span><strong>Engage autopilot</strong><small>Run the full pipeline safely</small></span>
+          </button>
+          <button type="button" class="mission-secondary" onclick="switchTab('explorer')">Explore opportunities <span>→</span></button>
+        </div>
+        <div class="mission-safety"><span>✓</span> Dry-run by default · your approval stays in the loop</div>
+      </div>
+
+      <div class="orbit-console" aria-label="Live pipeline orbit visualization">
+        <div class="orbit orbit-outer"></div>
+        <div class="orbit orbit-middle"></div>
+        <div class="orbit orbit-inner"></div>
+        <div class="orbit-scan"></div>
+        <div class="orbit-node node-discover"><i></i><span>Discover</span><b>{{ view.kpi.today_discovered }}</b></div>
+        <div class="orbit-node node-match"><i></i><span>Match</span><b>{{ view.state_counts.shortlisted }}</b></div>
+        <div class="orbit-node node-tailor"><i></i><span>Tailor</span><b>{{ view.state_counts.tailored }}</b></div>
+        <div class="orbit-node node-offer"><i></i><span>Apply</span><b>{{ view.kpi.applied_lifetime }}</b></div>
+        <div class="orbit-core">
+          <span class="orbit-core-label">CAREER</span>
+          <strong>AI</strong>
+          <small>autonomy core</small>
+        </div>
+      </div>
+
+      <aside class="mission-brief" aria-label="Current mission status">
+        <div class="brief-topline"><span>Today’s mission</span><b>0{{ guided.current_number }}/07</b></div>
+        {% for step in guided.steps %}
+        {% if step.status == "current" %}
+        <div class="brief-current">
+          <span class="brief-kicker">Now in focus</span>
+          <h2>{{ step.title }}</h2>
+          <p>{{ step.hint }}</p>
+          <button type="button" onclick="switchTab('{{ step.tab }}')">Open step {{ step.number }} <span>↗</span></button>
+        </div>
+        {% endif %}
+        {% endfor %}
+        <div class="brief-progress" aria-label="Step {{ guided.current_number }} of 7">
+          <div class="brief-progress-track"><span class="brief-progress-fill brief-progress-{{ guided.current_number }}"></span></div>
+          <div><span>Profile</span><span>Opportunity</span><span>Offer</span></div>
+        </div>
+        <div class="brief-status-grid">
+          <div><small>Agent</small><strong class="status-live">Active</strong></div>
+          <div><small>Strategy</small><strong>{{ view.config.llm_strategy }}</strong></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="career-story" aria-labelledby="story-title">
+      <div class="story-heading">
+        <div>
+          <span class="story-kicker">One story · three realities</span>
+          <h2 id="story-title">From career history to career velocity.</h2>
+        </div>
+        <p>Every signal in your past becomes leverage for the next move—without the repetitive application grind.</p>
+      </div>
+
+      <div class="story-acts">
+        <article class="story-act act-manual">
+          <div class="act-label"><span>Act 01</span><b>The manual grind</b></div>
+          <h3>Your energy disappears into forms.</h3>
+          <p class="act-intro">The same facts, rewritten for every portal. The same résumé, uploaded again.</p>
+          <div class="paper-stack" aria-hidden="true">
+            <div class="paper paper-back"><span>FORM 08/19</span></div>
+            <div class="paper paper-mid"><span>WORK HISTORY</span><i></i><i></i><i></i></div>
+            <div class="paper paper-front">
+              <div class="paper-head"><span>APPLICATION</span><b>!</b></div>
+              <i></i><i></i><i class="paper-field-short"></i>
+              <em>UPLOAD RESUME AGAIN</em>
+              <strong>FORMAT ERROR</strong>
+            </div>
+          </div>
+          <div class="grind-stats">
+            <span><b>42</b><small>fields / role</small></span>
+            <span><b>∞</b><small>context switches</small></span>
+            <span><b>0</b><small>energy left</small></span>
+          </div>
+        </article>
+
+        <article class="story-act act-career">
+          <div class="act-label"><span>Act 02</span><b>Your career genome</b></div>
+          {% if view.config.profile %}
+          <div class="career-card-head">
+            <div class="career-avatar" aria-hidden="true">◎</div>
+            <div><h3>{{ view.config.profile.name }}</h3><p>{{ view.config.profile.location }}</p></div>
+            <span>LIVE PROFILE</span>
+          </div>
+          <div class="career-timeline" role="list" aria-label="Career timeline">
+            {% for moment in view.config.profile.career_story %}
+            <button type="button" class="career-moment {% if loop.first %}active{% endif %}" role="listitem" onclick="activateCareerMoment(this)">
+              <span class="moment-node moment-{{ moment.kind }}"></span>
+              <span class="moment-copy">
+                <small>{{ moment.era }}</small>
+                <strong>{{ moment.title }}</strong>
+                <em>{{ moment.organization }}</em>
+                <span class="moment-proof">{{ moment.proof }}</span>
+              </span>
+            </button>
+            {% endfor %}
+          </div>
+          <div class="genome-footer"><span>Résumé signal</span><strong>{{ view.config.profile.skill_count }} skills · {{ view.config.profile.experience_count }} roles · continuously enriched</strong></div>
+          {% else %}
+          <div class="career-empty">
+            <span>+</span><h3>Your story starts here</h3>
+            <p>Import a résumé or LinkedIn archive and CareerAI will turn it into a living, editable timeline.</p>
+            <button type="button" onclick="switchTab('config')">Build my profile →</button>
+          </div>
+          {% endif %}
+        </article>
+
+        <article class="story-act act-autopilot">
+          <div class="act-label"><span>Act 03</span><b>CareerAI autopilot</b></div>
+          <h3>One profile. A system that moves.</h3>
+          <p class="act-intro">Your search becomes an observable pipeline, with a human checkpoint where it matters.</p>
+          <div class="automation-flow">
+            {% for step in guided.steps %}
+            <button type="button" class="automation-step automation-{{ step.status }}" onclick="switchTab('{{ step.tab }}')">
+              <span class="automation-index">0{{ step.number }}</span>
+              <span class="automation-copy"><strong>{{ step.title }}</strong><small>{{ step.command }}</small></span>
+              <span class="automation-state">{% if step.status == "done" %}✓{% elif step.status == "current" %}RUN{% else %}·{% endif %}</span>
+            </button>
+            {% endfor %}
+          </div>
+          <div class="autopilot-footer"><span class="live-beacon"></span><strong>System ready</strong><small>Next action: {{ guided.headline }}</small></div>
+        </article>
+      </div>
+    </section>
+
+    <div class="operations-divider">
+      <span>Live operations</span><i></i><small>Real data · real actions · full traceability</small>
+    </div>
+
     <div class="copilot-hint-banner" style="background:hsl(217 33% 15%); border:1px solid hsl(217 33% 25%); border-left:4px solid hsl(160 84% 39%); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
       <div style="font-size:13px; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
         <span>💡 <strong>CareerAI Step Hint:</strong> You have <strong>{{ view.kpi.shortlisted_active }}</strong> shortlisted jobs. Click <em>"🎯 Tailor"</em> on any card or use the batch bar below to tailor & render applications at scale.</span>
@@ -89,17 +256,17 @@
     </div>
     <section class="kpi-strip" role="kpi-strip">
       <div class="kpi">
-        <div class="kpi-num">{{ view.kpi.today_discovered }}</div>
+        <div class="kpi-num" data-count="{{ view.kpi.today_discovered }}">{{ view.kpi.today_discovered }}</div>
         <div class="kpi-label">Discovered Today</div>
         <div class="kpi-sub">Across active job sources</div>
       </div>
       <div class="kpi">
-        <div class="kpi-num accent-amber">{{ view.kpi.shortlisted_active }}</div>
+        <div class="kpi-num accent-amber" data-count="{{ view.kpi.shortlisted_active }}">{{ view.kpi.shortlisted_active }}</div>
         <div class="kpi-label">Shortlisted Active</div>
         <div class="kpi-sub">Ready for LLM tailoring</div>
       </div>
       <div class="kpi">
-        <div class="kpi-num accent-indigo">{{ view.kpi.applied_lifetime }}</div>
+        <div class="kpi-num accent-indigo" data-count="{{ view.kpi.applied_lifetime }}">{{ view.kpi.applied_lifetime }}</div>
         <div class="kpi-label">Applied Lifetime</div>
         <div class="kpi-sub">Submitted & responded</div>
       </div>
@@ -163,6 +330,8 @@
       </div>
     </div>
 
+    <hr class="section-divider">
+
     <div class="filter-bar">
       <div class="search-box">
         <span class="search-icon">🔍</span>
@@ -177,7 +346,7 @@
       </div>
     </div>
 
-    <section class="funnel" role="funnel">
+    <section class="funnel" id="job-pipeline" role="funnel">
       {% for col in view.columns %}
       <div class="col" data-stage="{{ col.state }}">
         <div class="col-head">
@@ -185,24 +354,43 @@
             <span class="stage-dot stage-{{ col.state }}"></span>
             <span class="col-label">{{ col.label }}</span>
           </div>
-          <div style="display:flex; align-items:center; gap:6px;">
-            {% if col.state == "discovered" %}
-            <button type="button" class="btn-primary" onclick="runCliCommand('match', {}, this)" style="padding:2px 8px; font-size:11px;" title="Score & shortlist all discovered listings">🎯 Shortlist All</button>
-            {% elif col.state == "shortlisted" and col.top | length > 0 %}
-            <button type="button" class="btn-primary" onclick="batchTailorAllShortlisted(this)" style="padding:2px 8px; font-size:11px;" title="Tailor all shortlisted listings">🎯 Tailor All</button>
-            {% elif col.state == "tailored" and col.top | length > 0 %}
-            <button type="button" class="btn-primary" onclick="batchRenderAllTailored(this)" style="padding:2px 8px; font-size:11px;" title="Render all tailored applications to PDF/DOCX">📄 Render All</button>
-            {% endif %}
-            <span class="col-count">{{ col.count }}</span>
-          </div>
+          <span class="col-count">{{ col.count }}</span>
         </div>
 
-        {% if (col.state == "shortlisted" or col.state == "tailored") and col.top | length > 0 %}
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-elevated); border-bottom:1px solid var(--border); font-size:11.5px;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-secondary);">
-            <input type="checkbox" onchange="toggleSelectAllColumn('{{ col.state }}', this)"> Select All
+        {% if col.state == "discovered" and col.count > 0 %}
+        <div class="col-actions-bar">
+          <button type="button" class="btn-primary col-action-btn-full" onclick="runCliCommand('match', {}, this)" title="Score & shortlist all discovered listings">🎯 Match All Discovered</button>
+        </div>
+        {% elif col.state == "shortlisted" and col.top | length > 0 %}
+        <div class="col-actions-bar">
+          <label class="col-select-all-label">
+            <input type="checkbox" onchange="toggleSelectAllColumn('shortlisted', this)"> Select All
           </label>
-          <span class="batch-col-hint" style="color:var(--text-muted); font-size:11px;">Batch actions</span>
+          <div style="display:flex; gap:5px; align-items:center;">
+            <button type="button" class="btn-primary col-action-btn-pill" onclick="batchTailorTop(20, this)" title="Tailor top 20 matches">🎯 Top 20</button>
+            <button type="button" class="btn-secondary col-action-btn-pill" onclick="batchTailorAllShortlisted(this)" title="Tailor all shortlisted listings">🎯 All</button>
+          </div>
+        </div>
+        {% elif col.state == "tailored" and col.top | length > 0 %}
+        <div class="col-actions-bar">
+          <label class="col-select-all-label">
+            <input type="checkbox" onchange="toggleSelectAllColumn('tailored', this)"> Select All
+          </label>
+          <div style="display:flex; gap:5px; align-items:center;">
+            <button type="button" class="btn-primary col-action-btn-pill" onclick="batchRenderAllTailored(this)" title="Render all tailored applications to PDF/DOCX">📄 Render All</button>
+            <button type="button" class="btn-secondary col-action-btn-icon" onclick="batchRollback('tailored', 'shortlisted', this)" title="Rollback all tailored jobs to shortlisted">↩️</button>
+          </div>
+        </div>
+        {% elif col.state == "rendered" and col.top | length > 0 %}
+        <div class="col-actions-bar">
+          <label class="col-select-all-label">
+            <input type="checkbox" onchange="toggleSelectAllColumn('rendered', this)"> All
+          </label>
+          <div style="display:flex; gap:5px; align-items:center;">
+            <button type="button" class="btn-primary col-action-btn-pill" onclick="batchApplyAllRendered(this)" style="background:var(--accent-emerald); color:#fff; font-weight:600;" title="Apply to all rendered applications">🚀 Apply All</button>
+            <button type="button" class="btn-secondary col-action-btn-pill" onclick="batchRenderAllTailored(this)" title="Re-render all applications to PDF/DOCX">🔄</button>
+            <button type="button" class="btn-secondary col-action-btn-icon" onclick="batchRollback('rendered', 'tailored', this)" title="Rollback all rendered jobs to tailored">↩️</button>
+          </div>
         </div>
         {% endif %}
 
@@ -211,12 +399,74 @@
           <div class="col-empty">No items</div>
           {% else %}
           {% for card in col.top %}
-          <article class="card {% if col.state == 'shortlisted' or col.state == 'tailored' %}card-has-cb{% endif %}" data-stage="{{ col.state }}" data-id="{{ card.id }}" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id | js | safe }}')">
-            {% if col.state == "shortlisted" %}
-            <input type="checkbox" class="card-select-cb batch-cb-shortlisted" data-id="{{ card.id }}" onclick="event.stopPropagation(); updateBatchToolbar();" title="Select for batch tailoring">
-            {% elif col.state == "tailored" %}
+          <article class="card card-stage-{{ col.state }} {% if col.state == 'shortlisted' or col.state == 'tailored' or col.state == 'rendered' %}card-has-cb{% endif %}" data-stage="{{ col.state }}" data-id="{{ card.id }}" data-title="{% if card.title %}{{ card.title | lower }}{% endif %}" data-company="{% if card.company %}{{ card.company | lower }}{% endif %}" onclick="openAppModal('{{ card.id | js | safe }}')">
+            {% if col.state == "tailored" %}
             <input type="checkbox" class="card-select-cb batch-cb-tailored" data-id="{{ card.id }}" onclick="event.stopPropagation(); updateBatchToolbar();" title="Select for batch rendering">
             {% endif %}
+
+            {% if col.state == "shortlisted" or col.state == "rendered" %}
+            <div class="job-card-topline">
+              <label class="card-selection-control" onclick="event.stopPropagation();" title="{% if col.state == 'shortlisted' %}Select for batch tailoring{% else %}Select for batch apply{% endif %}">
+                {% if col.state == "shortlisted" %}
+                <input type="checkbox" class="card-select-cb batch-cb-shortlisted" data-id="{{ card.id }}" onclick="event.stopPropagation(); updateBatchToolbar();" aria-label="Select {{ card.title }} for batch tailoring">
+                {% else %}
+                <input type="checkbox" class="card-select-cb batch-cb-rendered" data-id="{{ card.id }}" onclick="event.stopPropagation(); updateBatchToolbar();" aria-label="Select {{ card.title }} for batch apply">
+                {% endif %}
+                <span>Select</span>
+              </label>
+              <span class="job-stage-chip job-stage-chip-{{ col.state }}">
+                <span class="job-stage-chip-dot" aria-hidden="true"></span>
+                {% if col.state == "shortlisted" %}Ready to tailor{% else %}Application ready{% endif %}
+              </span>
+            </div>
+
+            <div class="job-card-heading">
+              <h3 class="card-title">{{ card.title }}</h3>
+              {% if card.score %}
+              <span class="job-fit-score" title="Overall job match score">
+                <strong>{{ (card.score * 100) | round(method="floor") }}%</strong><span>match</span>
+              </span>
+              {% endif %}
+            </div>
+
+            <div class="job-company-line">
+              <span class="company-mark" aria-hidden="true"></span>
+              <span class="card-company">{{ card.company }}</span>
+            </div>
+
+            {% if col.state == "rendered" %}
+            <div class="artifact-ready-strip">
+              <span class="artifact-document" aria-hidden="true"></span>
+              <span class="artifact-ready-copy">
+                <strong>Application pack</strong>
+                <small>PDF + DOCX ready</small>
+              </span>
+              <span class="artifact-check" aria-hidden="true">✓</span>
+            </div>
+            {% endif %}
+
+            <div class="card-actions-bar job-card-actions" onclick="event.stopPropagation();">
+              {% if col.state == "shortlisted" %}
+              <button type="button" class="job-primary-action btn-tailor" onclick="tailorListing('{{ card.id | js | safe }}', this)" title="Tailor resume and cover letter">
+                <span>Tailor application</span><span class="action-arrow" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="job-secondary-action" onclick="openAppModal('{{ card.id | js | safe }}')" title="Inspect job details">Details</button>
+              {% else %}
+              <button type="button" class="job-primary-action job-primary-apply btn-apply" onclick="applyApplication('{{ card.id | js | safe }}', this)" title="Submit or dry-run application">
+                <span>Apply now</span><span class="action-arrow" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="job-icon-action" onclick="openAppModal('{{ card.id | js | safe }}')" title="Inspect job details" aria-label="Inspect job details">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10s2.7-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.7 4.5-7.5 4.5S2.5 10 2.5 10Z"></path><circle cx="10" cy="10" r="2"></circle></svg>
+              </button>
+              <button type="button" class="job-icon-action btn-render" onclick="renderApplication('{{ card.id | js | safe }}', this)" title="Re-render PDF and DOCX artifacts" aria-label="Re-render application">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.4 7.1A6 6 0 1 0 16 12"></path><path d="M12.8 3.8h3.3v3.3"></path></svg>
+              </button>
+              <button type="button" class="job-icon-action job-icon-muted" onclick="rollbackApplication('{{ card.id | js | safe }}', 'tailored', this)" title="Move back to Tailored" aria-label="Move application back to Tailored">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.2 5.1-3.4 3.4 3.4 3.4"></path><path d="M4.2 8.5h6.4a5 5 0 0 1 5 5v1.1"></path></svg>
+              </button>
+              {% endif %}
+            </div>
+            {% else %}
             <div class="card-header">
               <span class="card-title">{{ card.title }}</span>
               {% if card.score %}
@@ -227,19 +477,19 @@
             </div>
             <div class="card-meta">
               <span class="card-company">🏢 {{ card.company }}</span>
-              <div style="display:flex; gap:6px; align-items:center;">
-                {% if col.state == "discovered" %}
-                <button type="button" class="card-action-btn" style="color:var(--accent-amber);" onclick="event.stopPropagation(); forceShortlist('{{ card.id | js | safe }}')" title="Shortlist this listing">⚡ Shortlist</button>
-                {% elif col.state == "shortlisted" %}
-                <button type="button" class="card-action-btn btn-tailor" onclick="event.stopPropagation(); tailorListing('{{ card.id | js | safe }}', this)" title="Tailor resume & cover letter">🎯 Tailor</button>
-                {% elif col.state == "tailored" %}
-                <button type="button" class="card-action-btn btn-render" onclick="event.stopPropagation(); renderApplication('{{ card.id | js | safe }}', this)" title="Render PDF & DOCX artifacts">📄 Render</button>
-                {% elif col.state == "rendered" %}
-                <button type="button" class="card-action-btn btn-apply" onclick="event.stopPropagation(); applyApplication('{{ card.id | js | safe }}', this)" title="Submit / Dry-run application">🚀 Apply</button>
-                {% endif %}
-                <button class="detail-link-btn">Inspect →</button>
-              </div>
+              <button type="button" class="detail-link-btn" onclick="event.stopPropagation(); openAppModal('{{ card.id | js | safe }}')">Inspect →</button>
             </div>
+            {% if col.state == "discovered" or col.state == "shortlisted" or col.state == "tailored" or col.state == "rendered" %}
+            <div class="card-actions-bar" onclick="event.stopPropagation();">
+              {% if col.state == "discovered" %}
+              <button type="button" class="card-action-btn" style="color:var(--accent-amber);" onclick="forceShortlist('{{ card.id | js | safe }}')" title="Shortlist this listing">⚡ Shortlist</button>
+              {% elif col.state == "tailored" %}
+              <button type="button" class="card-action-btn btn-render" onclick="renderApplication('{{ card.id | js | safe }}', this)" title="Render PDF & DOCX artifacts">📄 Render</button>
+              <button type="button" class="card-action-btn" style="color:var(--text-muted);" onclick="rollbackApplication('{{ card.id | js | safe }}', 'shortlisted', this)" title="Rollback to Shortlisted">↩️ Rollback</button>
+              {% endif %}
+            </div>
+            {% endif %}
+            {% endif %}
           </article>
           {% endfor %}
           {% endif %}
@@ -269,9 +519,17 @@
 
   <!-- TAB 2: SYSTEM AUDIT EVENTS -->
   <div id="tab-events" class="tab-panel">
-    <div class="panel-header">
-      <h2>System Audit Event Log</h2>
-      <p class="panel-desc">Real-time state transitions and system audit history from SQLite database</p>
+    <div class="panel-header mission-panel-head head-events">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Observability layer</span>
+        <h2>Every decision leaves a trail.</h2>
+        <p class="panel-desc">Follow every state transition, system choice, and candidate touchpoint from one immutable operational history.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>Events in view</small><strong>{{ view.recent_events | length }}</strong></div>
+        <div><small>System of record</small><strong>SQLite</strong></div>
+        <span class="panel-live"><i></i> Trace stream live</span>
+      </div>
     </div>
 
     <div class="filter-bar">
@@ -333,9 +591,17 @@
 
   <!-- TAB 3: CONFIG & SOURCES INSPECTOR -->
   <div id="tab-config" class="tab-panel">
-    <div class="panel-header">
-      <h2>Configuration & Job Sources Inspector</h2>
-      <p class="panel-desc">Active job scraper adapters, ATS feeds, score thresholds, and LLM settings</p>
+    <div class="panel-header mission-panel-head head-config">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Intelligence layer</span>
+        <h2>Tune the mind behind the search.</h2>
+        <p class="panel-desc">Shape discovery, scoring, source coverage, profile context, and model strategy from one controlled surface.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>Active sources</small><strong>{{ view.config.sources | length }}</strong></div>
+        <div><small>Search signals</small><strong>{{ view.config.keywords | length }}</strong></div>
+        <span class="panel-live"><i></i> {{ view.config.llm_strategy }} strategy</span>
+      </div>
     </div>
 
     <div class="copilot-hint-banner" style="background:hsl(217 33% 15%); border:1px solid hsl(217 33% 25%); border-left:4px solid hsl(38 92% 50%); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -421,6 +687,13 @@
         </div>
         <form id="llm-config-form" onsubmit="saveLlmSettings(event)" class="config-form">
           <div class="form-group">
+            <label for="cfg-strategy">⚡ Tailoring Strategy (Local Zero-LLM vs Live LLM)</label>
+            <select id="cfg-strategy" class="form-control">
+              <option value="local" {% if view.config.llm_strategy == "local" %}selected{% endif %}>local — Deterministic Fast-Path (0 Tokens, &lt;1ms, $0.00 Cost)</option>
+              <option value="llm" {% if view.config.llm_strategy == "llm" %}selected{% endif %}>llm — Live LLM Generator (Claude / DeepSeek / Gemini / OpenAI)</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label for="cfg-backend">LLM Backend / Agentic Tool</label>
             <select id="cfg-backend" class="form-control">
               <option value="auto" {% if view.config.llm_backend == "auto" %}selected{% endif %}>auto (Auto-detect)</option>
@@ -465,6 +738,10 @@
           <span class="pill pill-{{ view.llm_health }}">{{ view.llm_health }}</span>
         </div>
         <div class="config-details">
+          <div class="config-row">
+            <span class="config-label">Strategy</span>
+            <span class="config-value accent-emerald">{% if view.config.llm_strategy == "local" %}⚡ Local Fast-Path (0 Tokens, &lt;1ms){% else %}🤖 Live LLM Model{% endif %}</span>
+          </div>
           <div class="config-row">
             <span class="config-label">Provider</span>
             <span class="config-value">{{ view.config.llm_provider }}</span>
@@ -769,17 +1046,49 @@
 
   <!-- TAB 4: ACTION & INTERVIEW CENTER -->
   <div id="tab-actions" class="tab-panel">
-    <div class="panel-header">
-      <h2>Action & Interview Center</h2>
-      <p class="panel-desc">Pending human review approvals, interview prep sheets, and system maintenance alerts</p>
+    <div class="panel-header mission-panel-head head-actions">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Human checkpoint</span>
+        <h2>Where automation hands the wheel back to you.</h2>
+        <p class="panel-desc">Review high-impact decisions, prepare for live conversations, and keep every submission intentionally controlled.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>Drafted reviews</small><strong>{{ view.state_counts.drafted }}</strong></div>
+        <div><small>Active actions</small><strong>{{ view.action_items | length }}</strong></div>
+        <span class="panel-live"><i></i> Human approval armed</span>
+      </div>
     </div>
 
     <div class="actions-container">
+      <div class="action-command-deck">
+        <article class="action-lane lane-review">
+          <span class="lane-index">01</span>
+          <div class="lane-icon">✓</div>
+          <small>Approval queue</small>
+          <h3>Review before the world sees it.</h3>
+          <p>Inspect tailored packets and LinkedIn drafts before any final submission leaves the system.</p>
+          <button type="button" onclick="runCliCommand('review', {}, this)">Open {{ view.state_counts.drafted }} drafted reviews <span>→</span></button>
+        </article>
+        <article class="action-lane lane-interview">
+          <span class="lane-index">02</span>
+          <div class="lane-icon">◇</div>
+          <small>Interview studio</small>
+          <h3>Turn every response into readiness.</h3>
+          <p>Generate role-specific talking points, system-design drills, and evidence from your own career story.</p>
+          <button type="button" onclick="switchTab('chat'); usePromptChip('Create an interview preparation plan from my active applications and candidate profile')">Build a prep plan <span>→</span></button>
+        </article>
+        <article class="action-lane lane-guardrail">
+          <span class="lane-index">03</span>
+          <div class="lane-icon">⌁</div>
+          <small>Safety controls</small>
+          <h3>Fast execution. Visible boundaries.</h3>
+          <p>Dry-run defaults, traceable transitions, and explicit approval keep speed from becoming risk.</p>
+          <button type="button" onclick="switchTab('commands')">Inspect command controls <span>→</span></button>
+        </article>
+      </div>
       <div class="actions-section">
         <h3>📝 Drafted Applications Awaiting Approval</h3>
-        {% if view.state_counts.drafted > 0 %}
         <button type="button" class="btn-primary" onclick="runCliCommand('review', {}, this)" style="margin:8px 0 12px; padding:6px 12px; font-size:12px;">🔍 Review Drafted LinkedIn</button>
-        {% endif %}
         {% if view.action_items | length == 0 %}
         <div class="empty-card">
           <span>✨ No pending drafted applications requiring manual review right now.</span>
@@ -815,9 +1124,17 @@
 
   <!-- TAB 5: DISCOVERED & FILTERED EXPLORER -->
   <div id="tab-explorer" class="tab-panel">
-    <div class="panel-header">
-      <h2>🔍 Discovered & Filtered Job Explorer</h2>
-      <p class="panel-desc">Browse, search, and filter all discovered postings before and after matching</p>
+    <div class="panel-header mission-panel-head head-explorer">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Opportunity space</span>
+        <h2>The job market, reduced to signal.</h2>
+        <p class="panel-desc">Search the entire discovery universe, inspect why roles moved, and restore high-potential opportunities in one move.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>Indexed listings</small><strong>{{ view.discovered_explorer | length }}</strong></div>
+        <div><small>Shortlisted</small><strong>{{ view.state_counts.shortlisted }}</strong></div>
+        <span class="panel-live"><i></i> Ranking surface ready</span>
+      </div>
     </div>
 
     <div class="copilot-hint-banner" style="background:hsl(217 33% 15%); border:1px solid hsl(217 33% 25%); border-left:4px solid hsl(207 90% 54%); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -916,9 +1233,17 @@
 
   <!-- TAB 6: CLI COMMAND CENTER -->
   <div id="tab-commands" class="tab-panel">
-    <div class="panel-header">
-      <h2>⌨️ CLI Command Center</h2>
-      <p class="panel-desc">Every <code>careerai</code> CLI command as a button — runnable one-shots execute in place; long-running or credential-prompting commands copy to your terminal</p>
+    <div class="panel-header mission-panel-head head-commands">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Operator console</span>
+        <h2>Power-user control, inside the cockpit.</h2>
+        <p class="panel-desc">Run safe one-shots in place, compose ID-aware actions, or copy sensitive and long-running commands to the terminal.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>Command groups</small><strong>{{ cli_groups | length }}</strong></div>
+        <div><small>Execution model</small><strong>Local</strong></div>
+        <span class="panel-live"><i></i> CLI parity connected</span>
+      </div>
     </div>
 
     <div class="copilot-hint-banner" style="background:hsl(217 33% 15%); border:1px solid hsl(217 33% 25%); border-left:4px solid hsl(270 70% 60%); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -994,9 +1319,17 @@ careerai service uninstall                 disable + remove the systemd unit</pr
 
   <!-- TAB 7: AI CHAT ASSISTANT -->
   <div id="tab-chat" class="tab-panel">
-    <div class="panel-header">
-      <h2>🤖 Interactive AI Career & Pipeline Assistant</h2>
-      <p class="panel-desc">Ask questions, tune discovery keywords, analyze match scores, or get tailored interview advice</p>
+    <div class="panel-header mission-panel-head head-chat">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Contextual copilot</span>
+        <h2>Ask the system that knows your whole search.</h2>
+        <p class="panel-desc">Explore pipeline decisions, tune discovery strategy, and prepare for interviews with your live candidate context attached.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>Model state</small><strong>{{ view.llm_health }}</strong></div>
+        <div><small>Backend</small><strong>{{ view.config.llm_provider }}</strong></div>
+        <span class="panel-live"><i></i> Profile context connected</span>
+      </div>
     </div>
 
     <div class="chat-wrapper">
@@ -1041,6 +1374,7 @@ careerai service uninstall                 disable + remove the systemd unit</pr
       <div class="batch-bar-actions">
         <button type="button" id="batch-tailor-btn" class="btn-primary" onclick="batchTailorSelected(this)">🎯 Tailor Selected</button>
         <button type="button" id="batch-render-btn" class="btn-primary" onclick="batchRenderSelected(this)">📄 Render Selected</button>
+        <button type="button" id="batch-apply-btn" class="btn-primary" onclick="batchApplySelected(this)" style="background:var(--accent-emerald);">🚀 Apply Selected</button>
         <button type="button" class="btn-secondary" onclick="deselectAllBatch()" style="padding:6px 12px; font-size:12px;">✕ Clear</button>
       </div>
     </div>
@@ -1094,9 +1428,12 @@ careerai service uninstall                 disable + remove the systemd unit</pr
         </ul>
       </div>
     </div>
-    <div class="modal-footer">
-      <a id="modal-external-link" href="#" target="_blank" rel="noopener" class="action-btn">Open Original Posting ↗</a>
-      <button class="close-btn-secondary" onclick="closeAppModal()">Close</button>
+    <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div id="modal-actions-container" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;"></div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <a id="modal-external-link" href="#" target="_blank" rel="noopener" class="action-btn">Open Original Posting ↗</a>
+        <button class="close-btn-secondary" onclick="closeAppModal()">Close</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1112,9 +1449,26 @@ function switchTab(tabId) {
   
   var btn = document.getElementById('tab-btn-' + tabId);
   var panel = document.getElementById('tab-' + tabId);
-  if (btn) btn.classList.add('active');
+  if (btn) {
+    btn.classList.add('active');
+    try { btn.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' }); } catch(e) {}
+  }
   if (panel) panel.classList.add('active');
   try { localStorage.setItem('careerai-active-tab', tabId); } catch(e) {}
+  try {
+    var url = new URL(window.location.href);
+    url.searchParams.set('tab', tabId);
+    window.history.replaceState({}, '', url);
+  } catch(e) {}
+}
+
+function activateCareerMoment(button) {
+  var timeline = button && button.closest('.career-timeline');
+  if (!timeline) return;
+  timeline.querySelectorAll('.career-moment').forEach(function(moment) {
+    moment.classList.toggle('active', moment === button);
+  });
+  button.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function filterFunnelCards(query) {
@@ -1204,11 +1558,21 @@ function openAppModal(id) {
         data.artifacts.forEach(function(art) {
           var li = document.createElement('li');
           li.className = 'artifact-item';
-          li.innerText = '📄 [' + art.kind + '] ' + art.path + ' (' + art.bytes + ' bytes)';
+          var isPdf = art.path.endsWith('.pdf');
+          var isDocx = art.path.endsWith('.docx');
+          var isMd = art.path.endsWith('.md');
+          var icon = isPdf ? '📕 PDF' : (isDocx ? '📘 DOCX' : (isMd ? '📝 Markdown' : '📄 File'));
+          var downloadUrl = '/api/v1/artifacts/download?path=' + encodeURIComponent(art.path);
+          var sizeKb = (art.bytes / 1024).toFixed(1) + ' KB';
+
+          li.innerHTML = '<div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:8px;">' +
+            '<span>' + icon + ' <strong>' + art.kind + '</strong> (' + sizeKb + ')</span>' +
+            '<a href="' + downloadUrl + '" target="_blank" class="btn-primary" style="padding:3px 10px; font-size:11px; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">⬇️ Download</a>' +
+            '</div>';
           artifactsUl.appendChild(li);
         });
       } else {
-        artifactsUl.innerHTML = '<li class="empty-item">No disk artifacts registered.</li>';
+        artifactsUl.innerHTML = '<li class="empty-item">No disk artifacts registered. Click "📄 Render" to generate DOCX/PDF resume.</li>';
       }
 
       var timelineUl = document.getElementById('modal-timeline');
@@ -1224,6 +1588,24 @@ function openAppModal(id) {
         });
       } else {
         timelineUl.innerHTML = '<li class="empty-item">No audit events recorded.</li>';
+      }
+
+      var actionsDiv = document.getElementById('modal-actions-container');
+      if (actionsDiv) {
+        actionsDiv.innerHTML = '';
+        var state = (data.state || '').toLowerCase();
+        var targetId = data.listing_id || id;
+
+        if (state === 'shortlisted') {
+          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="tailorListing(\'' + targetId + '\', this)">🎯 Tailor Application</button>';
+        } else if (state === 'tailored') {
+          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="renderApplication(\'' + targetId + '\', this)">📄 Render PDF & DOCX</button>' +
+            '<button type="button" class="btn-secondary" onclick="rollbackApplication(\'' + targetId + '\', \'shortlisted\', this)">↩️ Rollback to Shortlisted</button>';
+        } else if (state === 'rendered') {
+          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="applyApplication(\'' + targetId + '\', this)">🚀 Apply</button>' +
+            '<button type="button" class="btn-secondary" onclick="renderApplication(\'' + targetId + '\', this)">🔄 Re-render</button>' +
+            '<button type="button" class="btn-secondary" onclick="rollbackApplication(\'' + targetId + '\', \'tailored\', this)">↩️ Rollback to Tailored</button>';
+        }
       }
     })
     .catch(function(err) {
@@ -1392,6 +1774,7 @@ function dismissConfigPreview() {
 
 function saveLlmSettings(e) {
   e.preventDefault();
+  var strategy = document.getElementById('cfg-strategy') ? document.getElementById('cfg-strategy').value : 'local';
   var backend = document.getElementById('cfg-backend').value;
   var model = document.getElementById('cfg-model').value;
   var apiBase = document.getElementById('cfg-api-base').value;
@@ -1401,9 +1784,8 @@ function saveLlmSettings(e) {
   msgEl.innerText = 'Saving...';
 
   // Persist non-secret fields to localStorage so they survive reloads.
-  // The API key is intentionally NOT persisted: it is a bearer secret
-  // and localStorage is readable by any script on the origin.
   try {
+    localStorage.setItem('careerai-cfg-strategy', strategy);
     localStorage.setItem('careerai-cfg-backend', backend);
     localStorage.setItem('careerai-cfg-model', model);
     localStorage.setItem('careerai-cfg-api-base', apiBase);
@@ -1415,6 +1797,7 @@ function saveLlmSettings(e) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      strategy: strategy,
       backend: backend,
       model: model || null,
       api_base_url: apiBase || null,
@@ -1629,7 +2012,8 @@ function saveProfile() {
 function updateBatchToolbar() {
   var shortlistedCbs = Array.from(document.querySelectorAll('.batch-cb-shortlisted:checked'));
   var tailoredCbs = Array.from(document.querySelectorAll('.batch-cb-tailored:checked'));
-  var totalSelected = shortlistedCbs.length + tailoredCbs.length;
+  var renderedCbs = Array.from(document.querySelectorAll('.batch-cb-rendered:checked'));
+  var totalSelected = shortlistedCbs.length + tailoredCbs.length + renderedCbs.length;
 
   var bar = document.getElementById('batch-action-bar');
   if (!bar) return;
@@ -1639,8 +2023,10 @@ function updateBatchToolbar() {
     document.getElementById('batch-bar-count').innerText = totalSelected + ' item(s) selected';
     var tailorBtn = document.getElementById('batch-tailor-btn');
     var renderBtn = document.getElementById('batch-render-btn');
+    var applyBtn = document.getElementById('batch-apply-btn');
     if (tailorBtn) tailorBtn.style.display = shortlistedCbs.length > 0 ? 'inline-block' : 'none';
     if (renderBtn) renderBtn.style.display = tailoredCbs.length > 0 ? 'inline-block' : 'none';
+    if (applyBtn) applyBtn.style.display = renderedCbs.length > 0 ? 'inline-block' : 'none';
   } else {
     bar.style.display = 'none';
   }
@@ -1700,10 +2086,51 @@ function batchTailorSelected(btn) {
 }
 
 function batchTailorAllShortlisted(btn) {
-  var cbs = Array.from(document.querySelectorAll('.batch-cb-shortlisted'));
-  if (cbs.length === 0) return;
-  var ids = cbs.map(function(cb) { return cb.getAttribute('data-id'); });
-  runBatchTailorSequence(ids, btn);
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring All...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'tailor', args: { all: true } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ All Tailored!';
+      setTimeout(function() { location.reload(); }, 1200);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
+}
+
+function batchTailorTop(limit, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring Top ' + limit + '...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'tailor', args: { limit: limit } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ Top ' + limit + ' Tailored!';
+      setTimeout(function() { location.reload(); }, 1200);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
 }
 
 function runBatchTailorSequence(ids, btn) {
@@ -1779,10 +2206,76 @@ function batchRenderSelected(btn) {
 }
 
 function batchRenderAllTailored(btn) {
-  var cbs = Array.from(document.querySelectorAll('.batch-cb-tailored'));
-  if (cbs.length === 0) return;
-  var ids = cbs.map(function(cb) { return cb.getAttribute('data-id'); });
-  runBatchRenderSequence(ids, btn);
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rendering All...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'render', args: { all: true } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ All Rendered!';
+      setTimeout(function() { location.reload(); }, 1200);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
+}
+
+function rollbackApplication(id, targetState, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'rollback', args: { id: id, to: targetState } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ Rolled back';
+      setTimeout(function() { location.reload(); }, 800);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 2500);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 2500);
+  });
+}
+
+function batchRollback(fromState, toState, btn) {
+  if (!confirm('Are you sure you want to rollback all ' + fromState + ' jobs to ' + toState + '?')) return;
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rolling back...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'rollback', args: { all: true, from_state: fromState, to: toState } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ Rolled back!';
+      setTimeout(function() { location.reload(); }, 1000);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
 }
 
 function runBatchRenderSequence(ids, btn) {
@@ -1828,7 +2321,7 @@ function applyApplication(id, btn) {
       if (btn) btn.innerHTML = '✅ Applied!';
       setTimeout(function() { location.reload(); }, 1000);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
@@ -1836,6 +2329,66 @@ function applyApplication(id, btn) {
     if (btn) btn.innerHTML = '❌ Error';
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
+}
+
+function batchApplyAllRendered(btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying All...'; }
+  fetch('/api/v1/cli/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'apply', args: { all: true } })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.status === 'success') {
+      if (btn) btn.innerHTML = '✅ All Applied!';
+      setTimeout(function() { location.reload(); }, 1200);
+    } else {
+      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+    }
+  })
+  .catch(function(err) {
+    if (btn) btn.innerHTML = '❌ Error';
+    setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
+  });
+}
+
+function batchApplySelected(btn) {
+  var cbs = Array.from(document.querySelectorAll('.batch-cb-rendered:checked'));
+  if (cbs.length === 0) return;
+  var ids = cbs.map(function(cb) { return cb.dataset.id; });
+  runBatchApplySequence(ids, btn);
+}
+
+function runBatchApplySequence(ids, btn) {
+  var orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying ' + ids.length + '...'; }
+  var nextIndex = 0;
+  function processNext() {
+    if (nextIndex >= ids.length) {
+      if (btn) btn.innerHTML = '✅ All Applied!';
+      setTimeout(function() { location.reload(); }, 1200);
+      return;
+    }
+    var id = ids[nextIndex];
+    if (btn) btn.innerHTML = '⏳ Applying (' + (nextIndex + 1) + '/' + ids.length + ')...';
+    fetch('/api/v1/cli/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'apply', args: { application_id: id } })
+    })
+    .then(function() {
+      nextIndex++;
+      processNext();
+    })
+    .catch(function() {
+      nextIndex++;
+      processNext();
+    });
+  }
+  processNext();
 }
 
 function toggleKeyword(kw) {
@@ -2161,7 +2714,13 @@ document.addEventListener('DOMContentLoaded', function() {
   // Restore Active Tab
   try {
     var savedTab = localStorage.getItem('careerai-active-tab');
-    if (savedTab) switchTab(savedTab);
+    var requestedTab = new URLSearchParams(window.location.search).get('tab');
+    var validTabs = ['funnel', 'events', 'config', 'actions', 'explorer', 'commands', 'chat'];
+    if (requestedTab && validTabs.indexOf(requestedTab) !== -1) {
+      switchTab(requestedTab);
+    } else if (savedTab && validTabs.indexOf(savedTab) !== -1) {
+      switchTab(savedTab);
+    }
   } catch(e) {}
 
   // Restore LLM Form Settings (Backend, Model, Base URL, API Key, Timeout)
@@ -2333,6 +2892,212 @@ function refreshExplorerListings() {
       refreshExplorerListings();
     }
   }, 1000);
+})();
+</script>
+
+<!-- ================================================================ MAKEOVER JS
+     Loading screen, scroll progress, scroll-reveal, animated counters,
+     3D card tilt, stepper progress fill, footer reveal.
+     ========================================================================= -->
+<script>
+(function() {
+  'use strict';
+
+  // ---- Loading screen ----
+  var overlay = document.getElementById('loader-overlay');
+  var barFill = document.getElementById('loader-bar-fill');
+  var pctEl = document.getElementById('loader-pct');
+  var progress = 0;
+  var loadTimer = setInterval(function() {
+    progress += Math.random() * 20 + 25;
+    if (progress >= 100) { progress = 100; clearInterval(loadTimer); }
+    if (barFill) barFill.style.width = progress + '%';
+    if (pctEl) pctEl.textContent = Math.floor(progress) + '%';
+    if (progress >= 100) {
+      setTimeout(function() {
+        if (overlay) overlay.classList.add('hidden');
+        setTimeout(scanReveal, 150);
+      }, 80);
+    }
+  }, 50);
+
+  // ---- Scroll progress bar ----
+  var scrollBar = document.getElementById('scroll-progress');
+  function updateScrollProgress() {
+    if (!scrollBar) return;
+    var scrollTop = window.scrollY || document.documentElement.scrollTop;
+    var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    scrollBar.style.width = pct + '%';
+  }
+  window.addEventListener('scroll', updateScrollProgress, { passive: true });
+
+  // ---- Scroll-reveal via IntersectionObserver ----
+  var revealSelector = '.mission-hero, .career-story, .operations-divider, .kpi, .guided-path, .pipeline-stepper, .filter-bar, .funnel, .next-steps, .config-card, .cmd-card, .action-card, .filter-panel-card, .table-container, .chat-wrapper, .sources-list, footer';
+  // Add reveal class to target elements
+  document.querySelectorAll(revealSelector).forEach(function(el) {
+    el.classList.add('reveal');
+  });
+
+  var revealObserver = null;
+  function scanReveal() {
+    if (!('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach(function(el) { el.classList.add('revealed'); });
+      return;
+    }
+    if (revealObserver) revealObserver.disconnect();
+    revealObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('revealed');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal:not(.revealed)').forEach(function(el) {
+      revealObserver.observe(el);
+    });
+  }
+
+  // ---- Animated KPI counters ----
+  // Numbers are already in the DOM (progressive enhancement). Count-up
+  // rewrites the text from 0; the final value is restored if anything fails.
+  function animateCounter(el) {
+    if (el.classList.contains('counted')) return;
+    el.classList.add('counted');
+    var target = parseInt(el.getAttribute('data-count'), 10);
+    if (isNaN(target)) return;
+    var suffix = el.getAttribute('data-suffix') || '';
+    var duration = 900;
+    var start = performance.now();
+    function tick(now) {
+      var elapsed = now - start;
+      var t = Math.min(elapsed / duration, 1);
+      var eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+      el.textContent = Math.floor(eased * target) + suffix;
+      if (t < 1) {
+        requestAnimationFrame(tick);
+      } else {
+        el.textContent = target + suffix;
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  var counterObserver = null;
+  function scanCounters() {
+    var counters = document.querySelectorAll('.kpi-num[data-count]:not(.counted)');
+    if (!counters.length) return;
+    if (!('IntersectionObserver' in window)) {
+      counters.forEach(animateCounter);
+      return;
+    }
+    if (counterObserver) counterObserver.disconnect();
+    counterObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          animateCounter(entry.target);
+          counterObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.2 });
+    counters.forEach(function(el) { counterObserver.observe(el); });
+  }
+
+  // ---- 3D card tilt on hover ----
+  document.querySelectorAll('.kpi, .config-card, .cmd-card, .action-card').forEach(function(card) {
+    card.classList.add('card-tilt');
+    card.addEventListener('mousemove', function(e) {
+      var rect = card.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      var cx = rect.width / 2;
+      var cy = rect.height / 2;
+      var rotX = ((y - cy) / cy) * -4;
+      var rotY = ((x - cx) / cx) * 4;
+      card.style.transform = 'perspective(800px) rotateX(' + rotX + 'deg) rotateY(' + rotY + 'deg) translateY(-3px)';
+      card.style.setProperty('--tilt-x', (x / rect.width * 100) + '%');
+      card.style.setProperty('--tilt-y', (y / rect.height * 100) + '%');
+    });
+    card.addEventListener('mouseleave', function() {
+      card.style.transform = '';
+    });
+  });
+
+  // ---- Stepper progress fill ----
+  function updateStepperProgress() {
+    var stepper = document.querySelector('.pipeline-stepper');
+    if (!stepper) return;
+    var steps = stepper.querySelectorAll('.stepper-step');
+    var totalSteps = steps.length;
+    if (totalSteps === 0) return;
+    var activeIndex = 0;
+    steps.forEach(function(step, i) {
+      var countEl = step.querySelector('.step-count');
+      if (countEl) {
+        var count = parseInt(countEl.textContent, 10) || 0;
+        if (count > 0) activeIndex = i + 1;
+      }
+    });
+    var pct = totalSteps > 1 ? ((activeIndex - 1) / (totalSteps - 1)) * 100 : 0;
+    // Add progress track if not present
+    var track = stepper.querySelector('.stepper-progress-track');
+    if (!track) return; // progress track is decorative; stepper still works without it
+    var fill = track.querySelector('.stepper-progress-fill');
+    if (fill) fill.style.width = Math.max(0, pct) + '%';
+  }
+
+  // ---- Footer reveal ----
+  var footer = document.querySelector('footer');
+  if (footer) footer.classList.add('reveal');
+
+  // ---- Run after DOMContentLoaded ----
+  function init() {
+    scanReveal();
+    scanCounters();
+    updateScrollProgress();
+    updateStepperProgress();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  // If IntersectionObserver never fires (headless, off-screen tabs),
+  // don't leave content at opacity 0.
+  setTimeout(function() {
+    document.querySelectorAll('.reveal:not(.revealed)').forEach(function(el) {
+      el.classList.add('revealed');
+    });
+    document.querySelectorAll('.kpi-num[data-count]:not(.counted)').forEach(animateCounter);
+    if (overlay && !overlay.classList.contains('hidden')) {
+      overlay.classList.add('hidden');
+    }
+  }, 1800);
+
+  // Re-scan after tab switch (new content may need reveal)
+  var origSwitchTab = window.switchTab;
+  if (origSwitchTab) {
+    window.switchTab = function(id) {
+      origSwitchTab(id);
+      setTimeout(function() {
+        scanReveal();
+        scanCounters();
+        updateScrollProgress();
+      }, 100);
+    };
+  }
+
+  // Re-scan after page refresh (explorer data load)
+  var origRefresh = window.refreshExplorerListings;
+  if (origRefresh) {
+    window.refreshExplorerListings = function() {
+      origRefresh();
+      setTimeout(scanReveal, 300);
+    };
+  }
 })();
 </script>
 </body>

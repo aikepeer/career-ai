@@ -64,9 +64,10 @@ async fn main() -> Result<()> {
         }
         Command::Profile { command } => commands::profile::run(command, backend_override)?,
         Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
-        Command::Match { tune, rematch_shortlisted } => {
-            commands::match_::run(&cwd, tune, rematch_shortlisted).await?
-        }
+        Command::Match {
+            tune,
+            rematch_shortlisted,
+        } => commands::match_::run(&cwd, tune, rematch_shortlisted).await?,
         Command::Run { auto_submit } => {
             let cfg = load_cfg(&cwd)?;
             commands::run::run(&cwd, &cfg, auto_submit).await?;
@@ -74,41 +75,63 @@ async fn main() -> Result<()> {
         Command::Shortlist { command } => match command {
             ShortlistCommand::Show { limit } => commands::shortlist::run_show(&cwd, limit).await?,
         },
-        Command::Tailor { listing_id } => {
+        Command::Tailor {
+            listing_id,
+            all,
+            limit,
+        } => {
             let mut cfg = load_cfg(&cwd)?;
             if let Some(b) = backend_override {
                 cfg.llm.backend = b;
             }
-            match pipeline::tailor_one(&cwd, &cfg, &listing_id).await {
-                Ok(outcome) => {
-                    println!(
-                        "tailored: application_id={} ({} @ {})",
-                        outcome.application_id, outcome.listing_title, outcome.company,
-                    );
-                    println!(
-                        "run `careerai render {}` to emit DOCX/PDF artifacts",
-                        outcome.application_id,
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(error = %format_args!("{e:#}"), "tailor failed");
-                    std::process::exit(commands::tailor::map_tailor_error_to_exit_code(&e));
-                }
-            }
-        }
-        Command::Render { application_id } => {
-            let cfg = load_cfg(&cwd)?;
-            match pipeline::render_one(&cwd, &cfg, &application_id).await {
-                Ok(outcome) => {
-                    println!("rendered: application_id={}", outcome.application_id);
-                    for (path, size) in &outcome.bytes {
-                        println!("  {} ({} bytes)", path.display(), size);
+            if all || limit.is_some() {
+                let outcomes = pipeline::tailor_all(&cwd, &cfg, limit).await?;
+                println!("tailored: {} shortlisted listings", outcomes.len());
+                println!("run `careerai render --all` to emit DOCX/PDF artifacts");
+            } else if let Some(id) = listing_id {
+                match pipeline::tailor_one(&cwd, &cfg, &id).await {
+                    Ok(outcome) => {
+                        println!(
+                            "tailored: application_id={} ({} @ {})",
+                            outcome.application_id, outcome.listing_title, outcome.company,
+                        );
+                        println!(
+                            "run `careerai render {}` to emit DOCX/PDF artifacts",
+                            outcome.application_id,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %format_args!("{e:#}"), "tailor failed");
+                        std::process::exit(commands::tailor::map_tailor_error_to_exit_code(&e));
                     }
                 }
-                Err(e) => {
-                    tracing::error!(error = %format_args!("{e:#}"), "render failed");
-                    std::process::exit(commands::render::map_render_error_to_exit_code(&e));
+            } else {
+                anyhow::bail!("provide listing_id or pass --all or --limit <n>");
+            }
+        }
+        Command::Render {
+            application_id,
+            all,
+        } => {
+            let cfg = load_cfg(&cwd)?;
+            if all {
+                let outcomes = pipeline::render_all(&cwd, &cfg).await?;
+                println!("rendered: {} tailored applications", outcomes.len());
+            } else if let Some(id) = application_id {
+                match pipeline::render_one(&cwd, &cfg, &id).await {
+                    Ok(outcome) => {
+                        println!("rendered: application_id={}", outcome.application_id);
+                        for (path, size) in &outcome.bytes {
+                            println!("  {} ({} bytes)", path.display(), size);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %format_args!("{e:#}"), "render failed");
+                        std::process::exit(commands::render::map_render_error_to_exit_code(&e));
+                    }
                 }
+            } else {
+                anyhow::bail!("provide application_id or pass --all");
             }
         }
         Command::Apply {
@@ -203,6 +226,31 @@ async fn main() -> Result<()> {
         Command::Retry { application_id } => {
             let cfg = load_cfg(&cwd)?;
             commands::retry::run(&cwd, &cfg, &application_id).await?;
+        }
+        Command::Rollback {
+            id,
+            to,
+            all,
+            from_state,
+        } => {
+            if all {
+                let from = from_state.as_deref().unwrap_or("rendered");
+                let outcomes = pipeline::rollback_all(&cwd, from, to.as_deref()).await?;
+                println!(
+                    "rolled back {} items from `{}` to `{}`",
+                    outcomes.len(),
+                    from,
+                    to.as_deref().unwrap_or("previous")
+                );
+            } else if let Some(target_id) = id {
+                let outcome = pipeline::rollback_one(&cwd, &target_id, to.as_deref()).await?;
+                println!(
+                    "rolled back {} from `{}` to `{}`",
+                    outcome.id, outcome.from_state, outcome.to_state
+                );
+            } else {
+                anyhow::bail!("provide id or pass --all");
+            }
         }
         Command::Daemon => {
             let cfg = load_cfg(&cwd)?;

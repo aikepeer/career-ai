@@ -197,25 +197,43 @@ async fn run_live_with_boundary_rate_limit(
             .unwrap_or_else(|| rate_policy_for(rates, source));
 
         // Enforce day cap using SQLite history (cross-process safety).
-        let today_utc = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0)
-            .map(|dt| chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
-        if let Ok(count) = queries::count_submissions_since(pool, source, today_utc).await {
-            if count >= policy.max_per_day {
-                return Err(SubmitError::RateLimited(format!(
-                    "daily submission cap ({}) reached for {}",
-                    policy.max_per_day, source
-                )));
-            }
+        // Fail closed: if the count query errors, we block the submission
+        // rather than letting it through without checking the cap.
+        let today_utc = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .map_or_else(chrono::Utc::now, |dt| {
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)
+            });
+        let count = queries::count_submissions_since(pool, source, today_utc)
+            .await
+            .map_err(|e| {
+                SubmitError::RateLimited(format!("daily cap check failed for {source}: {e}"))
+            })?;
+        if count >= policy.max_per_day {
+            return Err(SubmitError::RateLimited(format!(
+                "daily submission cap ({}) reached for {}",
+                policy.max_per_day, source
+            )));
         }
 
         // Enforce min_seconds_between using SQLite latest submission timestamp.
+        // Best-effort cross-process check — the in-process governor limiter
+        // provides precise enforcement. There is an inherent TOCTOU window
+        // between this read and the actual submission that cannot be closed
+        // without a distributed lock; this is acceptable for a single-user
+        // local daemon.
         if let Ok(Some(last_sub)) = queries::latest_submission_time(pool, source).await {
-            let elapsed = chrono::Utc::now().signed_duration_since(last_sub).num_seconds();
+            let elapsed = chrono::Utc::now()
+                .signed_duration_since(last_sub)
+                .num_seconds();
             let min_secs = u64::from(policy.min_seconds_between);
-            if elapsed >= 0 && (elapsed as u64) < min_secs {
-                let wait = min_secs.saturating_sub(elapsed as u64);
-                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+            if elapsed >= 0 {
+                let elapsed_u64 = u64::try_from(elapsed).unwrap_or(0);
+                if elapsed_u64 < min_secs {
+                    let wait = min_secs.saturating_sub(elapsed_u64);
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                }
             }
         }
 
@@ -316,5 +334,3 @@ fn load_profile(root: &Path) -> Result<Profile> {
         ))
     })
 }
-
-

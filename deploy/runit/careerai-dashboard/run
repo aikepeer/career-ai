@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Keep the service independent of runit's working directory and PATH.
-APP_ROOT="${CAREERAI_ROOT:-/home/miniblues/projects/career-ai}"
+# CAREERAI_ROOT must be set via the runit env or the service's envdir.
+APP_ROOT="${CAREERAI_ROOT:?CAREERAI_ROOT must be set}"
 CAREERAI_BIN="${CAREERAI_BIN:-careerai}"
-CAREERAI_USER="${CAREERAI_USER:-miniblues}"
+CAREERAI_USER="${CAREERAI_USER:?CAREERAI_USER must be set}"
 CAREERAI_PORT="${CAREERAI_DASHBOARD_PORT:-8787}"
 
 cd "${APP_ROOT}"

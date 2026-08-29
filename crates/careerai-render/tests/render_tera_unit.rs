@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use careerai_profile::schema::{Education, Links, Personal, Skills};
-use careerai_render::templates::{render_cover_letter, render_resume};
+use careerai_render::templates::{render_cover_letter, render_resume, render_resume_html};
 use careerai_tailor::model::{CoverLetter, ExperienceView, ProjectView, ResumeView};
 
 fn fixture_view() -> ResumeView {
@@ -123,4 +123,21 @@ fn cover_letter_contains_key_substrings() {
     assert!(md.contains("Dear Hiring Team,"));
     assert!(md.contains("I am excited to apply for this role."));
     assert!(md.contains("Best,\nJane Doe"));
+}
+
+#[test]
+fn resume_html_contains_core_structure() {
+    let view = fixture_view();
+    let html = render_resume_html(
+        &view,
+        &view.personal.name,
+        Some("Senior Embedded Architect"),
+    )
+    .unwrap();
+    assert!(html.contains("Jane Doe"));
+    assert!(html.contains("Senior Embedded Architect"));
+    assert!(html.contains("Profile Summary"));
+    assert!(html.contains("Experience"));
+    assert!(html.contains("Technical Skills"));
+    assert!(html.contains("Education"));
 }

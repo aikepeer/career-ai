@@ -1,0 +1,177 @@
+@page {
+  size: A4;
+  margin: 9mm 13mm 8mm 13mm;
+  @bottom-right {
+    content: counter(page) "/" counter(pages);
+    font-family: "Liberation Sans", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 7.5pt;
+    color: #666;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8.6pt;
+  line-height: 1.26;
+  color: #111;
+  background: #fff;
+}
+
+/* Header */
+.resume-header {
+  display: table;
+  width: 100%;
+  margin-bottom: 6px;
+}
+.header-left {
+  display: table-cell;
+  vertical-align: middle;
+  width: 60%;
+}
+.header-right {
+  display: table-cell;
+  vertical-align: middle;
+  width: 40%;
+  text-align: right;
+  font-size: 8.2pt;
+  line-height: 1.25;
+  color: #222;
+}
+.candidate-name {
+  font-size: 20pt;
+  font-weight: 700;
+  color: #222;
+  letter-spacing: -0.4px;
+  line-height: 1.05;
+  margin-bottom: 2px;
+}
+.candidate-title {
+  font-size: 11pt;
+  font-style: italic;
+  color: #333;
+  font-weight: 500;
+}
+.contact-item {
+  display: block;
+}
+.contact-item a {
+  color: #111;
+  text-decoration: none;
+}
+
+/* Section styling */
+.section {
+  margin-top: 5px;
+}
+.section-title {
+  font-size: 9.8pt;
+  font-weight: 700;
+  color: #000;
+  border-top: 2.5px solid #000;
+  padding-top: 1.5px;
+  margin-bottom: 3px;
+  letter-spacing: -0.2px;
+}
+
+.summary-text {
+  font-size: 8.5pt;
+  line-height: 1.26;
+  color: #1a1a1a;
+  text-align: justify;
+}
+
+/* Timeline Layout for Experience & Education */
+.timeline-entry {
+  display: table;
+  width: 100%;
+  margin-bottom: 4px;
+  page-break-inside: avoid;
+}
+.entry-date {
+  display: table-cell;
+  width: 95px;
+  vertical-align: top;
+  font-size: 8.2pt;
+  font-weight: 500;
+  color: #222;
+  line-height: 1.2;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+.entry-content {
+  display: table-cell;
+  vertical-align: top;
+  width: auto;
+}
+.entry-header {
+  font-size: 8.8pt;
+  margin-bottom: 1.5px;
+}
+.entry-title {
+  font-weight: 700;
+  color: #000;
+}
+.entry-company {
+  font-style: italic;
+  color: #222;
+}
+.entry-location {
+  color: #444;
+}
+
+.bullet-list {
+  list-style-type: none;
+  padding-left: 0;
+  margin-top: 1px;
+}
+.bullet-list li {
+  position: relative;
+  padding-left: 11px;
+  margin-bottom: 1.5px;
+  font-size: 8.3pt;
+  line-height: 1.23;
+  color: #111;
+  text-align: justify;
+}
+.bullet-list li::before {
+  content: "○";
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 6.5pt;
+  color: #444;
+}
+
+/* Technical Skills Table */
+.skills-table {
+  display: table;
+  width: 100%;
+  margin-top: 1px;
+}
+.skill-row {
+  display: table-row;
+}
+.skill-category {
+  display: table-cell;
+  width: 100px;
+  vertical-align: top;
+  font-size: 8.3pt;
+  font-weight: 600;
+  color: #000;
+  padding-right: 8px;
+  padding-bottom: 2px;
+}
+.skill-items {
+  display: table-cell;
+  vertical-align: top;
+  font-size: 8.3pt;
+  color: #111;
+  padding-bottom: 2px;
+  line-height: 1.22;
+}

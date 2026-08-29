@@ -125,6 +125,12 @@ impl ClaudeCliLlm {
             // with agy's "invalid model selection" error.
             if !model.is_empty() {
                 cmd.arg("--model").arg(model);
+                let effort = if self.effort.trim().is_empty() {
+                    "low"
+                } else {
+                    self.effort.trim()
+                };
+                cmd.arg("--effort").arg(effort);
             }
         } else if is_goose {
             // goose is an agentic CLI; drive it in headless single-turn

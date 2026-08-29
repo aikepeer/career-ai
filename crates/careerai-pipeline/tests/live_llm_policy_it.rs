@@ -3,6 +3,7 @@
 
 #![cfg(unix)]
 #![cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
+#![allow(clippy::await_holding_lock)]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
@@ -190,7 +191,6 @@ case "$input" in
   *) printf '%s' '{{"is_error":false,"result":{escaped_diff}}}' ;;
 esac
 "#,
-        escaped_diff = escaped_diff
     );
     write_stub(&stub, &script);
     cfg.llm.backend = BackendChoice::CustomCli(stub.display().to_string());

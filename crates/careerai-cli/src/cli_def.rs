@@ -3,7 +3,6 @@
 //! under the project's 300-LOC cap.
 
 use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
     ConfigSubcommand, CookiesCommand, LlmCommand, McpCommand, NotifyCommand, ProfileCommand,
@@ -71,11 +70,17 @@ pub(crate) enum Command {
     },
     /// Tailor the master resume to a shortlisted listing.
     Tailor {
-        listing_id: String,
+        listing_id: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        limit: Option<usize>,
     },
     /// Render a tailored application to DOCX + PDF via pandoc.
     Render {
-        application_id: String,
+        application_id: Option<String>,
+        #[arg(long)]
+        all: bool,
     },
     /// Submit prepared applications. Defaults to dry-run.
     Apply {
@@ -96,6 +101,16 @@ pub(crate) enum Command {
     /// Reset a failed application to its pre-submit state and retry apply.
     Retry {
         application_id: String,
+    },
+    /// Rollback a listing/application state (e.g. rendered -> tailored, tailored -> shortlisted).
+    Rollback {
+        id: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long = "from")]
+        from_state: Option<String>,
     },
     /// Profile ingestion + validation subcommands.
     Profile {
@@ -157,9 +172,41 @@ pub(crate) enum Command {
 }
 
 pub(crate) fn init_tracing(log_flag: Option<&str>) {
+    use std::fs::OpenOptions;
+    use std::path::PathBuf;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{fmt, EnvFilter, Layer};
+
     let filter = match log_flag {
         Some(level) => EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info")),
         None => EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
     };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    let log_dir = PathBuf::from("data/logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_file_path = log_dir.join("careerai.log");
+
+    let file_layer = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file_path)
+        .ok()
+        .map(|file| {
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(true)
+                .with_filter(filter.clone())
+        });
+
+    let stderr_layer = fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .with_filter(filter);
+
+    tracing_subscriber::registry()
+        .with(stderr_layer)
+        .with(file_layer)
+        .init();
 }

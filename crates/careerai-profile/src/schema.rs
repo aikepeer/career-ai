@@ -10,9 +10,8 @@ use validator::Validate;
 
 use crate::error::{ProfileError, Result};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Validate, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Profile {
-    #[validate(nested)]
     pub personal: Personal,
 
     #[serde(default)]
@@ -40,9 +39,8 @@ pub struct Profile {
     pub projects: Vec<Project>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Validate, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Personal {
-    #[validate(length(min = 1, message = "name is required"))]
     pub name: String,
 
     #[serde(default)]
@@ -161,6 +159,34 @@ pub struct Project {
 
     #[serde(default)]
     pub bullets: Vec<String>,
+}
+
+impl Validate for Personal {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        if self.name.trim().is_empty() {
+            let mut errors = validator::ValidationErrors::new();
+            let mut err = validator::ValidationError::new("length");
+            err.message = Some(std::borrow::Cow::Borrowed("name is required"));
+            errors.add("name", err);
+            return Err(errors);
+        }
+        Ok(())
+    }
+}
+
+impl Validate for Profile {
+    fn validate(&self) -> std::result::Result<(), validator::ValidationErrors> {
+        if let Err(personal_errs) = self.personal.validate() {
+            let mut errors = validator::ValidationErrors::new();
+            for (_field, field_errs) in personal_errs.field_errors() {
+                for err in field_errs {
+                    errors.add("personal", err.clone());
+                }
+            }
+            return Err(errors);
+        }
+        Ok(())
+    }
 }
 
 impl Profile {

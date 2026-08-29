@@ -126,6 +126,12 @@ pub struct LlmConfig {
     /// Bullet relevance threshold for local pruning [0.0, 1.0].
     #[serde(default = "default_drop_threshold")]
     pub drop_threshold: f32,
+    /// Minimum match score threshold (e.g. 0.03 for >=3% match) to trigger LLM tailoring.
+    #[serde(default = "default_llm_min_score")]
+    pub llm_min_score: f32,
+    /// Reasoning effort level for reasoning models (e.g. "low", "medium", "high").
+    #[serde(default = "default_effort")]
+    pub effort: String,
     /// Custom API Base URL for OpenAI/Anthropic/DeepSeek compatible endpoints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
@@ -135,10 +141,16 @@ pub struct LlmConfig {
 }
 
 fn default_tailor_strategy() -> String {
-    "llm".to_string()
+    "local".to_string()
 }
 fn default_drop_threshold() -> f32 {
     0.05
+}
+fn default_llm_min_score() -> f32 {
+    0.03
+}
+fn default_effort() -> String {
+    "low".to_string()
 }
 
 fn default_cache_dir() -> String {
@@ -158,7 +170,7 @@ fn default_timeout_seconds() -> u64 {
     300
 }
 fn default_prompt_version() -> String {
-    "tailor.v1".to_string()
+    "tailor.v2".to_string()
 }
 fn default_anthropic_prompt_cache() -> bool {
     true

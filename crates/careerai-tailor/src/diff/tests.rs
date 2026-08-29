@@ -84,7 +84,7 @@ fn rejects_path_outside_profile() {
     let mut ops = full_coverage_ops();
     ops.push(keep("experience[0].bullets[2]"));
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(matches!(err, TailorError::Schema(ref s) if s.contains("missing bullet")));
 }
 
@@ -100,7 +100,7 @@ fn rejects_invented_employer() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
         "got {err:?}"
@@ -119,7 +119,7 @@ fn rejects_fabricated_number() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented number"),
         "got {err:?}"
@@ -138,7 +138,7 @@ fn rejects_cross_entry_move() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("crosses entries")),
         "got {err:?}"
@@ -155,7 +155,7 @@ fn rejects_empty_experience_after_drops() {
         kind: OpKind::Drop,
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("emptied by drops")),
         "got {err:?}"
@@ -172,7 +172,7 @@ fn rejects_missing_coverage() {
         keep("projects[0].bullets[0]"),
     ];
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("not covered")),
         "got {err:?}"
@@ -185,7 +185,7 @@ fn rejects_duplicate_op_paths() {
     let mut ops = full_coverage_ops();
     ops.push(keep("experience[0].bullets[0]"));
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("duplicate op path")),
         "got {err:?}"
@@ -207,7 +207,7 @@ fn accepts_valid_reorder_and_keep() {
         keep("projects[0].bullets[0]"),
     ];
     let doc = minimal_doc(ops);
-    validate(&doc, &profile).unwrap();
+    validate(&doc, &profile, "").unwrap();
     let view = apply(doc, profile).unwrap();
     // Moved bullet[1] to front of experience[0].
     assert_eq!(view.experience[0].bullets.len(), 2);
@@ -227,7 +227,7 @@ fn accepts_skill_injection_from_profile_skills() {
         },
     };
     let doc = minimal_doc(ops);
-    validate(&doc, &profile).unwrap();
+    validate(&doc, &profile, "").unwrap();
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn bullet_length_cap_enforced() {
         kind: OpKind::Reword { new_text: ok_text },
     };
     let doc = minimal_doc(ops);
-    validate(&doc, &profile).unwrap();
+    validate(&doc, &profile, "").unwrap();
 
     // Over cap: 281 chars.
     let long_text: String = "a".repeat(MAX_BULLET_CHARS + 1);
@@ -256,7 +256,7 @@ fn bullet_length_cap_enforced() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "bullet over 280 chars"),
         "got {err:?}"
@@ -275,7 +275,7 @@ fn rejects_empty_reword_new_text() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("reword new_text is empty")),
         "got {err:?}"
@@ -293,7 +293,7 @@ fn rejects_move_before_target_equals_source() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("move_before target equals source")),
         "got {err:?}"
@@ -312,7 +312,7 @@ fn rejects_cover_letter_over_char_cap_even_with_low_word_count() {
         ops: full_coverage_ops(),
         cover_letter: huge,
     };
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::CoverLetterCharsTooLong { .. }),
         "got {err:?}"

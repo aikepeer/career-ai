@@ -5,17 +5,7 @@ use std::path::Path;
 
 use super::util::{atomic_write, backup_file, value_str};
 
-/// Merge the profile-derived sections of a generated config into
-/// `config/local.yaml` without clobbering everything else.
-///
-/// Only `sources.keywords`, `sources.locations`, `filter`, and
-/// `scheduler.cadence` are taken from the generated document. Keys the
-/// generator doesn't know about — `llm.api_key`, `submit.*`, `notify.*`,
-/// `user.*`, `domains`, and per-source company lists — are preserved.
-/// The previous full-file overwrite silently deleted those.
-/// Compute the merged `config/local.yaml` content produced by
-/// `generated` without writing anything. Used by the preview endpoint so
-/// the operator can see the before/after before applying.
+/// Merge profile-derived sections of generated config into `config/local.yaml`.
 pub(crate) fn merge_generated_config_doc(
     cfg_path: &Path,
     generated: &str,
@@ -89,6 +79,7 @@ pub(crate) fn merge_generated_config(cfg_path: &Path, generated: &str) -> Result
 /// Merge LLM settings into `config/local.yaml`, preserving every other key
 /// and any hand edits. This is a targeted YAML merge rather than a full
 /// `CoreConfig` re-serialize so unknown/forward keys survive.
+#[allow(clippy::too_many_arguments)]
 pub fn update_llm_settings_in_config(
     cfg_path: &Path,
     backend: &str,
@@ -97,6 +88,7 @@ pub fn update_llm_settings_in_config(
     api_base_url: Option<&str>,
     api_key: Option<&str>,
     timeout_seconds: Option<u64>,
+    strategy: Option<&str>,
 ) -> Result<(), String> {
     let mut doc: serde_yaml::Value = if cfg_path.exists() {
         let raw = std::fs::read_to_string(cfg_path)
@@ -125,6 +117,13 @@ pub fn update_llm_settings_in_config(
             llm_map,
             "backend",
             serde_yaml::Value::String(backend.trim().to_string()),
+        );
+    }
+    if let Some(v) = strategy.filter(|s| !s.trim().is_empty()) {
+        set(
+            llm_map,
+            "strategy",
+            serde_yaml::Value::String(v.trim().to_string()),
         );
     }
     if let Some(v) = provider.filter(|s| !s.trim().is_empty()) {
@@ -185,10 +184,7 @@ pub fn update_threshold_in_config(cfg_path: &Path, threshold: f32) -> Result<(),
         .as_mapping_mut()
         .ok_or_else(|| "config root must be a YAML mapping".to_string())?;
 
-    // Upsert match.score_threshold (or matching.score_threshold if legacy key exists).
-    let match_key = if root.contains_key(&serde_yaml::Value::String("match".into())) {
-        serde_yaml::Value::String("match".into())
-    } else if root.contains_key(&serde_yaml::Value::String("matching".into())) {
+    let match_key = if root.contains_key(serde_yaml::Value::String("matching".into())) {
         serde_yaml::Value::String("matching".into())
     } else {
         serde_yaml::Value::String("match".into())
@@ -229,6 +225,7 @@ mod tests {
             Some("https://api.deepseek.com/v1"),
             Some("sk-secret"),
             Some(120),
+            Some("local"),
         )
         .unwrap();
 
@@ -248,6 +245,7 @@ mod tests {
             text.contains("timeout_seconds: 120"),
             "timeout missing: {text}"
         );
+        assert!(text.contains("strategy: local"), "strategy missing: {text}");
     }
 
     #[test]
@@ -260,6 +258,7 @@ mod tests {
             "auto",
             None,
             Some("claude-3-5-sonnet"),
+            None,
             None,
             None,
             None,
@@ -344,14 +343,24 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = tmp.path().join("config").join("local.yaml");
         std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-        std::fs::write(&cfg, "llm:\n  backend: auto\nmatch:\n  must_include_skills: [Rust]\n").unwrap();
+        std::fs::write(
+            &cfg,
+            "llm:\n  backend: auto\nmatch:\n  must_include_skills: [Rust]\n",
+        )
+        .unwrap();
 
         update_threshold_in_config(&cfg, 0.003).unwrap();
 
         let text = std::fs::read_to_string(&cfg).unwrap();
-        assert!(text.contains("score_threshold: 0.003"), "threshold missing: {text}");
+        assert!(
+            text.contains("score_threshold: 0.003"),
+            "threshold missing: {text}"
+        );
         assert!(text.contains("backend: auto"), "llm.backend lost: {text}");
-        assert!(text.contains("must_include_skills"), "must_include_skills lost: {text}");
+        assert!(
+            text.contains("must_include_skills"),
+            "must_include_skills lost: {text}"
+        );
     }
 
     #[test]

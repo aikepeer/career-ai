@@ -39,22 +39,27 @@ pub async fn render_one(
     let application = match queries::find_application_by_id(&pool, application_id).await {
         Ok(a) => a,
         Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("application not found: {application_id}");
+            match queries::find_latest_application_for_listing(&pool, application_id).await {
+                Ok(Some(a)) => a,
+                _ => anyhow::bail!("application not found: {application_id}"),
+            }
         }
         Err(e) => return Err(e).context("fetch application"),
     };
 
-    if application.state != "tailored" {
+    let app_id = application.id.clone();
+
+    if application.state != "tailored" && application.state != "rendered" {
         anyhow::bail!(
-            "application {application_id} is in state '{}'; expected 'tailored'",
+            "application {app_id} is in state '{}'; expected 'tailored' or 'rendered'",
             application.state
         );
     }
 
-    let payload = match queries::find_payload_by_application_id(&pool, application_id).await {
+    let payload = match queries::find_payload_by_application_id(&pool, &app_id).await {
         Ok(p) => p,
         Err(careerai_db::DbError::NotFound(_)) => {
-            anyhow::bail!("application payload not found: {application_id}");
+            anyhow::bail!("application payload not found: {app_id}");
         }
         Err(e) => return Err(e).context("fetch application payload"),
     };
@@ -88,8 +93,7 @@ pub async fn render_one(
     .await
     .context("render_application")?;
 
-    // Attach artifact rows for each rendered file. `bytes` is the canonical
-    // size map returned from render; we look each path up there.
+    // Attach artifact rows for each rendered file that exists on disk.
     for (kind, path) in [
         ("resume_md", &artifacts.resume_md),
         ("resume_docx", &artifacts.resume_docx),
@@ -97,18 +101,21 @@ pub async fn render_one(
         ("cover_md", &artifacts.cover_md),
         ("cover_docx", &artifacts.cover_docx),
     ] {
-        let size = artifacts.bytes.get(path).copied().unwrap_or_default();
-        queries::attach_artifact(
-            &pool,
-            &application.id,
-            &NewArtifact {
-                kind: kind.to_string(),
-                path: path.to_string_lossy().into_owned(),
-                bytes: i64::try_from(size).unwrap_or(i64::MAX),
-            },
-        )
-        .await
-        .with_context(|| format!("attach_artifact {kind}"))?;
+        if let Some(&size) = artifacts.bytes.get(path) {
+            if size > 0 {
+                queries::attach_artifact(
+                    &pool,
+                    &application.id,
+                    &NewArtifact {
+                        kind: kind.to_string(),
+                        path: path.to_string_lossy().into_owned(),
+                        bytes: i64::try_from(size).unwrap_or(i64::MAX),
+                    },
+                )
+                .await
+                .with_context(|| format!("attach_artifact {kind}"))?;
+            }
+        }
     }
 
     queries::transition(
@@ -132,4 +139,25 @@ pub async fn render_one(
         cover_docx: artifacts.cover_docx,
         bytes: artifacts.bytes,
     })
+}
+
+/// Render all currently tailored or previously rendered applications in sequence.
+pub async fn render_all(root: &Path, cfg: &CoreConfig) -> Result<Vec<RenderedOutcome>> {
+    let pool = open_pool(root).await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT id FROM applications WHERE state IN ('tailored', 'rendered')")
+            .fetch_all(&pool)
+            .await
+            .context("fetch tailored/rendered applications")?;
+
+    let mut outcomes = Vec::with_capacity(rows.len());
+    for (id,) in rows {
+        match render_one(root, cfg, &id).await {
+            Ok(outcome) => outcomes.push(outcome),
+            Err(e) => {
+                tracing::warn!(application_id = %id, error = %e, "render_all: failed to render application");
+            }
+        }
+    }
+    Ok(outcomes)
 }

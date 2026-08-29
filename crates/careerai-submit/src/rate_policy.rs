@@ -1,7 +1,7 @@
 //! Rate policy resolution and ATS source classification.
 
-use careerai_core::config::{RatesConfig, SubmitConfig};
 use crate::rate_limiter::RatePolicy;
+use careerai_core::config::{RatesConfig, SubmitConfig};
 
 /// True when `source` routes to a non-browser ATS HTTP submitter.
 /// Browser submitters (`linkedin`, `naukri`) manage their own rate

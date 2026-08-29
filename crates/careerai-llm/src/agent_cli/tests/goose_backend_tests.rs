@@ -1,5 +1,10 @@
 #![cfg(unix)]
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::unwrap_in_result)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::unwrap_in_result,
+    clippy::await_holding_lock
+)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
@@ -48,11 +53,13 @@ printf '%s' '{"messages":[{"role":"assistant","content":[{"text":"BACKEND_OK"}]}
     }
     let path_value = dir.path().to_string_lossy().into_owned();
     std::env::set_var("PATH", path_value);
-    let mut cfg = LlmConfig::default();
-    cfg.backend = BackendChoice::Goose;
-    cfg.provider = "antigravity".into();
-    cfg.model = "provider/model-default".into();
-    cfg.max_retries = 0;
+    let cfg = LlmConfig {
+        backend: BackendChoice::Goose,
+        provider: "antigravity".into(),
+        model: "provider/model-default".into(),
+        max_retries: 0,
+        ..Default::default()
+    };
 
     let cache = Arc::new(Cache::new(dir.path().join("cache")));
     let backend = Backend::resolve(BackendChoice::Goose, &cfg, cache)

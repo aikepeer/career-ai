@@ -236,6 +236,38 @@ pub fn load_profile_view_at(path: &Path) -> Option<crate::view::ProfileView> {
     } else {
         p.experience.iter().map(|e| e.title.clone()).collect()
     };
+
+    let skill_count = p.skills.all_skill_names().count();
+    let mut career_story = Vec::with_capacity(p.education.len() + p.experience.len());
+    for education in &p.education {
+        let proof = education
+            .achievements
+            .first()
+            .or_else(|| education.projects.first())
+            .cloned()
+            .unwrap_or_else(|| "Built the technical foundation for the journey ahead.".to_string());
+        career_story.push(crate::view::CareerStoryItem {
+            kind: "education".to_string(),
+            era: format_era(&education.start, &education.end),
+            title: education.degree.clone(),
+            organization: education.institution.clone(),
+            proof,
+        });
+    }
+    for experience in &p.experience {
+        career_story.push(crate::view::CareerStoryItem {
+            kind: "experience".to_string(),
+            era: format_era(&experience.start, &experience.end),
+            title: experience.title.clone(),
+            organization: experience.company.clone(),
+            proof: experience.bullets.first().map_or_else(
+                || "Expanded scope, impact, and technical depth.".to_string(),
+                |bullet| truncate_story_proof(bullet, 156),
+            ),
+        });
+    }
+    career_story.sort_by(|a, b| a.era.cmp(&b.era));
+
     Some(crate::view::ProfileView {
         name: p.personal.name,
         email: p.personal.email,
@@ -253,10 +285,30 @@ pub fn load_profile_view_at(path: &Path) -> Option<crate::view::ProfileView> {
         tools: p.skills.tools,
         debugging: p.skills.debugging,
         protocols: p.skills.protocols,
+        skill_count,
         experience_count: p.experience.len(),
         education_count: p.education.len(),
+        career_story,
         raw_yaml: raw,
     })
+}
+
+fn format_era(start: &str, end: &str) -> String {
+    match (start.trim(), end.trim()) {
+        ("", "") => "Milestone".to_string(),
+        (start, "") => start.to_string(),
+        ("", end) => end.to_string(),
+        (start, end) => format!("{start} — {end}"),
+    }
+}
+
+fn truncate_story_proof(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut shortened: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+    shortened.push('…');
+    shortened
 }
 
 #[cfg(test)]

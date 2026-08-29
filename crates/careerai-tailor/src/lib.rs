@@ -35,7 +35,9 @@ pub use crate::cover_skeleton::{CoverSkeleton, CoverSlots};
 pub use crate::error::{Result, TailorError};
 pub use crate::local::{tailor_for_listing_local, tailor_local, tailor_local_with_variants};
 pub use crate::model::{CoverLetter, ExperienceView, ProjectView, ResumeView, TailorOutcome};
-pub use crate::variants::{compile_profile_variants, BulletVariant, EntryVariants, ProfileVariants};
+pub use crate::variants::{
+    compile_profile_variants, BulletVariant, EntryVariants, ProfileVariants,
+};
 
 /// Tailor a shortlisted listing end-to-end: fetch the listing, call the
 /// LLM (cache-wrapped) for a constrained diff, validate + apply it,
@@ -102,7 +104,9 @@ pub async fn tailor_for_listing(
     };
 
     // 4) Parse + validate the diff; apply it to produce the ResumeView.
-    let doc = schema::parse_and_validate(&resp.text, profile)?;
+    let jd_text = format!("{} {} {}", listing.title, listing.company, listing.description);
+    let doc = schema::parse_and_validate(&resp.text, profile, &jd_text)?;
+    let cover_letter_body = doc.cover_letter.clone();
     let diff_raw_json = resp.text.clone();
     let resume_view = diff::apply(doc, profile.clone())?;
 
@@ -113,11 +117,16 @@ pub async fn tailor_for_listing(
         cache.put(&key, &resp).await?;
     }
 
-    // 5) Draft the cover letter (separate cache scope with its own
-    //    prompt_version suffix in `cover_letter::draft`). Pass the
-    //    pre-computed profile_hash so we don't re-canonicalize the
-    //    whole profile JSON tree.
-    let letter = cover_letter::draft(llm, profile, &listing, cfg, &cache, &profile_hash).await?;
+    // 5) Draft the cover letter:
+    // If the unified single-pass diff already generated a valid cover letter (>= 40 chars),
+    // reuse it directly, saving a second LLM roundtrip and 50% token cost.
+    let letter = if cover_letter_body.trim().len() >= 40 {
+        CoverLetter {
+            body: cover_letter_body,
+        }
+    } else {
+        cover_letter::draft(llm, profile, &listing, cfg, &cache, &profile_hash).await?
+    };
 
     // 6) Persist application row + payload.
     let new_app = NewApplication {

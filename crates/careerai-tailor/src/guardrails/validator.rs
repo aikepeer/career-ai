@@ -124,6 +124,7 @@ pub(crate) fn forbid_invented_entities_with(
                 || sets.skill_tokens.contains(&stripped)
                 || sets.skill_tokens.contains(&lower)
                 || sets.summary_proper_nouns.contains(&stripped)
+                || sets.jd_proper_nouns.contains(&stripped)
                 || original_proper_nouns.contains(&stripped)
                 || original_words.contains(&stripped)
                 || COMMON_ENGLISH_CAPS.contains(&stripped.as_str());

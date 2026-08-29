@@ -42,6 +42,7 @@ pub(crate) fn unique_tmp_path(path: &Path) -> PathBuf {
 }
 
 #[cfg(unix)]
+#[allow(clippy::similar_names)]
 pub(crate) fn fix_sudo_ownership(path: &Path) {
     use std::os::unix::fs::MetadataExt;
     // 1. Check SUDO_UID / SUDO_GID
@@ -57,11 +58,11 @@ pub(crate) fn fix_sudo_ownership(path: &Path) {
     // 2. If running as root without SUDO_UID, inherit ownership from parent directory
     if let Some(parent) = path.parent() {
         if let Ok(meta) = std::fs::metadata(parent) {
-            let parent_uid = meta.uid();
-            let parent_gid = meta.gid();
-            if parent_uid != 0 {
+            let owner_uid = meta.uid();
+            let owner_gid = meta.gid();
+            if owner_uid != 0 {
                 let _ = std::process::Command::new("chown")
-                    .arg(format!("{parent_uid}:{parent_gid}"))
+                    .arg(format!("{owner_uid}:{owner_gid}"))
                     .arg(path)
                     .status();
             }

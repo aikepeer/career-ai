@@ -16,7 +16,10 @@ pub(crate) const RESUME_TEMPLATE: &str = include_str!("../../../templates/resume
 pub(crate) const COVER_LETTER_TEMPLATE: &str =
     include_str!("../../../templates/cover_letter.md.tera");
 
+pub(crate) const RESUME_HTML_TEMPLATE: &str = include_str!("../../../templates/resume.html.tera");
+
 const RESUME_NAME: &str = "resume.md.tera";
+const RESUME_HTML_NAME: &str = "resume.html.tera";
 const COVER_LETTER_NAME: &str = "cover_letter.md.tera";
 
 /// Escape characters that have special meaning in Markdown tables, code,
@@ -74,17 +77,50 @@ fn joinlines_filter(
     tera::to_value(items.join("\n")).map_err(tera::Error::from)
 }
 
+/// Strip trailing punctuation (., : ; !) from markdown headings to satisfy MD026.
+fn clean_heading_filter(
+    value: &Value,
+    _args: &HashMap<String, Value>,
+) -> std::result::Result<Value, tera::Error> {
+    let s = match value {
+        Value::String(s) => s.trim_end_matches(['.', ':', ';', '!', ',']).to_string(),
+        other => other.to_string(),
+    };
+    tera::to_value(s).map_err(tera::Error::from)
+}
+
+/// Format bullet points with bold leading category label (e.g. `Impact & Scale: ...` -> `<strong>Impact & Scale:</strong> ...`).
+fn format_bullet_filter(
+    value: &Value,
+    _args: &HashMap<String, Value>,
+) -> std::result::Result<Value, tera::Error> {
+    let s = match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    if let Some((label, rest)) = s.split_once(':') {
+        if label.len() <= 40 && !label.contains('.') {
+            let formatted = format!("<strong>{label}:</strong>{rest}");
+            return tera::to_value(formatted).map_err(tera::Error::from);
+        }
+    }
+    tera::to_value(s).map_err(tera::Error::from)
+}
+
 fn build_engine() -> Result<Tera> {
     let mut tera = Tera::default();
     tera.autoescape_on(vec![]);
     tera.register_filter("escape_md", escape_md_filter);
     tera.register_filter("joinlines", joinlines_filter);
+    tera.register_filter("clean_heading", clean_heading_filter);
+    tera.register_filter("format_bullet", format_bullet_filter);
     tera.add_raw_template(RESUME_NAME, RESUME_TEMPLATE)?;
+    tera.add_raw_template(RESUME_HTML_NAME, RESUME_HTML_TEMPLATE)?;
     tera.add_raw_template(COVER_LETTER_NAME, COVER_LETTER_TEMPLATE)?;
     Ok(tera)
 }
 
-/// Process-wide Tera instance. Parsing both templates + registering
+/// Process-wide Tera instance. Parsing all templates + registering
 /// filters costs ~30ms on first use; cache it so subsequent renders
 /// pay only the render cost (single-digit ms).
 fn engine() -> Result<&'static Tera> {
@@ -106,6 +142,24 @@ pub fn render_resume(view: &ResumeView, personal_name: &str) -> Result<String> {
     };
     ctx.insert("personal_name", personal_name);
     Ok(tera.render(RESUME_NAME, &ctx)?)
+}
+
+pub fn render_resume_html(
+    view: &ResumeView,
+    personal_name: &str,
+    candidate_headline: Option<&str>,
+) -> Result<String> {
+    let tera = engine()?;
+    let mut ctx = {
+        let json = serde_json::to_value(view)
+            .map_err(|e| tera::Error::msg(format!("serialize ResumeView: {e}")))?;
+        Context::from_value(json)?
+    };
+    ctx.insert("personal_name", personal_name);
+    if let Some(headline) = candidate_headline {
+        ctx.insert("candidate_headline", headline);
+    }
+    Ok(tera.render(RESUME_HTML_NAME, &ctx)?)
 }
 
 pub fn render_cover_letter(

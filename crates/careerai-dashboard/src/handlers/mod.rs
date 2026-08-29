@@ -5,7 +5,7 @@ pub mod listings;
 pub mod profile_import;
 
 pub use config_gen::{api_config_apply, api_config_generate, api_config_prompt};
-pub use listings::{api_application_detail, api_force_shortlist};
+pub use listings::{api_application_detail, api_download_artifact, api_force_shortlist};
 pub use profile_import::{api_profile_import, api_profile_import_confirm};
 
 use std::fmt::Write as _;
@@ -69,6 +69,7 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
         prompt_version: "v1.2.0".into(),
         profile: None,
         llm_backend: "auto".into(),
+        llm_strategy: "local".into(),
         llm_api_base: None,
         llm_timeout_seconds: 300,
     });
@@ -141,6 +142,7 @@ pub struct SaveConfigRequest {
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
     pub timeout_seconds: Option<u64>,
+    pub strategy: Option<String>,
 }
 
 pub async fn api_save_config(
@@ -163,6 +165,7 @@ pub async fn api_save_config(
         payload.api_base_url.as_deref(),
         payload.api_key.as_deref(),
         payload.timeout_seconds,
+        payload.strategy.as_deref(),
     ) {
         Ok(()) => (
             StatusCode::OK,
@@ -220,10 +223,8 @@ pub async fn api_save_threshold(
     let cwd = careerai_core::paths::resolve_root_env();
     let config_path = cwd.join("config").join("local.yaml");
 
-    match crate::profile_handler::update_threshold_in_config(
-        &config_path,
-        payload.score_threshold,
-    ) {
+    match crate::profile_handler::update_threshold_in_config(&config_path, payload.score_threshold)
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(serde_json::json!({
@@ -247,9 +248,7 @@ pub async fn api_save_threshold(
 
 /// `POST /api/match/rematch-shortlisted` — re-score shortlisted listings
 /// and demote those that fall below the current threshold to filtered_out.
-pub async fn api_rematch_shortlisted(
-    State(_state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+pub async fn api_rematch_shortlisted(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let cwd = careerai_core::paths::resolve_root_env();
     let cfg = match careerai_core::config::CoreConfig::load(&cwd) {
         Ok(c) => c,

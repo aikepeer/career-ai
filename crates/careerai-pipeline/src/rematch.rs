@@ -84,8 +84,7 @@ pub async fn rematch_shortlisted(root: &Path, cfg: &CoreConfig) -> Result<Rematc
                             &db_row.id,
                             ListingState::FilteredOut,
                             Some(&format!(
-                                "rematch: score {:.3} below threshold {:.3}",
-                                score, threshold
+                                "rematch: score {score:.3} below threshold {threshold:.3}"
                             )),
                         )
                         .await?;
@@ -120,8 +119,7 @@ pub async fn rematch_shortlisted(root: &Path, cfg: &CoreConfig) -> Result<Rematc
                         &db_row.id,
                         ListingState::Shortlisted,
                         Some(&format!(
-                            "rematch: score {:.3} >= threshold {:.3}",
-                            score, threshold
+                            "rematch: score {score:.3} >= threshold {threshold:.3}"
                         )),
                     )
                     .await?;
@@ -131,13 +129,7 @@ pub async fn rematch_shortlisted(root: &Path, cfg: &CoreConfig) -> Result<Rematc
         }
     }
 
-    info!(
-        rescored,
-        demoted,
-        promoted,
-        threshold,
-        "rematch completed"
-    );
+    info!(rescored, demoted, promoted, threshold, "rematch completed");
 
     Ok(RematchReport {
         rescored,

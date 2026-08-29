@@ -1,5 +1,7 @@
 //! Tests for careerai profile commands.
 
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 
 #[test]

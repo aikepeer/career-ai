@@ -69,6 +69,10 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
 
     let llm_api_base = core_cfg.as_ref().and_then(|c| c.llm.api_base_url.clone());
 
+    let llm_strategy = core_cfg
+        .as_ref()
+        .map_or_else(|| "local".to_string(), |c| c.llm.strategy.clone());
+
     let llm_timeout_seconds = core_cfg.as_ref().map_or(300, |c| c.llm.timeout_seconds);
 
     let profile = crate::profile_handler::load_profile_view();
@@ -92,6 +96,7 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         prompt_version: prompt_ver,
         profile,
         llm_backend,
+        llm_strategy,
         llm_api_base,
         llm_timeout_seconds,
     })

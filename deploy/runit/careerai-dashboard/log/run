@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CAREERAI_LOG_USER="${CAREERAI_LOG_USER:-miniblues}"
+CAREERAI_LOG_USER="${CAREERAI_LOG_USER:?CAREERAI_LOG_USER must be set}"
 CAREERAI_LOG_DIR="${CAREERAI_LOG_DIR:-./main}"
 
 exec chpst -u "${CAREERAI_LOG_USER}" svlogd "${CAREERAI_LOG_DIR}"

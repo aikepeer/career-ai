@@ -16,7 +16,7 @@ mod tests {
 
     #[test]
     fn rule1_coverage_positive_control_passes() {
-        parse_and_validate(VALID_DIFF_JSON, &fixture_profile()).unwrap();
+        parse_and_validate(VALID_DIFF_JSON, &fixture_profile(), "").unwrap();
     }
 
     #[test]
@@ -29,7 +29,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::Schema(ref s) if s.contains("not covered")),
             "got {err:?}"
@@ -50,7 +50,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::Schema(ref s) if s.contains("duplicate")),
             "got {err:?}"
@@ -67,7 +67,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(matches!(err, TailorError::BadPath(_)), "got {err:?}");
     }
 
@@ -85,7 +85,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::Schema(ref s) if s.contains("missing bullet")),
             "got {err:?}"
@@ -105,7 +105,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::Schema(ref s) if s.contains("crosses entries")),
             "got {err:?}"
@@ -125,7 +125,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::Schema(ref s) if s.contains("emptied by drops")),
             "got {err:?}"
@@ -148,7 +148,7 @@ mod tests {
                 "cover_letter":"short"
             }}"#
         );
-        let err = parse_and_validate(&raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(&raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::InventedContent { reason, .. } if reason == "bullet over 280 chars"),
             "got {err:?}"
@@ -168,7 +168,7 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
             "got {err:?}"
@@ -191,7 +191,7 @@ mod tests {
                 "cover_letter":"{long}"
             }}"#
         );
-        let err = parse_and_validate(&raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(&raw, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::CoverLetterTooLong { words, cap } if words == 400 && cap == 350),
             "got {err:?}"
@@ -200,13 +200,13 @@ mod tests {
 
     #[test]
     fn malformed_json_surfaces_schema() {
-        let err = parse_and_validate("{not json", &fixture_profile()).unwrap_err();
+        let err = parse_and_validate("{not json}", &fixture_profile(), "").unwrap_err();
         assert!(matches!(err, TailorError::Schema(_)), "got {err:?}");
     }
 
     #[test]
     fn fence_wrapped_json_accepted() {
         let wrapped = format!("```json\n{VALID_DIFF_JSON}\n```");
-        parse_and_validate(&wrapped, &fixture_profile()).unwrap();
+        parse_and_validate(&wrapped, &fixture_profile(), "").unwrap();
     }
 }

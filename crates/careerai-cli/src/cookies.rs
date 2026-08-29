@@ -17,11 +17,8 @@
 //! on the next apply tick without restarting.
 
 use anyhow::{anyhow, Result};
-use careerai_submit::credentials::SERVICE as KEYRING_SERVICE;
 
 struct ProviderInfo {
-    /// Keyring username in `{source}/{key}` format.
-    keyring_username: &'static str,
     /// Human-readable cookie name shown in the prompt.
     cookie_name: &'static str,
     /// Where to find the cookie in the browser.
@@ -31,12 +28,10 @@ struct ProviderInfo {
 fn provider_info(provider: &str) -> Option<ProviderInfo> {
     match provider {
         "linkedin" => Some(ProviderInfo {
-            keyring_username: "linkedin/li_at",
             cookie_name: "li_at",
             where_to_find: "linkedin.com → DevTools → Application → Cookies → li_at",
         }),
         "naukri" => Some(ProviderInfo {
-            keyring_username: "naukri/session_cookie",
             cookie_name: "naukri session cookie",
             where_to_find: "naukri.com → DevTools → Application → Cookies → \
                             look for the long opaque session value (nauk_at or similar)",
@@ -67,12 +62,10 @@ pub fn refresh(provider: &str) -> Result<()> {
         return Err(anyhow!("empty cookie value — aborting"));
     }
 
-    let entry = keyring::Entry::new(KEYRING_SERVICE, info.keyring_username)
-        .map_err(|e| anyhow!("keyring open failed: {e}"))?;
-    entry
-        .set_password(value)
-        .map_err(|e| anyhow!("keyring write failed: {e}"))?;
+    let cred = careerai_submit::credentials::Credential::for_source(provider, info.cookie_name);
+    careerai_submit::credentials::store(&cred, value)
+        .map_err(|e| anyhow!("store credential failed: {e}"))?;
 
-    println!("Stored. Daemon will pick this up on next {provider} apply tick.");
+    println!("Stored. Daemon and discovery will pick this up immediately.");
     Ok(())
 }

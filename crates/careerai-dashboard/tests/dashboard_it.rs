@@ -90,7 +90,7 @@ async fn healthz_and_index_render() {
         body.contains("kpi-strip"),
         "body missing kpi-strip role: {body:.300}"
     );
-    assert!(body.contains("Pipeline & Funnel"), "body missing tab label");
+    assert!(body.contains("Mission Control"), "body missing tab label");
     assert!(
         body.contains("runCliCommand"),
         "body missing generic CLI dispatcher hook: {body:.300}"

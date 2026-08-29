@@ -160,14 +160,9 @@ pub async fn compile_profile_variants(
         let mut bullet_variants = Vec::new();
         for (bullet_index, original_bullet) in exp.bullets.iter().enumerate() {
             let path_label = format!("experience[{entry_index}].bullets[{bullet_index}]");
-            let variants = compile_single_bullet_variants(
-                original_bullet,
-                &path_label,
-                &token_sets,
-                llm,
-                cfg,
-            )
-            .await?;
+            let variants =
+                compile_single_bullet_variants(original_bullet, &path_label, &token_sets, llm, cfg)
+                    .await?;
             bullet_variants.push(BulletVariant {
                 original: original_bullet.clone(),
                 variants,
@@ -184,14 +179,9 @@ pub async fn compile_profile_variants(
         let mut bullet_variants = Vec::new();
         for (bullet_index, original_bullet) in proj.bullets.iter().enumerate() {
             let path_label = format!("projects[{entry_index}].bullets[{bullet_index}]");
-            let variants = compile_single_bullet_variants(
-                original_bullet,
-                &path_label,
-                &token_sets,
-                llm,
-                cfg,
-            )
-            .await?;
+            let variants =
+                compile_single_bullet_variants(original_bullet, &path_label, &token_sets, llm, cfg)
+                    .await?;
             bullet_variants.push(BulletVariant {
                 original: original_bullet.clone(),
                 variants,
@@ -228,7 +218,9 @@ async fn compile_single_bullet_variants(
     );
 
     let req = LlmRequest {
-        system: "You are an expert technical resume editor. Output only valid JSON arrays of strings.".into(),
+        system:
+            "You are an expert technical resume editor. Output only valid JSON arrays of strings."
+                .into(),
         profile_block: String::new(),
         user: prompt,
         prompt_version: "variants.v1".into(),
@@ -253,10 +245,7 @@ async fn compile_single_bullet_variants(
                         continue;
                     }
                     if guardrails::forbid_invented_entities_with(
-                        trimmed,
-                        original,
-                        token_sets,
-                        path_label,
+                        trimmed, original, token_sets, path_label,
                     )
                     .is_ok()
                     {
@@ -321,14 +310,19 @@ mod tests {
         let variants = ProfileVariants::from_profile_identity(&p);
         assert_eq!(variants.experience.len(), 1);
         let candidates = variants.experience_bullet_candidates(0, 0, "");
-        assert_eq!(candidates, vec!["Built Tokio backend handling 10M req/sec."]);
+        assert_eq!(
+            candidates,
+            vec!["Built Tokio backend handling 10M req/sec."]
+        );
     }
 
     #[test]
     fn save_and_load_roundtrip() {
         let p = sample_profile();
         let mut variants = ProfileVariants::from_profile_identity(&p);
-        variants.experience[0].bullets[0].variants.push("Optimized Tokio network IO at 10M req/sec.".into());
+        variants.experience[0].bullets[0]
+            .variants
+            .push("Optimized Tokio network IO at 10M req/sec.".into());
 
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("variants.json");

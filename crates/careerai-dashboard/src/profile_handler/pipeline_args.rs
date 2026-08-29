@@ -56,6 +56,12 @@ fn shortlist_show_args(args: &CliRunArgs) -> Vec<OsString> {
 }
 
 fn tailor_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
+    if let Some(limit) = args.limit {
+        return Ok(vec![os("tailor"), os("--limit"), os(&limit.to_string())]);
+    }
+    if args.all == Some(true) {
+        return Ok(vec![os("tailor"), os("--all")]);
+    }
     Ok(vec![
         os("tailor"),
         os(require_id(
@@ -67,6 +73,9 @@ fn tailor_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError
 }
 
 fn render_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
+    if args.all == Some(true) {
+        return Ok(vec![os("render"), os("--all")]);
+    }
     Ok(vec![
         os("render"),
         os(require_id(
@@ -79,14 +88,15 @@ fn render_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError
 
 fn apply_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
     let mut out = vec![os("apply")];
-    if args.application_id.is_some() {
-        let id = require_id(args.application_id.as_ref(), "application_id", "apply")?;
+    if let Some(id) = &args.application_id {
         out.push(os(id));
+    } else if let Some(lid) = &args.listing_id {
+        out.push(os(lid));
     } else if args.all == Some(true) {
         out.push(os("--all"));
     } else {
         return Err(CliRunValidationError::MissingArgument(
-            "application_id or all",
+            "application_id, listing_id, or all",
             "apply",
         ));
     }
@@ -143,6 +153,30 @@ fn retry_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError>
             "retry",
         )?),
     ])
+}
+
+fn rollback_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
+    let mut out = vec![os("rollback")];
+    if args.all == Some(true) {
+        out.push(os("--all"));
+        if let Some(from) = &args.from_state {
+            out.push(os("--from"));
+            out.push(os(from));
+        }
+    } else {
+        let raw_id = args
+            .id
+            .as_ref()
+            .or(args.listing_id.as_ref())
+            .or(args.application_id.as_ref());
+        let id = require_id(raw_id, "id", "rollback")?;
+        out.push(os(id));
+    }
+    if let Some(to) = &args.to {
+        out.push(os("--to"));
+        out.push(os(to));
+    }
+    Ok(out)
 }
 
 fn config_generate_args(args: &CliRunArgs) -> Vec<OsString> {
@@ -204,6 +238,7 @@ pub fn build_command_args(req: &CliRunRequest) -> Result<Vec<OsString>, CliRunVa
         WhitelistedCommand::Inspect => inspect_args(args),
         WhitelistedCommand::Review => Ok(review_args()),
         WhitelistedCommand::Retry => retry_args(args),
+        WhitelistedCommand::Rollback => rollback_args(args),
         WhitelistedCommand::ConfigGenerate => Ok(config_generate_args(args)),
         WhitelistedCommand::SourcesSync => Ok(sources_sync_args(args)),
         WhitelistedCommand::SourcesDiscoverWeb => Ok(sources_discover_web_args(args)),

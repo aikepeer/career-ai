@@ -62,12 +62,16 @@ pub async fn apply_one(
 ) -> Result<AppliedOutcome> {
     let pool = open_pool(root).await?;
 
-    // Pre-fetch surfaces the typed errors from careerai-db; the CLI's
-    // exit-code mapper downcasts to `DbError::NotFound` directly. We do
-    // NOT bail!() into a stringly-typed error here — that was previously
-    // breaking exit-code classification once any `.context(...)` wrapper
-    // ran upstream.
-    let application = queries::find_application_by_id(&pool, application_id).await?;
+    let application = match queries::find_application_by_id(&pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            match queries::find_latest_application_for_listing(&pool, application_id).await {
+                Ok(Some(a)) => a,
+                _ => anyhow::bail!("application not found for id: {application_id}"),
+            }
+        }
+        Err(e) => return Err(e).context("fetch application"),
+    };
     let listing = queries::find_by_id(&pool, &application.listing_id).await?;
 
     // LinkedIn assist mode: when interactive_only is set (default true), the

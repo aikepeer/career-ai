@@ -176,6 +176,7 @@ mod tests {
             prompt_version: "v1".into(),
             profile: None,
             llm_backend: "auto".into(),
+            llm_strategy: "local".into(),
             llm_api_base: None,
             llm_timeout_seconds: 300,
         }
@@ -199,8 +200,10 @@ mod tests {
             devops: vec![],
             debugging: vec![],
             protocols: vec![],
+            skill_count: 0,
             experience_count: 0,
             education_count: 0,
+            career_story: vec![],
             raw_yaml: String::new(),
         }
     }

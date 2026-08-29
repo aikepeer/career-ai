@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use std::fs;
 use std::path::Path;
 
@@ -36,7 +38,7 @@ fn dashboard_runit_log_script_uses_svlogd() {
     assert!(LOG_SCRIPT.contains("svlogd"));
     assert!(LOG_SCRIPT.contains("chpst -u"));
 
-    let log_script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../deploy/runit/careerai-dashboard/log/run");
+    let log_script_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/runit/careerai-dashboard/log/run");
     assert_executable(&log_script_path);
 }

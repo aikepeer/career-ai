@@ -61,7 +61,7 @@ mod tests {
         let jd = "Embedded Linux Engineer building firmware with C and RTOS.";
         let bullet = "Managed social media marketing campaigns and created graphic assets.";
         let score = scorer.score(bullet, jd);
-        assert_eq!(score, 0.0);
+        assert!(score < f32::EPSILON, "expected zero, got {score}");
     }
 
     #[test]
@@ -74,9 +74,15 @@ mod tests {
             "Built Python telemetry tools to monitor sensor state in real-time.".to_string(),
         ];
 
-        let scores = scorer.score_many(&bullets, jd);
-        assert_eq!(scores.len(), 3);
-        assert!(scores[0] > scores[1], "bullet 0 should outscore generic bullet 1");
-        assert!(scores[2] > scores[1], "bullet 2 should outscore generic bullet 1");
+        let ranked = scorer.score_many(&bullets, jd);
+        assert_eq!(ranked.len(), 3);
+        assert!(
+            ranked[0] > ranked[1],
+            "bullet 0 should outscore generic bullet 1"
+        );
+        assert!(
+            ranked[2] > ranked[1],
+            "bullet 2 should outscore generic bullet 1"
+        );
     }
 }

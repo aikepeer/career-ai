@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn adversarial_table() {
         for row in rows() {
-            let result = parse_and_validate(&row.raw, &row.profile);
+            let result = parse_and_validate(&row.raw, &row.profile, "");
             match (&row.expect, result) {
                 (Expect::Ok, Ok(_)) => {}
                 (Expect::Ok, Err(e)) => {

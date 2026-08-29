@@ -234,7 +234,7 @@ async fn generate_config_card_flows_preview_in_real_browser() {
     );
 
     // Click the generate button and wait for the preview panel to show.
-    generate_config_preview(&page, deadline).await;
+    generate_config_preview(&page).await;
 
     browser.close().await.expect("close browser");
     server.abort();
@@ -243,7 +243,8 @@ async fn generate_config_card_flows_preview_in_real_browser() {
 /// Click "Generate Config from Profile" and wait for the preview panel
 /// to become visible, then assert the status message and that the
 /// generated YAML preview is populated.
-async fn generate_config_preview(page: &Page, deadline: Instant) {
+async fn generate_config_preview(page: &Page) {
+    let deadline = Instant::now() + Duration::from_secs(15);
     page.find_element(GENERATE_BUTTON)
         .await
         .expect("find generate button")
@@ -254,19 +255,24 @@ async fn generate_config_preview(page: &Page, deadline: Instant) {
     loop {
         let display: String = page
             .evaluate(format!(
-                "document.querySelector('{PREVIEW_PANEL}').style.display"
+                "document.querySelector('{PREVIEW_PANEL}') ? document.querySelector('{PREVIEW_PANEL}').style.display : ''"
             ))
             .await
             .expect("eval panel display")
             .into_value::<String>()
-            .expect("display value");
+            .unwrap_or_default();
         if display == "block" {
             break;
         }
-        assert!(
-            Instant::now() < deadline,
-            "preview panel never became visible (display={display:?})"
-        );
+        if Instant::now() >= deadline {
+            let status = page
+                .find_element(STATUS_MSG)
+                .await
+                .ok()
+                .and_then(|el| futures::executor::block_on(el.inner_text()).ok().flatten())
+                .unwrap_or_default();
+            panic!("preview panel never became visible (display={display:?}, status={status:?})");
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
@@ -362,5 +368,124 @@ async fn mobile_viewport_renders_config_cards_without_horizontal_overflow() {
     }
 
     browser.close().await.expect("close browser");
+    server.abort();
+}
+
+async fn assert_all_tabs_fit_viewport(browser: &Browser, port: u16, width: u32) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let page = open_index(browser, port, deadline).await;
+    let tabs = [
+        "funnel", "events", "config", "actions", "explorer", "commands", "chat",
+    ];
+
+    for tab in tabs {
+        let button_selector = format!("#tab-btn-{tab}");
+        let panel_selector = format!("#tab-{tab}");
+        page.find_element(&button_selector)
+            .await
+            .unwrap_or_else(|_| panic!("find {button_selector}"))
+            .click()
+            .await
+            .unwrap_or_else(|_| panic!("click {button_selector}"));
+        wait_for_visible(&page, &panel_selector, deadline).await;
+
+        if tab != "funnel" {
+            let zone_selector = format!("{panel_selector} .mission-panel-head");
+            wait_for_visible(&page, &zone_selector, deadline).await;
+        }
+
+        let brand_width: f64 = page
+            .evaluate("document.querySelector('.brand-container').getBoundingClientRect().width")
+            .await
+            .expect("eval brand width")
+            .into_value::<f64>()
+            .expect("brand width number");
+        assert!(
+            brand_width >= 120.0,
+            "brand collapsed to {brand_width}px on tab {tab} at {width}px"
+        );
+
+        let brand_text_is_visible: bool = page
+            .evaluate(
+                "(function(){ var b=document.querySelector('.brand'); \
+                 return b.getBoundingClientRect().width >= 80 && b.scrollWidth <= b.clientWidth + 1; })()",
+            )
+            .await
+            .expect("eval brand text visibility")
+            .into_value::<bool>()
+            .expect("brand text visibility bool");
+        assert!(
+            brand_text_is_visible,
+            "brand text is clipped on tab {tab} at {width}px"
+        );
+
+        let active_tab_is_visible: bool = page
+            .evaluate(format!(
+                "(function(){{ var n=document.querySelector('.tab-nav').getBoundingClientRect(); \
+                 var b=document.querySelector('{button_selector}').getBoundingClientRect(); \
+                 return b.left >= n.left - 1 && b.right <= n.right + 1 && b.width > 40; }})()"
+            ))
+            .await
+            .expect("eval active tab visibility")
+            .into_value::<bool>()
+            .expect("active tab visibility bool");
+        assert!(
+            active_tab_is_visible,
+            "active tab {tab} is clipped inside the nav rail at {width}px"
+        );
+
+        let overflow: bool = page
+            .evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
+            .await
+            .expect("eval cross-tab overflow")
+            .into_value::<bool>()
+            .expect("cross-tab overflow bool");
+        if overflow {
+            let offenders: String = page
+                .evaluate(
+                    "(function(){ var out = []; document.querySelectorAll('*').forEach(function(el){ \
+                     var r = el.getBoundingClientRect(); \
+                     if (r.right > window.innerWidth + 1 && r.width > 0) { \
+                     var c = el.className; if (typeof c !== 'string') { c = c.baseVal || ''; } \
+                     out.push(el.tagName.toLowerCase() + (c ? '.' + String(c).split(' ')[0] : '') + ' right=' + Math.round(r.right)); \
+                     } }); return out.slice(0, 12).join(' | '); })()",
+                )
+                .await
+                .expect("eval cross-tab offenders")
+                .into_value::<String>()
+                .expect("cross-tab offenders string");
+            panic!("tab {tab} overflows at {width}px; offenders: {offenders}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
+    let Some(_exe) = chromium_executable() else {
+        eprintln!(
+            "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
+        );
+        return;
+    };
+
+    let pool = pool_in_memory().await.expect("in-memory pool");
+    let port = pick_free_port().await;
+    let opts = ServeOptions {
+        port,
+        bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        refresh_seconds: 0,
+        pool,
+    };
+    let server = tokio::spawn(async move {
+        let _ = run(opts).await;
+    });
+    wait_for_server(port).await;
+
+    for (width, height) in [(1440, 1000), (390, 844)] {
+        let (mut browser, _handler) = launch_browser(width, height).await;
+        assert_all_tabs_fit_viewport(&browser, port, width).await;
+        browser.close().await.expect("close browser");
+    }
+
     server.abort();
 }

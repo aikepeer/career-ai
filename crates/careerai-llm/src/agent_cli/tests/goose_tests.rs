@@ -1,5 +1,10 @@
 #![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::unwrap_in_result)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::unwrap_in_result,
+    clippy::await_holding_lock
+)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
@@ -61,6 +66,7 @@ printf '%s' '{"messages":[{"role":"assistant","content":[{"text":"OK"}]}],"metad
         &stub_path,
         "provider/model-1",
         "antigravity",
+        String::new(),
         Arc::new(Cache::new(dir.path().join("cache"))),
         10,
         0,
@@ -101,6 +107,7 @@ printf '%s' '{"messages":[{"role":"assistant","content":[{"text":"x"}]}],"metada
         &stub_path,
         "model",
         String::new(),
+        String::new(),
         Arc::new(Cache::new(dir.path().join("cache"))),
         10,
         0,
@@ -139,6 +146,7 @@ async fn cli_retry_budget_is_configurable() {
         let llm = ClaudeCliLlm::new_with_options(
             &stub_path,
             "model",
+            String::new(),
             String::new(),
             Arc::new(Cache::new(dir.path().join("cache"))),
             10,

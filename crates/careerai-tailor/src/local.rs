@@ -83,9 +83,10 @@ fn tailor_experience_entry(
         .iter()
         .enumerate()
         .map(|(bullet_idx, b)| {
-            let candidates = variants
-                .map(|v| v.experience_bullet_candidates(entry_idx, bullet_idx, b))
-                .unwrap_or_else(|| vec![b.clone()]);
+            let candidates = variants.map_or_else(
+                || vec![b.clone()],
+                |v| v.experience_bullet_candidates(entry_idx, bullet_idx, b),
+            );
             // Pick candidate variant with highest score.
             candidates
                 .into_iter()
@@ -93,7 +94,10 @@ fn tailor_experience_entry(
                     let s = scorer.score(&c, jd_text);
                     (c, s)
                 })
-                .max_by(|a, b_cand| a.1.partial_cmp(&b_cand.1).unwrap_or(std::cmp::Ordering::Equal))
+                .max_by(|a, b_cand| {
+                    a.1.partial_cmp(&b_cand.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .unwrap_or_else(|| (b.clone(), 0.0))
         })
         .collect();
@@ -142,16 +146,20 @@ fn tailor_project_entry(
         .iter()
         .enumerate()
         .map(|(bullet_idx, b)| {
-            let candidates = variants
-                .map(|v| v.project_bullet_candidates(entry_idx, bullet_idx, b))
-                .unwrap_or_else(|| vec![b.clone()]);
+            let candidates = variants.map_or_else(
+                || vec![b.clone()],
+                |v| v.project_bullet_candidates(entry_idx, bullet_idx, b),
+            );
             candidates
                 .into_iter()
                 .map(|c| {
                     let s = scorer.score(&c, jd_text);
                     (c, s)
                 })
-                .max_by(|a, b_cand| a.1.partial_cmp(&b_cand.1).unwrap_or(std::cmp::Ordering::Equal))
+                .max_by(|a, b_cand| {
+                    a.1.partial_cmp(&b_cand.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .unwrap_or_else(|| (b.clone(), 0.0))
         })
         .collect();
