@@ -129,7 +129,10 @@ careerai apply <application-id>                      # DRY-RUN; see /career:appl
 careerai applied --limit 20                          # confirm recent rows + cadence
 careerai digest --since 24h                          # whole-pipeline rollup
 careerai salary "Acme Robotics" [--city Berlin]     # benchmark vs your salary_data.json
-careerai salary --list-all | --validate              # inspect / validate your salary data
+careerai salary "Acme Robotics" --gap             # target comp vs market index
+careerai salary --list-all | --validate           # inspect / validate your salary data
+careerai followups [--days 10]                    # quiet applications due a follow-up
+careerai liveness [--source greenhouse]           # drop dead postings before tailoring
 ```
 
 Live submission is gated three ways: dry-run is the default, you
