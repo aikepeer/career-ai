@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod artifacts;
+pub mod ats;
 pub mod config;
 pub mod error;
 pub mod pandoc;

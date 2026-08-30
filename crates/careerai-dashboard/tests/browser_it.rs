@@ -375,7 +375,7 @@ async fn assert_all_tabs_fit_viewport(browser: &Browser, port: u16, width: u32) 
     let deadline = Instant::now() + Duration::from_secs(20);
     let page = open_index(browser, port, deadline).await;
     let tabs = [
-        "funnel", "events", "config", "actions", "explorer", "commands", "chat",
+        "funnel", "events", "config", "actions", "explorer", "commands", "canvas", "chat",
     ];
 
     for tab in tabs {

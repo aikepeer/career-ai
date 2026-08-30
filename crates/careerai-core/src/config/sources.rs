@@ -10,7 +10,9 @@ mod web;
 
 pub use linkedin::{LinkedinBrowserFilters, LinkedinBrowserSourceConfig};
 pub use mcp::{McpQueryConfig, McpSourceConfig, McpTransportConfig};
-pub use web::{IndeedRssSourceConfig, NaukriSourceConfig, RemotiveSourceConfig};
+pub use web::{
+    FreehireSourceConfig, IndeedRssSourceConfig, NaukriSourceConfig, RemotiveSourceConfig,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourcesConfig {
@@ -39,6 +41,10 @@ pub struct SourcesConfig {
     pub remotive: RemotiveSourceConfig,
     #[serde(default)]
     pub remoteok: ToggleSource,
+    /// FreeHire aggregator (`freehire.me`) — public REST API, no auth,
+    /// tech-tuned facets. `FreehireSource` adapter in `careerai-sources`.
+    #[serde(default)]
+    pub freehire: FreehireSourceConfig,
     #[serde(default)]
     pub naukri: NaukriSourceConfig,
     /// Indeed public RSS feed (`https://rss.indeed.com/rss?q=&l=&fromage=`).

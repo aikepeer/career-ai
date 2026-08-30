@@ -10,8 +10,8 @@ use careerai_core::config::CoreConfig;
 use careerai_db::models::NewListing;
 use careerai_db::{queries, SqlitePool};
 use careerai_sources::{
-    GreenhouseSource, IndeedRssSource, LeverSource, McpJobsSource, NaukriSource, RemoteOkSource,
-    RemotiveSource, Source,
+    FreehireSource, GreenhouseSource, IndeedRssSource, LeverSource, McpJobsSource, NaukriSource,
+    RemoteOkSource, RemotiveSource, Source,
 };
 
 use crate::open_pool;
@@ -65,6 +65,22 @@ pub fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
     }
     if cfg.sources.remoteok.enabled {
         out.push(Arc::new(RemoteOkSource::new()));
+    }
+    if cfg.sources.freehire.enabled {
+        let mut s = FreehireSource::new().with_limit(cfg.sources.freehire.limit);
+        if !cfg.sources.freehire.keywords.is_empty() {
+            s = s.with_query(cfg.sources.freehire.keywords.clone());
+        }
+        if cfg.sources.freehire.remote_only {
+            s = s.with_remote_only(true);
+        }
+        if let Some(region) = &cfg.sources.freehire.region {
+            s = s.with_region(region.clone());
+        }
+        if let Some(days) = cfg.sources.freehire.jobage {
+            s = s.with_jobage(days);
+        }
+        out.push(Arc::new(s));
     }
     if cfg.sources.naukri.enabled {
         let mut s = NaukriSource::new();
@@ -151,6 +167,22 @@ pub fn build_sources_for_name(cfg: &CoreConfig, name: &str) -> Vec<Arc<dyn Sourc
         }
         "remoteok" if cfg.sources.remoteok.enabled => {
             out.push(Arc::new(RemoteOkSource::new()));
+        }
+        "freehire" if cfg.sources.freehire.enabled => {
+            let mut s = FreehireSource::new().with_limit(cfg.sources.freehire.limit);
+            if !cfg.sources.freehire.keywords.is_empty() {
+                s = s.with_query(cfg.sources.freehire.keywords.clone());
+            }
+            if cfg.sources.freehire.remote_only {
+                s = s.with_remote_only(true);
+            }
+            if let Some(region) = &cfg.sources.freehire.region {
+                s = s.with_region(region.clone());
+            }
+            if let Some(days) = cfg.sources.freehire.jobage {
+                s = s.with_jobage(days);
+            }
+            out.push(Arc::new(s));
         }
         "naukri" if cfg.sources.naukri.enabled => {
             let mut s = NaukriSource::new();

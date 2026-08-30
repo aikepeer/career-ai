@@ -16,6 +16,7 @@ pub mod guardrails;
 pub mod local;
 pub mod model;
 pub mod prompt;
+pub mod reduce;
 pub mod schema;
 pub mod variants;
 
@@ -104,11 +105,32 @@ pub async fn tailor_for_listing(
     };
 
     // 4) Parse + validate the diff; apply it to produce the ResumeView.
-    let jd_text = format!("{} {} {}", listing.title, listing.company, listing.description);
+    let jd_text = format!(
+        "{} {} {}",
+        listing.title, listing.company, listing.description
+    );
     let doc = schema::parse_and_validate(&resp.text, profile, &jd_text)?;
     let cover_letter_body = doc.cover_letter.clone();
     let diff_raw_json = resp.text.clone();
-    let resume_view = diff::apply(doc, profile.clone())?;
+    let resume_view = diff::apply(doc, profile.clone(), &jd_text)?;
+
+    // Deterministic relevance-weighted reduction (ported from
+    // ai-job-search's "Relevance-weighted CV cutting"): if the LLM
+    // overflowed the bullet budget, cut the lowest-scoring bullets
+    // (JD relevance first, uniqueness + cover-letter dependency as
+    // tiebreakers). Only removes bullets — never invents content, so
+    // the constrained-diff safety invariant is preserved.
+    let reduce_cfg = reduce::ReduceConfig::default();
+    let (resume_view, reduce_report) =
+        reduce::reduce_view(resume_view, &jd_text, &cover_letter_body, &reduce_cfg);
+    if !reduce_report.cut.is_empty() {
+        info!(
+            target: "tailor",
+            listing_id = %listing.id,
+            cut = reduce_report.cut.len(),
+            "deterministic reduction trimmed over-budget bullets"
+        );
+    }
 
     // Cache the response only after it survives validation: caching a
     // validator-rejected diff would replay the same failure on every

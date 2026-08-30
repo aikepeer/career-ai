@@ -17,7 +17,14 @@
 //! * Security: cross-origin rejection, invalid ID rejection
 //! * Template parity: every CLI catalog command appears in served HTML
 
-#![allow(clippy::expect_used, clippy::unused_async)]
+#![allow(
+    clippy::expect_used,
+    clippy::unused_async,
+    // `CLI_RUN_SERIAL` is a std mutex held across `.await`s by design —
+    // it serializes tests that share process-global state (env var +
+    // busy lock). Deliberate, documented, test-only.
+    clippy::await_holding_lock
+)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -39,7 +46,7 @@ async fn pick_free_port() -> u16 {
     port
 }
 
-async fn boot_server() -> (tokio::task::JoinHandle<()>, u16) {
+async fn bootserver() -> (tokio::task::JoinHandle<()>, u16) {
     let pool = pool_in_memory().await.expect("in-memory pool");
     let port = pick_free_port().await;
     let opts = ServeOptions {
@@ -76,6 +83,17 @@ async fn curl_post(url: &str, body: &str) -> (u16, String) {
     curl_post_with_headers(url, body, &[]).await
 }
 
+/// The dashboard's `/api/v1/cli/run` + `/api/v1/pipeline/*` paths use a
+/// process-global busy lock and read the process-global `CAREERAI_BIN`
+/// env var at request time, and the tests below mutate that env var.
+/// Parallel execution therefore races: one test's slow stub holds the
+/// busy lock while another gets a spurious 409, env-var set/remove leaks
+/// into another test's subprocess spawn, and — worst — with `CAREERAI_BIN`
+/// unset the dashboard spawns `current_exe()`, which is the test binary
+/// itself (a recursive test run). Every test that exercises these
+/// endpoints must hold this mutex for its whole body.
+static CLI_RUN_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 async fn curl_post_with_headers(url: &str, body: &str, headers: &[&str]) -> (u16, String) {
     let mut cmd = std::process::Command::new("curl");
     cmd.args([
@@ -107,7 +125,7 @@ async fn seed_listing(pool: &sqlx::SqlitePool, state: &str) -> String {
         pool,
         &NewListing {
             source: "greenhouse".into(),
-            external_id: format!("btn-it-{}", state),
+            external_id: format!("btn-it-{state}"),
             title: "Senior Rust Engineer".into(),
             company: "Beta Corp".into(),
             location: Some("Remote".into()),
@@ -139,7 +157,7 @@ async fn seed_listing(pool: &sqlx::SqlitePool, state: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn served_html_contains_all_runnable_cli_commands() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!("http://127.0.0.1:{port}/")).await;
 
     // Every command from cli_catalog with availability Runnable or NeedsId
@@ -172,7 +190,7 @@ async fn served_html_contains_all_runnable_cli_commands() {
             &body[..500.min(body.len())]
         );
     }
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -181,11 +199,14 @@ async fn served_html_contains_all_runnable_cli_commands() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn served_html_contains_all_key_dashboard_buttons() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!("http://127.0.0.1:{port}/")).await;
 
     // Funnel action buttons
-    assert!(body.contains("batchTailorTop"), "missing batchTailorTop button");
+    assert!(
+        body.contains("batchTailorTop"),
+        "missing batchTailorTop button"
+    );
     assert!(
         body.contains("batchTailorAllShortlisted"),
         "missing batchTailorAllShortlisted button"
@@ -198,10 +219,16 @@ async fn served_html_contains_all_key_dashboard_buttons() {
         body.contains("batchRenderAllTailored"),
         "missing batchRenderAllTailored button"
     );
-    assert!(body.contains("batchRollback"), "missing batchRollback button");
+    assert!(
+        body.contains("batchRollback"),
+        "missing batchRollback button"
+    );
 
     // Card action buttons
-    assert!(body.contains("tailorListing"), "missing tailorListing button");
+    assert!(
+        body.contains("tailorListing"),
+        "missing tailorListing button"
+    );
     assert!(
         body.contains("renderApplication"),
         "missing renderApplication button"
@@ -242,7 +269,7 @@ async fn served_html_contains_all_key_dashboard_buttons() {
     assert!(body.contains("listing-id-cell"), "missing listing-id-cell");
     assert!(body.contains("Explorer"), "missing Explorer section");
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -251,13 +278,13 @@ async fn served_html_contains_all_key_dashboard_buttons() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_rejects_disallowed_commands() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     // daemon, init, status serve, cookies refresh are CLI-only
     for cmd in ["daemon", "init", "status serve", "cookies refresh"] {
-        let (status, body) =
-            curl_post(&url, &format!("{{\"command\":\"{cmd}\"}}")).await;
+        let (status, body) = curl_post(&url, &format!("{{\"command\":\"{cmd}\"}}")).await;
         assert_eq!(
             status, 400,
             "`{cmd}` must be rejected as disallowed: {body}"
@@ -273,12 +300,13 @@ async fn cli_run_rejects_disallowed_commands() {
     assert_eq!(status, 400, "unknown command must be 400: {body}");
     assert!(body.contains("unknown command"), "body: {body}");
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_rejects_shell_metacharacters_in_ids() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     // Shell injection attempt in listing_id
@@ -306,51 +334,43 @@ async fn cli_run_rejects_shell_metacharacters_in_ids() {
     .await;
     assert_eq!(status, 400, "invalid id must be rejected: {body}");
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_tailor_limit_builds_correct_argv() {
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
     // Regression for "tailor top 20" button: the JS sends
     // {"command":"tailor","args":{"limit":20}} which must produce
     // `careerai tailor --limit 20` argv. Use /bin/true as a stub binary.
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
-    let (status, body) = curl_post(
-        &url,
-        r#"{"command":"tailor","args":{"limit":20}}"#,
-    )
-    .await;
+    let (status, body) = curl_post(&url, r#"{"command":"tailor","args":{"limit":20}}"#).await;
     assert_eq!(status, 200, "tailor --limit 20 must succeed: {body}");
-    assert!(
-        body.contains("\"status\":\"success\""),
-        "body: {body}"
-    );
+    assert!(body.contains("\"status\":\"success\""), "body: {body}");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_tailor_all_builds_correct_argv() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
-    let (status, body) = curl_post(
-        &url,
-        r#"{"command":"tailor","args":{"all":true}}"#,
-    )
-    .await;
+    let (status, body) = curl_post(&url, r#"{"command":"tailor","args":{"all":true}}"#).await;
     assert_eq!(status, 200, "tailor --all must succeed: {body}");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_tailor_with_listing_id_builds_correct_argv() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
@@ -361,68 +381,65 @@ async fn cli_run_tailor_with_listing_id_builds_correct_argv() {
     .await;
     assert_eq!(status, 200, "tailor <id> must succeed: {body}");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_render_all_builds_correct_argv() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
-    let (status, body) = curl_post(
-        &url,
-        r#"{"command":"render","args":{"all":true}}"#,
-    )
-    .await;
+    let (status, body) = curl_post(&url, r#"{"command":"render","args":{"all":true}}"#).await;
     assert_eq!(status, 200, "render --all must succeed: {body}");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_apply_all_builds_correct_argv() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
-    let (status, body) = curl_post(
-        &url,
-        r#"{"command":"apply","args":{"all":true}}"#,
-    )
-    .await;
+    let (status, body) = curl_post(&url, r#"{"command":"apply","args":{"all":true}}"#).await;
     assert_eq!(status, 200, "apply --all must succeed: {body}");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_apply_missing_id_rejected() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     let (status, body) = curl_post(&url, r#"{"command":"apply","args":{}}"#).await;
     assert_eq!(status, 400, "apply without id must be rejected: {body}");
     assert!(body.contains("missing"), "body: {body}");
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_inspect_missing_id_rejected() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     let (status, body) = curl_post(&url, r#"{"command":"inspect","args":{}}"#).await;
     assert_eq!(status, 400, "inspect without id must be rejected: {body}");
     assert!(body.contains("missing"), "body: {body}");
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_all_runnable_commands_succeed_with_stub() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
@@ -468,12 +485,13 @@ async fn cli_run_all_runnable_commands_succeed_with_stub() {
     }
 
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_concurrent_requests_return_busy() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     // Use a slow stub so the first request holds the lock
@@ -488,14 +506,12 @@ async fn cli_run_concurrent_requests_return_busy() {
             format!("#!/bin/sh\ntouch \"{}\"\nsleep 2\n", ready.display()),
         )
         .expect("write script");
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
-            .expect("chmod");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
         std::env::set_var("CAREERAI_BIN", &script);
 
         let first_url = url.clone();
-        let first = tokio::spawn(async move {
-            curl_post(&first_url, r#"{"command":"llm probe"}"#).await
-        });
+        let first =
+            tokio::spawn(async move { curl_post(&first_url, r#"{"command":"llm probe"}"#).await });
 
         // Wait for the slow script to start
         let mut ready_seen = false;
@@ -517,7 +533,7 @@ async fn cli_run_concurrent_requests_return_busy() {
         std::env::remove_var("CAREERAI_BIN");
     }
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -526,7 +542,7 @@ async fn cli_run_concurrent_requests_return_busy() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn config_endpoint_returns_expected_fields() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!("http://127.0.0.1:{port}/api/v1/config")).await;
 
     assert!(
@@ -542,12 +558,12 @@ async fn config_endpoint_returns_expected_fields() {
         "config must include llm_strategy: {body}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn config_generate_returns_preview() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let (status, body) = curl_post(
         &format!("http://127.0.0.1:{port}/api/v1/config/generate"),
         "{}",
@@ -563,12 +579,12 @@ async fn config_generate_returns_preview() {
         "config/generate must return preview or error: {body}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn config_prompt_extracts_keywords() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = r#"{"prompt":"Focus on Remote Embedded Linux and Freelance AI jobs"}"#;
     let (status, resp) = curl_post(
         &format!("http://127.0.0.1:{port}/api/v1/config/prompt"),
@@ -582,12 +598,12 @@ async fn config_prompt_extracts_keywords() {
         "config/prompt must return extracted_keywords: {resp}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn threshold_save_rejects_invalid_input() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let (status, body) = curl_post(
         &format!("http://127.0.0.1:{port}/api/config/threshold"),
         r#"{"score_threshold":"not a number"}"#,
@@ -598,7 +614,7 @@ async fn threshold_save_rejects_invalid_input() {
         "invalid threshold must be rejected: status={status}, body={body}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -646,7 +662,7 @@ async fn explorer_endpoint_returns_json_array() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn application_detail_returns_404_for_unknown_id() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!(
         "http://127.0.0.1:{port}/api/v1/applications/nonexistent-id"
     ))
@@ -656,7 +672,7 @@ async fn application_detail_returns_404_for_unknown_id() {
         "unknown application should return error/null: {body:.200}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -665,40 +681,31 @@ async fn application_detail_returns_404_for_unknown_id() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cross_origin_post_rejected_on_cli_run() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
     let body = r#"{"command":"discover"}"#;
 
-    let (status, resp) = curl_post_with_headers(
-        &url,
-        body,
-        &["Origin: http://evil.example"],
-    )
-    .await;
+    let (status, resp) = curl_post_with_headers(&url, body, &["Origin: http://evil.example"]).await;
     assert_eq!(status, 403, "cross-origin must be 403: {resp}");
     assert!(
         resp.contains("cross-origin"),
         "expected cross-origin rejection: {resp}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cross_origin_post_rejected_on_config_save() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/config");
     let body = r#"{"backend":"agy"}"#;
 
-    let (status, resp) = curl_post_with_headers(
-        &url,
-        body,
-        &["Origin: http://evil.example"],
-    )
-    .await;
+    let (status, resp) = curl_post_with_headers(&url, body, &["Origin: http://evil.example"]).await;
     assert_eq!(status, 403, "cross-origin must be 403: {resp}");
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -707,7 +714,7 @@ async fn cross_origin_post_rejected_on_config_save() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn profile_import_rejects_empty_body() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let (status, body) = curl_post(
         &format!("http://127.0.0.1:{port}/api/v1/profile/import"),
         "{}",
@@ -722,7 +729,7 @@ async fn profile_import_rejects_empty_body() {
         "expected error message: {body}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -731,7 +738,7 @@ async fn profile_import_rejects_empty_body() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn snapshot_contains_kpi_and_state_counts() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!("http://127.0.0.1:{port}/api/v1/snapshot")).await;
     assert!(
         body.contains("kpi"),
@@ -742,19 +749,19 @@ async fn snapshot_contains_kpi_and_state_counts() {
         "snapshot must include state_counts: {body:.200}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn events_endpoint_returns_array() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!("http://127.0.0.1:{port}/api/v1/events")).await;
     assert!(
         body.starts_with('['),
         "events must return a JSON array: {body:.200}"
     );
 
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -763,7 +770,8 @@ async fn events_endpoint_returns_array() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pipeline_discover_wrapper_responds() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     std::env::set_var("CAREERAI_BIN", "/bin/true");
     let (status, _) = curl_post(
         &format!("http://127.0.0.1:{port}/api/v1/pipeline/discover"),
@@ -772,12 +780,13 @@ async fn pipeline_discover_wrapper_responds() {
     .await;
     assert_eq!(status, 200, "discover wrapper must respond");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pipeline_match_wrapper_responds() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     std::env::set_var("CAREERAI_BIN", "/bin/true");
     let (status, _) = curl_post(
         &format!("http://127.0.0.1:{port}/api/v1/pipeline/match"),
@@ -786,7 +795,7 @@ async fn pipeline_match_wrapper_responds() {
     .await;
     assert_eq!(status, 200, "match wrapper must respond");
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -795,7 +804,8 @@ async fn pipeline_match_wrapper_responds() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_rollback_all_builds_correct_argv() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
@@ -817,7 +827,7 @@ async fn cli_run_rollback_all_builds_correct_argv() {
     assert_eq!(status, 400, "rollback without id/all must fail: {body}");
 
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -826,19 +836,17 @@ async fn cli_run_rollback_all_builds_correct_argv() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_shortlist_show_with_limit() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
-    let (status, body) = curl_post(
-        &url,
-        r#"{"command":"shortlist show","args":{"limit":10}}"#,
-    )
-    .await;
+    let (status, body) =
+        curl_post(&url, r#"{"command":"shortlist show","args":{"limit":10}}"#).await;
     assert_eq!(status, 200, "shortlist show --limit must succeed: {body}");
 
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -847,7 +855,8 @@ async fn cli_run_shortlist_show_with_limit() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_applied_with_source_and_limit() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
@@ -856,7 +865,10 @@ async fn cli_run_applied_with_source_and_limit() {
         r#"{"command":"applied","args":{"source":"greenhouse","limit":50}}"#,
     )
     .await;
-    assert_eq!(status, 200, "applied with source+limit must succeed: {body}");
+    assert_eq!(
+        status, 200,
+        "applied with source+limit must succeed: {body}"
+    );
 
     // Unknown source must be rejected
     let (status, body) = curl_post(
@@ -868,7 +880,7 @@ async fn cli_run_applied_with_source_and_limit() {
     assert!(body.contains("unknown source"), "body: {body}");
 
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -877,7 +889,8 @@ async fn cli_run_applied_with_source_and_limit() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_run_discover_with_sources() {
-    let (_server, port) = boot_server().await;
+    let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
+    let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
 
     std::env::set_var("CAREERAI_BIN", "/bin/true");
@@ -886,7 +899,10 @@ async fn cli_run_discover_with_sources() {
         r#"{"command":"discover","args":{"sources":["greenhouse","lever"]}}"#,
     )
     .await;
-    assert_eq!(status, 200, "discover with known sources must succeed: {body}");
+    assert_eq!(
+        status, 200,
+        "discover with known sources must succeed: {body}"
+    );
 
     // Unknown source must be rejected
     let (status, body) = curl_post(
@@ -897,15 +913,11 @@ async fn cli_run_discover_with_sources() {
     assert_eq!(status, 400, "unknown source must be rejected: {body}");
 
     // Empty source list must be rejected
-    let (status, body) = curl_post(
-        &url,
-        r#"{"command":"discover","args":{"sources":[]}}"#,
-    )
-    .await;
+    let (status, body) = curl_post(&url, r#"{"command":"discover","args":{"sources":[]}}"#).await;
     assert_eq!(status, 400, "empty sources must be rejected: {body}");
 
     std::env::remove_var("CAREERAI_BIN");
-    _server.abort();
+    server.abort();
 }
 
 // ---------------------------------------------------------------------------
@@ -914,8 +926,8 @@ async fn cli_run_discover_with_sources() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn healthz_returns_ok() {
-    let (_server, port) = boot_server().await;
+    let (server, port) = bootserver().await;
     let body = curl_get(&format!("http://127.0.0.1:{port}/healthz")).await;
     assert!(body.starts_with("ok"), "healthz must return ok: {body}");
-    _server.abort();
+    server.abort();
 }

@@ -11,7 +11,8 @@ use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
 use careerai_db::models::NewArtifact;
 use careerai_db::queries;
-use careerai_render::render_application;
+use careerai_db::SqlitePool;
+use careerai_render::{render_application, RenderedArtifacts};
 use careerai_tailor::model::{CoverLetter, ResumeView};
 
 use crate::{load_profile, open_pool};
@@ -94,29 +95,7 @@ pub async fn render_one(
     .context("render_application")?;
 
     // Attach artifact rows for each rendered file that exists on disk.
-    for (kind, path) in [
-        ("resume_md", &artifacts.resume_md),
-        ("resume_docx", &artifacts.resume_docx),
-        ("resume_pdf", &artifacts.resume_pdf),
-        ("cover_md", &artifacts.cover_md),
-        ("cover_docx", &artifacts.cover_docx),
-    ] {
-        if let Some(&size) = artifacts.bytes.get(path) {
-            if size > 0 {
-                queries::attach_artifact(
-                    &pool,
-                    &application.id,
-                    &NewArtifact {
-                        kind: kind.to_string(),
-                        path: path.to_string_lossy().into_owned(),
-                        bytes: i64::try_from(size).unwrap_or(i64::MAX),
-                    },
-                )
-                .await
-                .with_context(|| format!("attach_artifact {kind}"))?;
-            }
-        }
-    }
+    attach_artifacts(&pool, &application.id, &artifacts).await?;
 
     queries::transition(
         &pool,
@@ -130,6 +109,16 @@ pub async fn render_one(
         .await
         .context("set application state=rendered")?;
 
+    ats_verify(
+        &artifacts.resume_pdf,
+        &listing.title,
+        &listing.company,
+        &listing.description,
+        &profile.personal.email,
+        &profile.personal.phone,
+        &application.id,
+    );
+
     Ok(RenderedOutcome {
         application_id: application.id,
         resume_md: artifacts.resume_md,
@@ -139,6 +128,64 @@ pub async fn render_one(
         cover_docx: artifacts.cover_docx,
         bytes: artifacts.bytes,
     })
+}
+
+/// Insert `artifacts` rows for every rendered file that exists on disk.
+async fn attach_artifacts(
+    pool: &SqlitePool,
+    application_id: &str,
+    artifacts: &RenderedArtifacts,
+) -> Result<()> {
+    for (kind, path) in [
+        ("resume_md", &artifacts.resume_md),
+        ("resume_docx", &artifacts.resume_docx),
+        ("resume_pdf", &artifacts.resume_pdf),
+        ("cover_md", &artifacts.cover_md),
+        ("cover_docx", &artifacts.cover_docx),
+    ] {
+        if let Some(&size) = artifacts.bytes.get(path) {
+            if size > 0 {
+                queries::attach_artifact(
+                    pool,
+                    application_id,
+                    &NewArtifact {
+                        kind: kind.to_string(),
+                        path: path.to_string_lossy().into_owned(),
+                        bytes: i64::try_from(size).unwrap_or(i64::MAX),
+                    },
+                )
+                .await
+                .with_context(|| format!("attach_artifact {kind}"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// ATS text-layer verification (ported from ai-job-search `/apply` 5d):
+/// an ATS reads the PDF's embedded text, not the rendered page. Check
+/// that the resume extracts cleanly, contact details survive as literal
+/// text, and the JD's top terms are covered. Advisory only — honest gaps
+/// are logged, never stuffed or fatal.
+fn ats_verify(
+    resume_pdf: &std::path::Path,
+    title: &str,
+    company: &str,
+    description: &str,
+    email: &str,
+    phone: &str,
+    app_id: &str,
+) {
+    let ats_jd = format!("{title} {company} {description}");
+    let jd_keywords = careerai_render::ats::extract_jd_keywords(&ats_jd, 12);
+    match careerai_render::ats::verify_pdf(resume_pdf, email, phone, &jd_keywords) {
+        Ok(report) => careerai_render::ats::log_report(&report),
+        Err(e) => {
+            // Degraded mode: extraction failed (corrupt PDF, unsupported
+            // engine). Warn loudly — the artifact was still written.
+            tracing::warn!(error = %e, app_id, "ATS check failed");
+        }
+    }
 }
 
 /// Render all currently tailored or previously rendered applications in sequence.

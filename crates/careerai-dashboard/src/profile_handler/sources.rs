@@ -50,6 +50,7 @@ const KNOWN_SOURCES: &[(&str, &str, &str)] = &[
     ),
     ("toptal", "Elite Freelance", "https://www.toptal.com"),
     ("remoteok", "Remote Tech Board", "https://remoteok.com"),
+    ("freehire", "Aggregator REST API", "https://freehire.me"),
     ("otta", "Curated Tech Jobs", "https://otta.com"),
 ];
 
@@ -194,6 +195,17 @@ fn submit_gate_for(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn freehire_is_a_known_discovery_source() {
+        assert!(is_known_source("freehire"));
+        assert!(is_known_source("FREEHIRE"));
+    }
+
+    #[test]
+    fn unknown_sources_are_rejected() {
+        assert!(!is_known_source("totally-made-up-board"));
+    }
 
     #[test]
     fn submit_gate_for_per_source_block_wins() {

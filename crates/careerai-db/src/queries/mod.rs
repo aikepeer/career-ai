@@ -38,7 +38,7 @@ pub use applications::{
 pub use applications_sync::{
     list_applications_by_state_and_source, transition_application_and_listing,
 };
-pub use artifacts::{attach_artifact, list_artifacts};
+pub use artifacts::{all_artifact_paths, attach_artifact, list_artifacts};
 pub use events::{count_submissions_since, events_for, latest_submission_time, list_recent_events};
 pub use linkedin::{claim_drafted_application, list_drafted_linkedin};
 pub use listings::{

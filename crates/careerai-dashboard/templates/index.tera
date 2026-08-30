@@ -73,6 +73,9 @@
     <button class="nav-btn" id="tab-btn-commands" onclick="switchTab('commands')">
       <span class="nav-icon">⌨️</span> CLI Commands
     </button>
+    <button class="nav-btn" id="tab-btn-canvas" onclick="switchTab('canvas')">
+      <span class="nav-icon">✦</span> Spatial Journey
+    </button>
     <button class="nav-btn" id="tab-btn-chat" onclick="switchTab('chat')">
       <span class="nav-icon">🤖</span> AI Assistant
       <span class="tab-badge badge-accent">AI</span>
@@ -179,6 +182,9 @@
           <h3>Your energy disappears into forms.</h3>
           <p class="act-intro">The same facts, rewritten for every portal. The same résumé, uploaded again.</p>
           <div class="paper-stack" aria-hidden="true">
+            <span class="manual-error-toast">Required field missing</span>
+            <span class="manual-rejected-stamp">Rejected</span>
+            <span class="manual-spinner"><i></i> uploading 99%</span>
             <div class="paper paper-back"><span>FORM 08/19</span></div>
             <div class="paper paper-mid"><span>WORK HISTORY</span><i></i><i></i><i></i></div>
             <div class="paper paper-front">
@@ -187,6 +193,10 @@
               <em>UPLOAD RESUME AGAIN</em>
               <strong>FORMAT ERROR</strong>
             </div>
+            <span class="manual-cursor">↖</span>
+          </div>
+          <div class="manual-fragment-line" aria-hidden="true">
+            <span class="fragment-done"></span><i></i><span></span><i></i><span class="fragment-error"></span><i></i><span></span>
           </div>
           <div class="grind-stats">
             <span><b>42</b><small>fields / role</small></span>
@@ -203,18 +213,28 @@
             <div><h3>{{ view.config.profile.name }}</h3><p>{{ view.config.profile.location }}</p></div>
             <span>LIVE PROFILE</span>
           </div>
-          <div class="career-timeline" role="list" aria-label="Career timeline">
-            {% for moment in view.config.profile.career_story %}
-            <button type="button" class="career-moment {% if loop.first %}active{% endif %}" role="listitem" onclick="activateCareerMoment(this)">
-              <span class="moment-node moment-{{ moment.kind }}"></span>
-              <span class="moment-copy">
-                <small>{{ moment.era }}</small>
-                <strong>{{ moment.title }}</strong>
-                <em>{{ moment.organization }}</em>
-                <span class="moment-proof">{{ moment.proof }}</span>
-              </span>
-            </button>
-            {% endfor %}
+          <div class="career-workbench">
+            <div class="career-timeline" role="list" aria-label="Career timeline">
+              {% for moment in view.config.profile.career_story %}
+              <button type="button" class="career-moment {% if loop.first %}active{% endif %}" role="listitem" data-era="{{ moment.era }}" data-title="{{ moment.title }}" data-organization="{{ moment.organization }}" data-proof="{{ moment.proof }}" onclick="activateCareerMoment(this)">
+                <span class="moment-node moment-{{ moment.kind }}"></span>
+                <span class="moment-copy">
+                  <small>{{ moment.era }}</small>
+                  <strong>{{ moment.title }}</strong>
+                  <em>{{ moment.organization }}</em>
+                  <span class="moment-proof">{{ moment.proof }}</span>
+                </span>
+              </button>
+              {% endfor %}
+            </div>
+            <aside class="resume-live-preview" aria-label="Resume canvas preview">
+              <div class="resume-preview-head"><span>LIVE RÉSUMÉ</span><i></i></div>
+              <strong id="resume-preview-title">Career signal selected</strong>
+              <small id="resume-preview-org">Building candidate context…</small>
+              <div class="resume-preview-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+              <p id="resume-preview-proof">Select a milestone to render its evidence into the résumé canvas.</p>
+              <div class="skill-unlock"><span>Skill unlocked</span><b id="resume-preview-skill">EXPERIENCE</b></div>
+            </aside>
           </div>
           <div class="genome-footer"><span>Résumé signal</span><strong>{{ view.config.profile.skill_count }} skills · {{ view.config.profile.experience_count }} roles · continuously enriched</strong></div>
           {% else %}
@@ -230,7 +250,13 @@
           <div class="act-label"><span>Act 03</span><b>CareerAI autopilot</b></div>
           <h3>One profile. A system that moves.</h3>
           <p class="act-intro">Your search becomes an observable pipeline, with a human checkpoint where it matters.</p>
-          <div class="automation-flow">
+          <div class="autopilot-engine" aria-hidden="true">
+            <span class="engine-core"><i></i></span>
+            <span class="engine-label">AUTOFILL ENGINE</span>
+            <span class="engine-scan">ATS CLEAR</span>
+          </div>
+          <div class="automation-flow" data-current-step="{{ guided.current_number }}">
+            <span class="pipeline-packet" aria-hidden="true"></span>
             {% for step in guided.steps %}
             <button type="button" class="automation-step automation-{{ step.status }}" onclick="switchTab('{{ step.tab }}')">
               <span class="automation-index">0{{ step.number }}</span>
@@ -612,29 +638,109 @@
     </div>
 
     <div class="config-grid">
-      <!-- Target Discovery Keywords Card — FULL WIDTH, TOP PRIORITY -->
-      <div class="config-card" style="grid-column: 1 / -1;">
-        <div class="config-card-header">
-          <h3>🎯 Target Discovery Keywords</h3>
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <button type="button" class="btn-primary" onclick="runCliCommand('discover', {}, this)" style="padding:4px 10px; font-size:11px;" title="Execute careerai discover">⚡ Run Discover</button>
-            <button type="button" class="btn-primary" onclick="runCliCommand('match', {}, this)" style="padding:4px 10px; font-size:11px; background:hsl(160 84% 39%);" title="Execute careerai match">🎯 Run Matcher</button>
-            <button type="button" class="btn-primary" onclick="runCliCommand('run', {}, this)" style="padding:4px 10px; font-size:11px; background:hsl(207 90% 54%);" title="Run the full pipeline (dry-run by default)">🚀 Run All</button>
-            <span class="pill pill-info">{{ view.config.keywords | length }} keywords — Click to remove · Type to add</span>
+      <!-- Discovery Observatory — keywords become signals moving through live sources. -->
+      <section class="config-card keyword-observatory" aria-labelledby="observatory-title">
+        <header class="observatory-header">
+          <div>
+            <span class="observatory-kicker"><i></i> Discovery observatory · live network</span>
+            <h3 id="observatory-title">Watch your career signals find opportunity.</h3>
+            <p>Keywords radiate across every configured source. New postings return as inbound matches, not rows in a spreadsheet.</p>
           </div>
+          <div class="observatory-actions">
+            <button type="button" class="observatory-run observatory-run-discover" onclick="runDiscoveryExperience('discover', this)" title="Search all configured sources">
+              <span class="run-icon">⌁</span><span><b>Run discovery</b><small>scan {{ view.config.sources | length }} sources</small></span>
+            </button>
+            <button type="button" class="observatory-run observatory-run-match" onclick="runDiscoveryExperience('match', this)" title="Score discovered jobs against your profile">
+              <span class="run-icon">◎</span><span><b>Match signals</b><small>rank new postings</small></span>
+            </button>
+            <button type="button" class="observatory-run observatory-run-all" onclick="runDiscoveryExperience('run', this)" title="Run the dry-run-first pipeline">
+              <span class="run-icon">↗</span><span><b>Engage autopilot</b><small>dry-run by default</small></span>
+            </button>
+          </div>
+        </header>
+
+        <div class="discovery-observatory" id="discovery-observatory">
+          <div class="discovery-stage" id="discovery-stage">
+            <canvas id="discovery-network-canvas" aria-hidden="true"></canvas>
+            <div class="discovery-grid" aria-hidden="true"></div>
+            <div class="source-orbit" aria-label="Configured job-source network">
+              {% for src in view.config.sources %}
+              <button type="button" class="source-satellite source-satellite-{{ src.status }}" data-source="{{ src.name }}" data-count="{{ src.listing_count }}" data-source-index="{{ loop.index0 }}" onclick="filterExplorerBySource('{{ src.name | js | safe }}')" title="Open {{ src.name }} jobs in Explorer">
+                <i aria-hidden="true"></i><span>{{ src.name }}</span><small>{{ src.listing_count }}</small>
+              </button>
+              {% endfor %}
+            </div>
+
+            <div class="signal-constellation" id="signal-constellation" aria-label="Priority keyword constellation">
+              {% for kw in view.config.keywords | sort(attribute="name") %}
+              <button type="button" class="keyword-orbit-node {% if loop.index > 28 %}keyword-orbit-secondary{% endif %}" data-keyword="{{ kw.name }}" data-keyword-index="{{ loop.index0 }}" onclick="toggleKeyword('{{ kw.name | js | safe }}')" title="{{ kw.name }} · click to remove">
+                <i aria-hidden="true"></i><span>{{ kw.name }}</span>
+              </button>
+              {% endfor %}
+            </div>
+
+            <div class="discovery-globe" aria-label="Global job discovery engine">
+              <div class="globe-atmosphere" aria-hidden="true"></div>
+              <div class="globe-grid globe-grid-a" aria-hidden="true"></div>
+              <div class="globe-grid globe-grid-b" aria-hidden="true"></div>
+              <div class="globe-core-copy">
+                <small>CAREER SIGNAL</small>
+                <strong>{{ view.config.keywords | length }}</strong>
+                <span>KEYWORDS ACTIVE</span>
+              </div>
+              <div class="globe-sweep" aria-hidden="true"></div>
+            </div>
+
+            <div class="match-impact-layer" id="match-impact-layer" aria-hidden="true"></div>
+            <div class="observatory-legend">
+              <span><i class="legend-signal"></i> search signal</span>
+              <span><i class="legend-source"></i> job source</span>
+              <span><i class="legend-match"></i> matched posting</span>
+            </div>
+          </div>
+
+          <aside class="discovery-telemetry" aria-label="Discovery telemetry">
+            <div class="telemetry-head"><span><i></i> Live telemetry</span><small id="discovery-mode-label">listening</small></div>
+            <div class="telemetry-metrics">
+              <div><small>Network</small><strong>{{ view.config.sources | length }}</strong><span>sources online</span></div>
+              <div><small>Indexed</small><strong>{{ view.kpi.today_discovered }}</strong><span>new today</span></div>
+              <div><small>Qualified</small><strong>{{ view.kpi.shortlisted_active }}</strong><span>active matches</span></div>
+            </div>
+            <div class="telemetry-feed" id="discovery-telemetry-feed">
+              {% for src in view.config.sources %}
+              {% if loop.index <= 6 %}
+              <button type="button" onclick="filterExplorerBySource('{{ src.name | js | safe }}')">
+                <span class="feed-pulse"></span><b>{{ src.name }}</b><small>{{ src.listing_count }} indexed</small><em>↗</em>
+              </button>
+              {% endif %}
+              {% endfor %}
+            </div>
+            <div class="telemetry-caption"><span>18-source search fabric</span><small>Inbound packets are visual previews; pipeline state remains authoritative.</small></div>
+          </aside>
         </div>
-        <div id="keywords-container" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin-bottom:12px;">
-          {% for kw in view.config.keywords | sort(attribute="name") %}
-          <span class="skill-tag kw-chip" style="cursor:pointer; justify-content:space-between;" onclick="toggleKeyword('{{ kw.name | js | safe }}')" title="Click to remove">
-            <span>✓ {{ kw.name }}</span><span style="opacity:0.6; margin-left:6px;">✕</span>
-          </span>
-          {% endfor %}
-        </div>
-        <div style="display:flex; gap:8px; margin-top:4px;">
-          <input type="text" id="new-kw-input" class="form-control" placeholder="Add keyword (e.g. Yocto, RTOS, PyTorch, ROS2)..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomKeyword();}">
-          <button type="button" class="btn-primary" onclick="addCustomKeyword()">+ Add Keyword</button>
-        </div>
-      </div>
+
+        <details class="keyword-vault">
+          <summary>
+            <span><i>⌘</i><b>Signal vault</b><small>Review, search, add, or remove every discovery keyword</small></span>
+            <strong>{{ view.config.keywords | length }} signals <i>↓</i></strong>
+          </summary>
+          <div class="keyword-vault-toolbar">
+            <label><span>⌕</span><input type="search" id="keyword-filter-input" class="form-control" placeholder="Filter signals…" oninput="filterKeywordVault(this.value)"></label>
+            <span>Click a signal to remove it from discovery</span>
+          </div>
+          <div id="keywords-container" class="keyword-vault-grid">
+            {% for kw in view.config.keywords | sort(attribute="name") %}
+            <button type="button" class="kw-chip" data-keyword="{{ kw.name }}" onclick="toggleKeyword('{{ kw.name | js | safe }}')" title="Remove {{ kw.name }}">
+              <span><i></i>{{ kw.name }}</span><b aria-hidden="true">×</b>
+            </button>
+            {% endfor %}
+          </div>
+          <div class="keyword-add-row">
+            <label for="new-kw-input">Add a new career signal</label>
+            <div><input type="text" id="new-kw-input" class="form-control" placeholder="e.g. Yocto, RTOS, PyTorch, ROS2…" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomKeyword();}"><button type="button" class="btn-primary" onclick="addCustomKeyword()">Add signal <span>↗</span></button></div>
+          </div>
+        </details>
+      </section>
 
       <!-- Active Sources Card -->
       <div class="config-card">
@@ -1253,12 +1359,30 @@
       <button type="button" class="btn-primary" onclick="switchTab('chat'); usePromptChip('What does careerai rematch do?')" style="padding:4px 10px; font-size:11px; white-space:nowrap;">🤖 CLI Help ↗</button>
     </div>
 
+    <div class="command-journey" id="command-journey">
+      <aside class="journey-progress" aria-label="Command journey progress">
+        <span class="journey-progress-orb" id="journey-progress-orb"></span>
+        <i></i>
+        <small>Foundation</small><small>Momentum</small><small>Autonomy</small>
+      </aside>
+      <div class="journey-chapters">
     {% for group in cli_groups %}
-    <section class="cmd-group">
-      <h3 class="cmd-group-title">{{ group.name }}<span class="cmd-group-count">{{ group.cards | length }}</span></h3>
+    <section class="cmd-group command-chapter journey-{% if group.name == 'Setup' %}foundation{% elif group.name == 'Pipeline' %}momentum{% elif group.name == 'Inspect' %}clarity{% elif group.name == 'Sources' %}reach{% elif group.name == 'Diagnose' %}resilience{% elif group.name == 'Credentials' %}trust{% elif group.name == 'Long-running' %}consistency{% else %}autonomy{% endif %}" data-chapter-index="{{ loop.index0 }}">
+      <div class="chapter-marker" aria-hidden="true"><span>0{{ loop.index }}</span><i></i></div>
+      <div class="chapter-body">
+      <header class="command-chapter-head">
+        <div class="chapter-symbol" aria-hidden="true"><i></i><b></b><span></span></div>
+        <div>
+          <span class="chapter-kicker">Chapter 0{{ loop.index }} · {{ group.name }}</span>
+          <h3>{% if group.name == "Setup" %}Build the foundation.{% elif group.name == "Pipeline" %}Turn intent into momentum.{% elif group.name == "Inspect" %}Make progress visible.{% elif group.name == "Sources" %}Expand your opportunity horizon.{% elif group.name == "Diagnose" %}Keep the system resilient.{% elif group.name == "Credentials" %}Protect the keys to your search.{% elif group.name == "Long-running" %}Let consistency compound.{% else %}Graduate to autonomous operation.{% endif %}</h3>
+          <p>{% if group.name == "Setup" %}A trustworthy career system begins with structured context.{% elif group.name == "Pipeline" %}Discover, qualify, tailor, render, and apply—each command advances the story.{% elif group.name == "Inspect" %}Evidence replaces uncertainty as every state becomes observable.{% elif group.name == "Sources" %}More thoughtful coverage creates more chances for the right role to find you.{% elif group.name == "Diagnose" %}Healthy feedback loops turn failures into recoverable moments.{% elif group.name == "Credentials" %}Sensitive access stays local, deliberate, and under your control.{% elif group.name == "Long-running" %}Small scheduled actions become a durable daily advantage.{% else %}The machinery disappears; your attention returns to interviews and decisions.{% endif %}</p>
+        </div>
+        <span class="cmd-group-count">{{ group.cards | length }} commands</span>
+      </header>
       <div class="cmd-grid">
         {% for card in group.cards %}
-        <div class="cmd-card cmd-{{ card.availability }}">
+        <article class="cmd-card cmd-{{ card.availability }}" data-command="{{ card.name }}" data-sequence="{{ loop.index0 }}">
+          <div class="cmd-motion-glyph" aria-hidden="true"><i></i><i></i><i></i><span></span></div>
           <div class="cmd-head">
             <code class="cmd-argv">{{ card.argv }}</code>
             <span class="avail-badge avail-{{ card.availability }}">
@@ -1276,11 +1400,14 @@
             {% endif %}
             <button type="button" class="chip-btn cmd-copy" title="Copy CLI command" onclick="copyCliCommand('{{ card.argv | js | safe }}', this)">📋 Copy</button>
           </div>
-        </div>
+        </article>
         {% endfor %}
+      </div>
       </div>
     </section>
     {% endfor %}
+      </div>
+    </div>
 
     <!-- Static full-surface reference — works with JS disabled and is
          the copy-paste cheat sheet for the terminal. -->
@@ -1317,7 +1444,120 @@ careerai service uninstall                 disable + remove the systemd unit</pr
     </details>
   </div>
 
-  <!-- TAB 7: AI CHAT ASSISTANT -->
+  <!-- TAB 7: SPATIAL CAREER CANVAS -->
+  <div id="tab-canvas" class="tab-panel">
+    <div class="panel-header mission-panel-head head-canvas">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Experimental spatial mode</span>
+        <h2>Your career is a world, not a workflow.</h2>
+        <p class="panel-desc">Pan, zoom, and move between the evidence you built, the portal work the engine absorbs, and the interviews waiting on the horizon.</p>
+      </div>
+      <div class="panel-head-stats">
+        <div><small>World zones</small><strong>3</strong></div>
+        <div><small>Canvas mode</small><strong>Live</strong></div>
+        <span class="panel-live"><i></i> Drag to explore</span>
+      </div>
+    </div>
+
+    <section class="spatial-shell" aria-labelledby="spatial-title">
+      <header class="spatial-toolbar">
+        <div>
+          <span class="spatial-overline">Career world / 01</span>
+          <h3 id="spatial-title">From accumulated proof to calendar-ready opportunity.</h3>
+        </div>
+        <nav class="spatial-zone-nav" aria-label="Focus a spatial canvas zone">
+          <button type="button" onclick="focusSpatialZone('experience', this)"><i class="zone-a-dot"></i><span>Experience</span><kbd>1</kbd></button>
+          <button type="button" onclick="focusSpatialZone('nightmare', this)"><i class="zone-b-dot"></i><span>Portal nightmare</span><kbd>2</kbd></button>
+          <button type="button" onclick="focusSpatialZone('horizon', this)"><i class="zone-c-dot"></i><span>Interview horizon</span><kbd>3</kbd></button>
+        </nav>
+        <div class="spatial-zoom-controls" aria-label="Canvas zoom controls">
+          <button type="button" onclick="zoomSpatialCanvas(-0.12)" title="Zoom out" aria-label="Zoom out">−</button>
+          <span id="spatial-zoom-label">72%</span>
+          <button type="button" onclick="zoomSpatialCanvas(0.12)" title="Zoom in" aria-label="Zoom in">+</button>
+          <button type="button" onclick="resetSpatialCanvas()" title="Reset canvas" aria-label="Reset canvas">⌂</button>
+        </div>
+      </header>
+
+      <div class="spatial-viewport" id="spatial-viewport" tabindex="0" aria-label="Zoomable career journey canvas. Drag to pan; use plus and minus to zoom.">
+        <div class="spatial-canvas" id="spatial-canvas">
+          <div class="spatial-world-grid" aria-hidden="true"></div>
+          <svg class="spatial-connections" viewBox="0 0 1900 1080" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="career-path-gradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#818cf8"></stop><stop offset=".5" stop-color="#22d3ee"></stop><stop offset="1" stop-color="#34d399"></stop></linearGradient>
+              <filter id="career-path-glow"><feGaussianBlur stdDeviation="4" result="blur"></feGaussianBlur><feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
+            </defs>
+            <path class="world-path world-path-base" d="M500 435 C690 320 720 700 925 545 S1260 285 1430 480"></path>
+            <path class="world-path world-path-live" d="M500 435 C690 320 720 700 925 545 S1260 285 1430 480"></path>
+          </svg>
+
+          <article class="spatial-zone zone-experience" data-spatial-zone="experience">
+            <span class="zone-coordinate">ZONE A · 09°27′</span>
+            <header><span class="zone-number">01</span><div><small>Accumulated proof</small><h3>The experience constellation</h3></div></header>
+            <p>Every degree, role, and hard-won skill remains connected. Select a node to surface its proof.</p>
+            {% if view.config.profile %}
+            <div class="spatial-profile-card">
+              <span class="spatial-avatar">◎</span><div><strong>{{ view.config.profile.name }}</strong><small>{{ view.config.profile.experience_count }} roles · {{ view.config.profile.skill_count }} skills</small></div><i>LIVE</i>
+            </div>
+            <div class="spatial-timeline">
+              {% for moment in view.config.profile.career_story %}
+              <button type="button" class="spatial-moment {% if loop.first %}active{% endif %}" onclick="activateSpatialMoment(this)">
+                <i></i><span><small>{{ moment.era }}</small><strong>{{ moment.title }}</strong><em>{{ moment.organization }}</em></span><b>↗</b>
+              </button>
+              {% endfor %}
+            </div>
+            {% else %}
+            <button type="button" class="spatial-empty-profile" onclick="switchTab('config')">Import your profile to ignite this constellation <span>↗</span></button>
+            {% endif %}
+            <div class="zone-orbit zone-orbit-a" aria-hidden="true"><i></i><i></i><i></i></div>
+          </article>
+
+          <article class="spatial-zone zone-nightmare" data-spatial-zone="nightmare">
+            <span class="zone-coordinate">ZONE B · 100× PARALLEL</span>
+            <header><span class="zone-number">02</span><div><small>Work absorbed</small><h3>The portal nightmare, contained.</h3></div></header>
+            <p>Forms fragment into machine-sized tasks. The engine fills, validates, and queues them while you stay in control.</p>
+            <div class="portal-simulation" id="portal-simulation">
+              <div class="portal-swarm" id="portal-swarm" aria-hidden="true"></div>
+              <div class="portal-engine-core">
+                <span class="engine-ring engine-ring-a"></span><span class="engine-ring engine-ring-b"></span>
+                <i>AI</i><strong>100</strong><small>portals orchestrated</small>
+              </div>
+              <div class="portal-stat portal-stat-left"><span>42 → 0</span><small>manual fields</small></div>
+              <div class="portal-stat portal-stat-right"><span>1×</span><small>human approval</small></div>
+            </div>
+            <div class="portal-progress"><span><i></i></span><small>Autofill engine distributing candidate context…</small></div>
+          </article>
+
+          <article class="spatial-zone zone-horizon" data-spatial-zone="horizon">
+            <span class="zone-coordinate">ZONE C · NEXT 14 DAYS</span>
+            <header><span class="zone-number">03</span><div><small>Opportunity realized</small><h3>The interview horizon</h3></div></header>
+            <p>A clean queue turns preparation into conversations, with space left for the decisions only you can make.</p>
+            <div class="interview-queue">
+              <div class="queue-item queue-ready"><span>01</span><div><strong>Application pack</strong><small>{{ view.state_counts.rendered }} ready to submit</small></div><i>✓</i></div>
+              <div class="queue-connector"><i></i><i></i><i></i></div>
+              <div class="queue-item queue-human"><span>02</span><div><strong>Human checkpoint</strong><small>Review, approve, send</small></div><i>◎</i></div>
+            </div>
+            <div class="interview-calendar" aria-label="Illustrative interview calendar">
+              <div class="calendar-head"><span>Interview runway</span><small>Next 2 weeks</small></div>
+              <div class="calendar-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+              <div class="calendar-grid" aria-hidden="true">
+                {% for n in range(start=1, end=15) %}<i class="{% if n == 3 or n == 8 or n == 12 %}calendar-slot{% endif %}">{{ n }}</i>{% endfor %}
+              </div>
+            </div>
+            <button type="button" class="horizon-action" onclick="switchTab('actions')">Open interview & action center <span>↗</span></button>
+            <div class="zone-orbit zone-orbit-c" aria-hidden="true"><i></i><i></i><i></i></div>
+          </article>
+
+          <div class="world-packet" aria-hidden="true"><i></i></div>
+          <span class="world-note world-note-a">PAST SIGNALS</span><span class="world-note world-note-b">AUTOMATION BRIDGE</span><span class="world-note world-note-c">FUTURE CONVERSATIONS</span>
+        </div>
+
+        <div class="spatial-minimap" aria-hidden="true"><i class="minimap-a"></i><i class="minimap-b"></i><i class="minimap-c"></i><span id="spatial-minimap-window"></span></div>
+        <div class="spatial-instructions"><span>Drag to pan</span><i></i><span>Scroll to zoom</span><i></i><span>1–3 to travel</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- TAB 8: AI CHAT ASSISTANT -->
   <div id="tab-chat" class="tab-panel">
     <div class="panel-header mission-panel-head head-chat">
       <div class="panel-head-main">
@@ -1462,13 +1702,30 @@ function switchTab(tabId) {
   } catch(e) {}
 }
 
-function activateCareerMoment(button) {
+function activateCareerMoment(button, skipScroll) {
   var timeline = button && button.closest('.career-timeline');
   if (!timeline) return;
   timeline.querySelectorAll('.career-moment').forEach(function(moment) {
     moment.classList.toggle('active', moment === button);
   });
-  button.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  var workbench = button.closest('.career-workbench');
+  if (workbench) {
+    var title = workbench.querySelector('#resume-preview-title');
+    var org = workbench.querySelector('#resume-preview-org');
+    var proof = workbench.querySelector('#resume-preview-proof');
+    var skill = workbench.querySelector('#resume-preview-skill');
+    if (title) title.textContent = button.dataset.title || 'Career milestone';
+    if (org) org.textContent = [button.dataset.era, button.dataset.organization].filter(Boolean).join(' · ');
+    if (proof) proof.textContent = button.dataset.proof || 'Evidence connected to your living résumé.';
+    if (skill) skill.textContent = (button.dataset.title || 'Experience').split(/\s+/).slice(0, 2).join(' ').toUpperCase();
+    var preview = workbench.querySelector('.resume-live-preview');
+    if (preview) {
+      preview.classList.remove('resume-updated');
+      void preview.offsetWidth;
+      preview.classList.add('resume-updated');
+    }
+  }
+  if (!skipScroll) button.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function filterFunnelCards(query) {
@@ -1566,7 +1823,7 @@ function openAppModal(id) {
           var sizeKb = (art.bytes / 1024).toFixed(1) + ' KB';
 
           li.innerHTML = '<div style="display:flex; justify-content:space-between; align-items:center; width:100%; gap:8px;">' +
-            '<span>' + icon + ' <strong>' + art.kind + '</strong> (' + sizeKb + ')</span>' +
+            '<span>' + icon + ' <strong>' + escapeHtml(art.kind) + '</strong> (' + sizeKb + ')</span>' +
             '<a href="' + downloadUrl + '" target="_blank" class="btn-primary" style="padding:3px 10px; font-size:11px; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">⬇️ Download</a>' +
             '</div>';
           artifactsUl.appendChild(li);
@@ -1597,14 +1854,14 @@ function openAppModal(id) {
         var targetId = data.listing_id || id;
 
         if (state === 'shortlisted') {
-          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="tailorListing(\'' + targetId + '\', this)">🎯 Tailor Application</button>';
+          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="tailorListing(\'' + escapeJsString(targetId) + '\', this)">🎯 Tailor Application</button>';
         } else if (state === 'tailored') {
-          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="renderApplication(\'' + targetId + '\', this)">📄 Render PDF & DOCX</button>' +
-            '<button type="button" class="btn-secondary" onclick="rollbackApplication(\'' + targetId + '\', \'shortlisted\', this)">↩️ Rollback to Shortlisted</button>';
+          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="renderApplication(\'' + escapeJsString(targetId) + '\', this)">📄 Render PDF & DOCX</button>' +
+            '<button type="button" class="btn-secondary" onclick="rollbackApplication(\'' + escapeJsString(targetId) + '\', \'shortlisted\', this)">↩️ Rollback to Shortlisted</button>';
         } else if (state === 'rendered') {
-          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="applyApplication(\'' + targetId + '\', this)">🚀 Apply</button>' +
-            '<button type="button" class="btn-secondary" onclick="renderApplication(\'' + targetId + '\', this)">🔄 Re-render</button>' +
-            '<button type="button" class="btn-secondary" onclick="rollbackApplication(\'' + targetId + '\', \'tailored\', this)">↩️ Rollback to Tailored</button>';
+          actionsDiv.innerHTML = '<button type="button" class="btn-primary" onclick="applyApplication(\'' + escapeJsString(targetId) + '\', this)">🚀 Apply</button>' +
+            '<button type="button" class="btn-secondary" onclick="renderApplication(\'' + escapeJsString(targetId) + '\', this)">🔄 Re-render</button>' +
+            '<button type="button" class="btn-secondary" onclick="rollbackApplication(\'' + escapeJsString(targetId) + '\', \'tailored\', this)">↩️ Rollback to Tailored</button>';
         }
       }
     })
@@ -2400,9 +2657,11 @@ function toggleKeyword(kw) {
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.status === 'success') {
-      document.querySelectorAll('#keywords-container .kw-chip').forEach(function(el) {
-        if (el.textContent.includes(kw)) el.remove();
+      document.querySelectorAll('.kw-chip, .keyword-orbit-node').forEach(function(el) {
+        if ((el.dataset.keyword || '') === kw) el.remove();
       });
+      updateKeywordSignalCount(-1);
+      if (window.layoutDiscoveryWorld) window.layoutDiscoveryWorld();
     }
   })
   .catch(function(err) { console.warn('Toggle keyword failed:', err); });
@@ -2432,18 +2691,49 @@ function addCustomKeyword() {
     if (d.status === 'success') {
       inp.value = '';
       var container = document.getElementById('keywords-container');
-      var span = document.createElement('span');
-      span.className = 'skill-tag kw-chip';
-      span.style.cursor = 'pointer';
-      span.style.justifyContent = 'space-between';
-      span.title = 'Click to remove';
-      span.setAttribute('onclick', "toggleKeyword('" + escapeJsString(kw) + "')");
-      span.innerHTML = '<span>✓ ' + escapeHtml(kw) + '</span><span style="opacity:0.6; margin-left:6px;">✕</span>';
-      container.appendChild(span);
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'kw-chip';
+      chip.dataset.keyword = kw;
+      chip.title = 'Remove ' + kw;
+      chip.addEventListener('click', function() { toggleKeyword(kw); });
+      chip.innerHTML = '<span><i></i>' + escapeHtml(kw) + '</span><b aria-hidden="true">×</b>';
+      container.appendChild(chip);
+      var constellation = document.getElementById('signal-constellation');
+      if (constellation && constellation.querySelectorAll('.keyword-orbit-node:not(.keyword-orbit-secondary)').length < 28) {
+        var node = document.createElement('button');
+        node.type = 'button';
+        node.className = 'keyword-orbit-node';
+        node.dataset.keyword = kw;
+        node.dataset.keywordIndex = String(constellation.children.length);
+        node.title = kw + ' · click to remove';
+        node.addEventListener('click', function() { toggleKeyword(kw); });
+        node.innerHTML = '<i aria-hidden="true"></i><span>' + escapeHtml(kw) + '</span>';
+        constellation.appendChild(node);
+      }
       sortKeywordsContainer();
+      updateKeywordSignalCount(1);
+      if (window.layoutDiscoveryWorld) window.layoutDiscoveryWorld();
     }
   })
   .catch(function(err) { console.warn('Add keyword failed:', err); });
+}
+
+function updateKeywordSignalCount(delta) {
+  var value = document.querySelector('.globe-core-copy strong');
+  if (value) value.textContent = Math.max(0, (parseInt(value.textContent, 10) || 0) + delta);
+  var summary = document.querySelector('.keyword-vault summary > strong');
+  if (summary) {
+    var count = Math.max(0, (parseInt(summary.textContent, 10) || 0) + delta);
+    summary.firstChild.textContent = count + ' signals ';
+  }
+}
+
+function filterKeywordVault(query) {
+  var q = (query || '').trim().toLowerCase();
+  document.querySelectorAll('#keywords-container .kw-chip').forEach(function(chip) {
+    chip.hidden = q && !(chip.dataset.keyword || '').toLowerCase().includes(q);
+  });
 }
 
 function filterExplorerBySource(srcName) {
@@ -2715,7 +3005,7 @@ document.addEventListener('DOMContentLoaded', function() {
   try {
     var savedTab = localStorage.getItem('careerai-active-tab');
     var requestedTab = new URLSearchParams(window.location.search).get('tab');
-    var validTabs = ['funnel', 'events', 'config', 'actions', 'explorer', 'commands', 'chat'];
+    var validTabs = ['funnel', 'events', 'config', 'actions', 'explorer', 'commands', 'canvas', 'chat'];
     if (requestedTab && validTabs.indexOf(requestedTab) !== -1) {
       switchTab(requestedTab);
     } else if (savedTab && validTabs.indexOf(savedTab) !== -1) {
@@ -2933,7 +3223,7 @@ function refreshExplorerListings() {
   window.addEventListener('scroll', updateScrollProgress, { passive: true });
 
   // ---- Scroll-reveal via IntersectionObserver ----
-  var revealSelector = '.mission-hero, .career-story, .operations-divider, .kpi, .guided-path, .pipeline-stepper, .filter-bar, .funnel, .next-steps, .config-card, .cmd-card, .action-card, .filter-panel-card, .table-container, .chat-wrapper, .sources-list, footer';
+  var revealSelector = '.mission-hero, .career-story, .operations-divider, .kpi, .guided-path, .pipeline-stepper, .filter-bar, .funnel, .next-steps, .config-card, .command-chapter, .cmd-card, .spatial-shell, .action-card, .filter-panel-card, .table-container, .chat-wrapper, .sources-list, footer';
   // Add reveal class to target elements
   document.querySelectorAll(revealSelector).forEach(function(el) {
     el.classList.add('reveal');
@@ -3005,7 +3295,7 @@ function refreshExplorerListings() {
   }
 
   // ---- 3D card tilt on hover ----
-  document.querySelectorAll('.kpi, .config-card, .cmd-card, .action-card').forEach(function(card) {
+  document.querySelectorAll('.kpi, .config-card:not(.keyword-observatory), .action-card').forEach(function(card) {
     card.classList.add('card-tilt');
     card.addEventListener('mousemove', function(e) {
       var rect = card.getBoundingClientRect();
@@ -3098,6 +3388,411 @@ function refreshExplorerListings() {
       setTimeout(scanReveal, 300);
     };
   }
+})();
+</script>
+
+<!-- ======================================================= EXPERIENCE SYSTEM
+     Progressive enhancement for the discovery observatory, three-act motion,
+     command journey, and the optional pan/zoom spatial career world.
+     ======================================================================== -->
+<script>
+(function() {
+  'use strict';
+
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------------------------------------------------- three-act choreography
+  function initializeActs() {
+    var acts = document.querySelectorAll('.story-act');
+    if (!acts.length) return;
+    var activate = function(act) { act.classList.add('act-live'); };
+    if (reduceMotion || !('IntersectionObserver' in window)) {
+      acts.forEach(activate);
+    } else {
+      var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          entry.target.classList.toggle('act-live', entry.isIntersecting);
+        });
+      }, { threshold: 0.24 });
+      acts.forEach(function(act) { observer.observe(act); });
+    }
+    var firstMoment = document.querySelector('.career-workbench .career-moment.active');
+    if (firstMoment) activateCareerMoment(firstMoment, true);
+  }
+
+  // --------------------------------------------------------- command chapters
+  function initializeCommandJourney() {
+    var journey = document.getElementById('command-journey');
+    if (!journey) return;
+    document.documentElement.classList.add('motion-ready');
+    var chapters = Array.from(journey.querySelectorAll('.command-chapter'));
+    var orb = document.getElementById('journey-progress-orb');
+
+    function revealChapter(chapter) {
+      chapter.classList.add('chapter-active');
+      chapter.querySelectorAll('.cmd-card').forEach(function(card, index) {
+        window.setTimeout(function() { card.classList.add('journey-card-visible'); }, reduceMotion ? 0 : index * 85);
+      });
+      if (orb && chapters.length > 1) {
+        var index = Math.max(0, chapters.indexOf(chapter));
+        orb.style.top = (20 + (index / (chapters.length - 1)) * 82) + '%';
+        orb.style.borderColor = getComputedStyle(chapter).getPropertyValue('--chapter-rgb') ? 'rgb(' + getComputedStyle(chapter).getPropertyValue('--chapter-rgb') + ')' : '';
+      }
+    }
+
+    if (reduceMotion || !('IntersectionObserver' in window)) {
+      chapters.forEach(revealChapter);
+      return;
+    }
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) revealChapter(entry.target);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+    chapters.forEach(function(chapter) { observer.observe(chapter); });
+  }
+
+  // ------------------------------------------------------ discovery world map
+  function initializeDiscoveryWorld() {
+    var stage = document.getElementById('discovery-stage');
+    var canvas = document.getElementById('discovery-network-canvas');
+    if (!stage || !canvas || canvas.dataset.initialized === 'true') return;
+    canvas.dataset.initialized = 'true';
+    var context = canvas.getContext('2d');
+    if (!context) return;
+    var satellites = Array.from(stage.querySelectorAll('.source-satellite'));
+    var constellation = document.getElementById('signal-constellation');
+    var particles = [];
+    var stars = [];
+    var width = 0;
+    var height = 0;
+    var active = false;
+    var frameRequest = null;
+    var previousTime = 0;
+
+    for (var starIndex = 0; starIndex < 62; starIndex++) {
+      stars.push({ x: ((starIndex * 47) % 101) / 101, y: ((starIndex * 83) % 97) / 97, size: 0.35 + (starIndex % 4) * 0.22 });
+    }
+    for (var particleIndex = 0; particleIndex < Math.max(7, Math.min(12, satellites.length)); particleIndex++) {
+      particles.push({ source: particleIndex % Math.max(1, satellites.length), progress: (particleIndex / 11) % 1, speed: 0.000075 + (particleIndex % 4) * 0.000014, bend: (particleIndex % 2 ? 1 : -1) * (24 + (particleIndex % 3) * 13) });
+    }
+
+    function visibleNodes(selector) {
+      return Array.from(stage.querySelectorAll(selector)).filter(function(node) { return getComputedStyle(node).display !== 'none'; });
+    }
+
+    function layoutWorld() {
+      var rect = stage.getBoundingClientRect();
+      if (rect.width < 40 || rect.height < 40) return;
+      width = rect.width;
+      height = rect.height;
+      var ratio = Math.min(window.devicePixelRatio || 1, 1.6);
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      satellites.forEach(function(node, index) {
+        var angle = -Math.PI / 2 + (index / Math.max(1, satellites.length)) * Math.PI * 2;
+        var x = 50 + Math.cos(angle) * (width < 560 ? 39 : 43);
+        var y = 50 + Math.sin(angle) * (width < 560 ? 38 : 41);
+        node.style.left = x + '%';
+        node.style.top = y + '%';
+        node.style.setProperty('--source-angle', angle + 'rad');
+        node.querySelector('i').style.animationDelay = (-index * 0.19) + 's';
+      });
+
+      var keywordNodes = visibleNodes('.keyword-orbit-node');
+      keywordNodes.forEach(function(node, index) {
+        var half = Math.ceil(keywordNodes.length / 2);
+        var leftSide = index < half;
+        var localIndex = index % half;
+        var fraction = half > 1 ? localIndex / (half - 1) : 0.5;
+        var curve = Math.sin(fraction * Math.PI) * (width < 560 ? 6 : 9);
+        var x = leftSide ? 17 + curve : 83 - curve;
+        var y = 12 + fraction * 76 + Math.sin(localIndex * 1.7) * 1.25;
+        node.style.left = x + '%';
+        node.style.top = y + '%';
+      });
+    }
+    window.layoutDiscoveryWorld = layoutWorld;
+
+    function pointFor(node) {
+      return { x: node.offsetLeft, y: node.offsetTop };
+    }
+    function quadraticPoint(start, control, end, t) {
+      var inverse = 1 - t;
+      return {
+        x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
+        y: inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y
+      };
+    }
+    function createImpact() {
+      var layer = document.getElementById('match-impact-layer');
+      if (!layer || !width) return;
+      var impact = document.createElement('span');
+      impact.className = 'match-impact';
+      impact.textContent = '+JOB';
+      impact.style.left = (width / 2 + (Math.random() - 0.5) * 130) + 'px';
+      impact.style.top = (height / 2 + (Math.random() - 0.5) * 130) + 'px';
+      layer.appendChild(impact);
+      window.setTimeout(function() { impact.remove(); }, 1700);
+    }
+    window.createDiscoveryImpact = createImpact;
+
+    function draw(time) {
+      if (!active || !width || !height) { frameRequest = null; return; }
+      var elapsed = Math.min(40, previousTime ? time - previousTime : 16);
+      previousTime = time;
+      context.clearRect(0, 0, width, height);
+
+      stars.forEach(function(star, index) {
+        context.beginPath();
+        context.fillStyle = index % 7 === 0 ? 'rgba(103,232,249,.35)' : 'rgba(148,163,184,.18)';
+        context.arc(star.x * width, star.y * height, star.size, 0, Math.PI * 2);
+        context.fill();
+      });
+
+      var keywordNodes = visibleNodes('.keyword-orbit-node');
+      context.lineWidth = 0.65;
+      context.strokeStyle = 'rgba(129,140,248,.10)';
+      [keywordNodes.slice(0, Math.ceil(keywordNodes.length / 2)), keywordNodes.slice(Math.ceil(keywordNodes.length / 2))].forEach(function(group) {
+        if (group.length < 2) return;
+        context.beginPath();
+        group.forEach(function(node, index) {
+          var point = pointFor(node);
+          if (index === 0) context.moveTo(point.x, point.y); else context.lineTo(point.x, point.y);
+        });
+        context.stroke();
+      });
+
+      var destination = { x: width / 2, y: height / 2 };
+      satellites.forEach(function(node) {
+        var start = pointFor(node);
+        context.beginPath();
+        context.strokeStyle = 'rgba(34,211,238,.055)';
+        context.moveTo(start.x, start.y);
+        context.lineTo(destination.x, destination.y);
+        context.stroke();
+      });
+
+      var speedMultiplier = stage.classList.contains('discovery-scanning') ? 2.5 : 1;
+      particles.forEach(function(particle) {
+        if (!satellites.length) return;
+        particle.progress += elapsed * particle.speed * speedMultiplier;
+        if (particle.progress >= 1) {
+          particle.progress = 0;
+          particle.source = Math.floor(Math.random() * satellites.length);
+          particle.bend *= -1;
+          if (Math.random() > 0.45 || stage.classList.contains('discovery-scanning')) createImpact();
+        }
+        var start = pointFor(satellites[particle.source % satellites.length]);
+        var control = { x: (start.x + destination.x) / 2 + particle.bend, y: (start.y + destination.y) / 2 - particle.bend * 0.45 };
+        var point = quadraticPoint(start, control, destination, particle.progress);
+        var tail = quadraticPoint(start, control, destination, Math.max(0, particle.progress - 0.06));
+        var gradient = context.createLinearGradient(tail.x, tail.y, point.x, point.y);
+        gradient.addColorStop(0, 'rgba(34,211,238,0)');
+        gradient.addColorStop(1, 'rgba(103,232,249,.95)');
+        context.beginPath();
+        context.strokeStyle = gradient;
+        context.lineWidth = 1.4;
+        context.moveTo(tail.x, tail.y);
+        context.lineTo(point.x, point.y);
+        context.stroke();
+        context.beginPath();
+        context.fillStyle = '#cffafe';
+        context.arc(point.x, point.y, 1.7, 0, Math.PI * 2);
+        context.fill();
+      });
+      frameRequest = window.requestAnimationFrame(draw);
+    }
+
+    function setActive(isActive) {
+      active = isActive;
+      if (active) {
+        layoutWorld();
+        if (!frameRequest && !reduceMotion) frameRequest = window.requestAnimationFrame(draw);
+        if (reduceMotion) { previousTime = 0; draw(16); active = false; }
+      }
+    }
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function(entries) { entries.forEach(function(entry) { setActive(entry.isIntersecting); }); }, { threshold: 0.08 }).observe(stage);
+    } else {
+      setActive(true);
+    }
+    if ('ResizeObserver' in window) new ResizeObserver(layoutWorld).observe(stage);
+    window.addEventListener('resize', layoutWorld, { passive: true });
+    window.setTimeout(layoutWorld, 120);
+  }
+
+  window.runDiscoveryExperience = function(command, button) {
+    var stage = document.getElementById('discovery-stage');
+    var label = document.getElementById('discovery-mode-label');
+    if (stage) stage.classList.add('discovery-scanning');
+    if (label) label.textContent = command === 'match' ? 'ranking signals' : (command === 'run' ? 'autopilot engaged' : 'scanning sources');
+    for (var i = 0; i < 7; i++) window.setTimeout(function() { if (window.createDiscoveryImpact) window.createDiscoveryImpact(); }, 380 + i * 390);
+    window.setTimeout(function() {
+      if (stage) stage.classList.remove('discovery-scanning');
+      if (label) label.textContent = 'listening';
+    }, 4300);
+    runCliCommand(command, {}, button);
+  };
+
+  // ------------------------------------------------------- spatial world UI
+  function initializePortalSwarm() {
+    var swarm = document.getElementById('portal-swarm');
+    if (!swarm || swarm.children.length) return;
+    var fragment = document.createDocumentFragment();
+    var goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    for (var index = 0; index < 100; index++) {
+      var portal = document.createElement('i');
+      portal.className = 'portal-window';
+      var angle = index * goldenAngle;
+      var radius = 44 + Math.sqrt(index / 99) * 138;
+      portal.style.setProperty('--portal-x', (Math.cos(angle) * radius * 1.18).toFixed(1) + 'px');
+      portal.style.setProperty('--portal-y', (Math.sin(angle) * radius * 0.66).toFixed(1) + 'px');
+      portal.style.setProperty('--portal-r', ((index * 17) % 20 - 10) + 'deg');
+      portal.style.setProperty('--portal-speed', (2.8 + (index % 7) * 0.37) + 's');
+      portal.style.setProperty('--portal-delay', (-index * 0.08) + 's');
+      portal.style.opacity = String(0.24 + (index % 5) * 0.12);
+      fragment.appendChild(portal);
+    }
+    swarm.appendChild(fragment);
+  }
+
+  var spatialState = { scale: 0.65, x: 0, y: 0, dragging: false, moved: false, pointerX: 0, pointerY: 0 };
+  function spatialElements() {
+    return { viewport: document.getElementById('spatial-viewport'), canvas: document.getElementById('spatial-canvas') };
+  }
+  function applySpatialTransform() {
+    var elements = spatialElements();
+    if (!elements.canvas) return;
+    elements.canvas.style.transform = 'translate3d(' + spatialState.x + 'px,' + spatialState.y + 'px,0) scale(' + spatialState.scale + ')';
+    var label = document.getElementById('spatial-zoom-label');
+    if (label) label.textContent = Math.round(spatialState.scale * 100) + '%';
+    var mini = document.getElementById('spatial-minimap-window');
+    if (mini && elements.viewport) {
+      var mx = Math.max(0, Math.min(58, -spatialState.x / Math.max(1, 1900 * spatialState.scale) * 130));
+      var my = Math.max(0, Math.min(28, -spatialState.y / Math.max(1, 1080 * spatialState.scale) * 72));
+      mini.style.transform = 'translate(' + mx + 'px,' + my + 'px)';
+    }
+  }
+  window.resetSpatialCanvas = function() {
+    var elements = spatialElements();
+    if (!elements.viewport || elements.viewport.clientWidth < 20) return;
+    var viewportWidth = elements.viewport.clientWidth;
+    var viewportHeight = elements.viewport.clientHeight;
+    if (viewportWidth < 700) {
+      spatialState.scale = 0.56;
+      spatialState.x = 18 - 70 * spatialState.scale;
+      spatialState.y = 24 - 110 * spatialState.scale;
+    } else {
+      spatialState.scale = Math.min(0.76, (viewportWidth - 54) / 1900, (viewportHeight - 58) / 1080);
+      spatialState.x = (viewportWidth - 1900 * spatialState.scale) / 2;
+      spatialState.y = (viewportHeight - 1080 * spatialState.scale) / 2;
+    }
+    applySpatialTransform();
+  };
+  window.zoomSpatialCanvas = function(delta, anchorX, anchorY) {
+    var elements = spatialElements();
+    if (!elements.viewport) return;
+    var previousScale = spatialState.scale;
+    var nextScale = Math.max(0.28, Math.min(1.35, previousScale + delta));
+    var x = anchorX == null ? elements.viewport.clientWidth / 2 : anchorX;
+    var y = anchorY == null ? elements.viewport.clientHeight / 2 : anchorY;
+    var worldX = (x - spatialState.x) / previousScale;
+    var worldY = (y - spatialState.y) / previousScale;
+    spatialState.scale = nextScale;
+    spatialState.x = x - worldX * nextScale;
+    spatialState.y = y - worldY * nextScale;
+    applySpatialTransform();
+  };
+  window.focusSpatialZone = function(name, button) {
+    var elements = spatialElements();
+    var zone = document.querySelector('[data-spatial-zone="' + name + '"]');
+    if (!elements.viewport || !zone) return;
+    document.querySelectorAll('.spatial-zone-nav button').forEach(function(item) { item.classList.toggle('active', item === button); });
+    var targetScale = elements.viewport.clientWidth < 700 ? 0.68 : 0.88;
+    spatialState.scale = targetScale;
+    spatialState.x = elements.viewport.clientWidth / 2 - (zone.offsetLeft + zone.offsetWidth / 2) * targetScale;
+    spatialState.y = elements.viewport.clientHeight / 2 - (zone.offsetTop + zone.offsetHeight / 2) * targetScale;
+    applySpatialTransform();
+  };
+  window.activateSpatialMoment = function(button) {
+    var timeline = button && button.closest('.spatial-timeline');
+    if (!timeline) return;
+    timeline.querySelectorAll('.spatial-moment').forEach(function(item) { item.classList.toggle('active', item === button); });
+    var zone = button.closest('.spatial-zone');
+    if (zone) {
+      zone.classList.remove('zone-signal-fired');
+      void zone.offsetWidth;
+      zone.classList.add('zone-signal-fired');
+    }
+  };
+
+  function initializeSpatialCanvas() {
+    var elements = spatialElements();
+    if (!elements.viewport || !elements.canvas || elements.viewport.dataset.initialized === 'true') return;
+    elements.viewport.dataset.initialized = 'true';
+    initializePortalSwarm();
+    elements.viewport.addEventListener('pointerdown', function(event) {
+      if (event.target.closest('button')) return;
+      spatialState.dragging = true;
+      spatialState.moved = false;
+      spatialState.pointerX = event.clientX;
+      spatialState.pointerY = event.clientY;
+      elements.viewport.setPointerCapture(event.pointerId);
+    });
+    elements.viewport.addEventListener('pointermove', function(event) {
+      if (!spatialState.dragging) return;
+      var dx = event.clientX - spatialState.pointerX;
+      var dy = event.clientY - spatialState.pointerY;
+      if (Math.abs(dx) + Math.abs(dy) > 2) spatialState.moved = true;
+      spatialState.x += dx;
+      spatialState.y += dy;
+      spatialState.pointerX = event.clientX;
+      spatialState.pointerY = event.clientY;
+      applySpatialTransform();
+    });
+    var stopDrag = function(event) {
+      spatialState.dragging = false;
+      if (event.pointerId != null && elements.viewport.hasPointerCapture(event.pointerId)) elements.viewport.releasePointerCapture(event.pointerId);
+    };
+    elements.viewport.addEventListener('pointerup', stopDrag);
+    elements.viewport.addEventListener('pointercancel', stopDrag);
+    elements.viewport.addEventListener('wheel', function(event) {
+      event.preventDefault();
+      var rect = elements.viewport.getBoundingClientRect();
+      window.zoomSpatialCanvas(event.deltaY > 0 ? -0.08 : 0.08, event.clientX - rect.left, event.clientY - rect.top);
+    }, { passive: false });
+    elements.viewport.addEventListener('keydown', function(event) {
+      if (event.key === '1' || event.key === '2' || event.key === '3') {
+        var names = { '1': 'experience', '2': 'nightmare', '3': 'horizon' };
+        window.focusSpatialZone(names[event.key], document.querySelector('.spatial-zone-nav button:nth-child(' + event.key + ')'));
+        event.preventDefault();
+      } else if (event.key === '+' || event.key === '=') {
+        window.zoomSpatialCanvas(0.12); event.preventDefault();
+      } else if (event.key === '-' || event.key === '_') {
+        window.zoomSpatialCanvas(-0.12); event.preventDefault();
+      } else if (event.key === '0') {
+        window.resetSpatialCanvas(); event.preventDefault();
+      }
+    });
+    if ('ResizeObserver' in window) new ResizeObserver(function() { if (!spatialState.moved) window.resetSpatialCanvas(); }).observe(elements.viewport);
+    var canvasButton = document.getElementById('tab-btn-canvas');
+    if (canvasButton) canvasButton.addEventListener('click', function() { window.setTimeout(window.resetSpatialCanvas, 110); });
+    window.setTimeout(window.resetSpatialCanvas, 220);
+  }
+
+  function initializeExperienceSystem() {
+    initializeActs();
+    initializeCommandJourney();
+    initializeDiscoveryWorld();
+    initializeSpatialCanvas();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeExperienceSystem);
+  else initializeExperienceSystem();
 })();
 </script>
 </body>

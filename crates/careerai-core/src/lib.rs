@@ -6,4 +6,5 @@
 pub mod config;
 pub mod init;
 pub mod paths;
+pub mod salary;
 pub mod state;

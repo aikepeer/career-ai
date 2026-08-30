@@ -74,3 +74,36 @@ pub struct IndeedRssSourceConfig {
     #[serde(default)]
     pub rate_per_minute: u32,
 }
+
+/// FreeHire aggregator source (`freehire.me`). Public JSON API, no auth:
+/// `GET /api/v1/agent/jobs/search` returns normalized postings from ~50
+/// ATS platforms, tech-tuned facets included. Defaults to enabled with
+/// the project's niche keywords; `remote_only`/`region`/`jobage` map to
+/// upstream facets. The upstream service is best-effort (no SLA), so a
+/// freehire outage degrades this one source, never the pipeline.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FreehireSourceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Full-text query sent as `q` (title, skill, role). Empty string
+    /// performs an unfiltered search.
+    #[serde(default)]
+    pub keywords: String,
+    /// Results per page (upstream API limit).
+    #[serde(default = "default_freehire_limit")]
+    pub limit: usize,
+    /// `remote=remote` facet — only fully-remote postings.
+    #[serde(default)]
+    pub remote_only: bool,
+    /// `region=<codes>` facet, comma-separated (e.g. `eu`, `global`,
+    /// `none` for unresolved). Upstream owns the vocabulary.
+    #[serde(default)]
+    pub region: Option<String>,
+    /// `jobage=<days>` — only postings from the last N days.
+    #[serde(default)]
+    pub jobage: Option<u32>,
+}
+
+fn default_freehire_limit() -> usize {
+    25
+}

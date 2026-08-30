@@ -457,7 +457,7 @@ fn still_rejects_invented_noun_not_in_jd_or_profile() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, TailorError::InventedContent { reason, offending_token, .. }
+        matches!(err, TailorError::InventedContent { reason, ref offending_token, .. }
             if reason == "invented proper noun"
             && (offending_token.contains("Google") || offending_token.contains("Cloud"))),
         "got {err:?}"

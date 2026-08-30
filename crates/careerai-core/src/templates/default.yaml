@@ -165,6 +165,13 @@ sources:
     category: "software-dev"
   remoteok:
     enabled: true
+  freehire:
+    enabled: true            # public aggregator API; no auth. Best-effort SLA.
+    keywords: "machine learning OR llm OR robotics OR embedded"
+    limit: 25
+    remote_only: false
+    region: null             # e.g. "eu,global,none" — see freehire facets
+    jobage: null             # e.g. 14 — posted within N days
   naukri:
     enabled: false             # undocumented endpoint; opt-in
     keywords:

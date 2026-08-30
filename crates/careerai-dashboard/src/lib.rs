@@ -235,6 +235,10 @@ mod tests {
             "careerai init",
             "careerai daemon",
             "tab-btn-commands",
+            "tab-btn-canvas",
+            "discovery-observatory",
+            "command-journey",
+            "spatial-viewport",
         ] {
             assert!(
                 INDEX_TERA.contains(needle),

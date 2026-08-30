@@ -11,9 +11,11 @@ description = "Pipeline orchestration, state machine, and config for career-ai"
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 serde_yaml.workspace = true
 tracing.workspace = true
 config.workspace = true
+regex = "1"
 careerai-notify = { path = "../careerai-notify" }
 
 [dev-dependencies]

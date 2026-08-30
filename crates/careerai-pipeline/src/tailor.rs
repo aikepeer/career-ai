@@ -13,6 +13,7 @@ use careerai_core::state::ListingState;
 use careerai_db::queries;
 use careerai_llm::mock::MockLlm;
 use careerai_tailor::tailor_for_listing;
+use sqlx::SqlitePool;
 
 use crate::{load_profile, open_pool};
 
@@ -55,8 +56,19 @@ pub async fn tailor_one(
     listing_id: &str,
 ) -> Result<TailoredOutcome> {
     let pool = open_pool(root).await?;
+    tailor_one_with_pool(&pool, root, cfg, listing_id).await
+}
 
-    let listing = match queries::find_by_id(&pool, listing_id).await {
+/// Inner implementation that reuses an already-open pool. `tailor_all`
+/// passes its shared pool here — opening one pool per listing would
+/// create N SQLite pools (up to 8 connections each) for a batch run.
+async fn tailor_one_with_pool(
+    pool: &SqlitePool,
+    root: &Path,
+    cfg: &CoreConfig,
+    listing_id: &str,
+) -> Result<TailoredOutcome> {
+    let listing = match queries::find_by_id(pool, listing_id).await {
         Ok(l) => l,
         Err(careerai_db::DbError::NotFound(_)) => {
             anyhow::bail!("listing not found: {listing_id}");
@@ -119,7 +131,7 @@ pub async fn tailor_one(
             "routing to local deterministic tailoring"
         );
         let outcome = careerai_tailor::tailor_for_listing_local(
-            &pool,
+            pool,
             &listing.id,
             &profile,
             cfg.llm.drop_threshold,
@@ -138,6 +150,19 @@ pub async fn tailor_one(
     // tailoring hop must succeed. Fixtures are an explicit offline mode,
     // never a recovery path for a requested live run. This prevents stale
     // fixture output from being persisted or inserted into the live cache.
+    live_or_fixture_tailor(pool, cfg, root, &listing, &profile).await
+}
+
+/// Tailor via a live LLM backend (when compiled in and opted in) or via
+/// `MockLlm` fixtures. Both paths funnel through
+/// `tailor_for_listing` with the shared pool.
+async fn live_or_fixture_tailor(
+    pool: &SqlitePool,
+    cfg: &CoreConfig,
+    root: &Path,
+    listing: &careerai_db::models::Listing,
+    profile: &careerai_profile::schema::Profile,
+) -> Result<TailoredOutcome> {
     #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
     if live_llm_opt_in() {
         use std::sync::Arc;
@@ -155,13 +180,13 @@ pub async fn tailor_one(
         let backend = careerai_llm::Backend::resolve(cfg.llm.backend.clone(), &cfg.llm, cache)
             .await
             .map_err(|e| anyhow::anyhow!("resolve live LLM backend: {e}"))?;
-        let outcome = tailor_for_listing(&pool, &backend, &listing.id, &profile, &cfg.llm, root)
+        let outcome = tailor_for_listing(pool, &backend, &listing.id, profile, &cfg.llm, root)
             .await
             .context("live tailor_for_listing")?;
         return Ok(TailoredOutcome {
             application_id: outcome.application_id,
-            listing_title: listing.title,
-            company: listing.company,
+            listing_title: listing.title.clone(),
+            company: listing.company.clone(),
         });
     }
 
@@ -177,14 +202,14 @@ pub async fn tailor_one(
     let llm = MockLlm::from_dir(&fixtures)
         .with_context(|| format!("load llm fixtures from {}", fixtures.display()))?;
 
-    let outcome = tailor_for_listing(&pool, &llm, &listing.id, &profile, &cfg.llm, root)
+    let outcome = tailor_for_listing(pool, &llm, &listing.id, profile, &cfg.llm, root)
         .await
         .context("tailor_for_listing")?;
 
     Ok(TailoredOutcome {
         application_id: outcome.application_id,
-        listing_title: listing.title,
-        company: listing.company,
+        listing_title: listing.title.clone(),
+        company: listing.company.clone(),
     })
 }
 
@@ -195,12 +220,15 @@ pub async fn tailor_all(
     limit: Option<usize>,
 ) -> Result<Vec<TailoredOutcome>> {
     let pool = open_pool(root).await?;
-    let query_str = if let Some(n) = limit {
-        format!("SELECT id FROM listings WHERE state = 'shortlisted' ORDER BY score DESC LIMIT {n}")
-    } else {
-        "SELECT id FROM listings WHERE state = 'shortlisted' ORDER BY score DESC".to_string()
-    };
-    let rows: Vec<(String,)> = sqlx::query_as(&query_str)
+    let mut q = sqlx::QueryBuilder::new(
+        "SELECT id FROM listings WHERE state = 'shortlisted' ORDER BY score DESC",
+    );
+    if let Some(n) = limit {
+        q.push(" LIMIT ")
+            .push_bind(i64::try_from(n).unwrap_or(i64::MAX));
+    }
+    let rows: Vec<(String,)> = q
+        .build_query_as()
         .fetch_all(&pool)
         .await
         .context("fetch shortlisted listings")?;
@@ -220,9 +248,10 @@ pub async fn tailor_all(
         let completed = Arc::clone(&completed);
         let root_buf = root.to_path_buf();
         let cfg_clone = Arc::clone(&cfg_arc);
+        let pool_clone = pool.clone();
         tasks.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.ok()?;
-            match tailor_one(&root_buf, &cfg_clone, &id).await {
+            match tailor_one_with_pool(&pool_clone, &root_buf, &cfg_clone, &id).await {
                 Ok(outcome) => {
                     let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
                     info!(

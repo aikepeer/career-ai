@@ -120,7 +120,7 @@ careerai sources sync                                # preview ~80 known-good Gr
                                                      # your `domains:` keywords
 careerai sources sync --apply                        # merge into config/local.yaml (preserves
                                                      # other user keys; manual additions kept)
-careerai discover --source greenhouse,lever,ashby,remotive,remoteok
+careerai discover --source greenhouse,lever,ashby,remotive,remoteok,freehire
 careerai match                                       # filter + rank against profile
 careerai shortlist show --limit 20                   # pick a listing-id
 careerai tailor <listing-id>                         # constrained-diff resume + cover letter
@@ -128,6 +128,8 @@ careerai render <application-id>                     # DOCX + PDF via pandoc
 careerai apply <application-id>                      # DRY-RUN; see /career:apply walkthrough
 careerai applied --limit 20                          # confirm recent rows + cadence
 careerai digest --since 24h                          # whole-pipeline rollup
+careerai salary "Acme Robotics" [--city Berlin]     # benchmark vs your salary_data.json
+careerai salary --list-all | --validate              # inspect / validate your salary data
 ```
 
 Live submission is gated three ways: dry-run is the default, you
@@ -173,7 +175,7 @@ are the open items:
    ┌──── Source trait ────┐ pipeline state machine ┌── Submitter trait ──┐
    │ greenhouse · lever · │ discovered → shortlist │ ats-http · linkedin │
    │ remotive · remoteok ·│ → tailored → rendered →│ · naukri            │
-   │ naukri               │ → submitted → responded│   (dry-run default) │
+   │ freehire · naukri    │ → submitted → responded│   (dry-run default) │
    └──────────────────────┘                        └─────────────────────┘
                                    │
                   SQLite · keyring · governor rate-limits
@@ -224,6 +226,7 @@ and key entry points:
 | `lever`             | enabled   | Public ATS API, one entry per company slug.                                                                 |
 | `remotive`          | enabled   | Public job feed.                                                                                            |
 | `remoteok`          | enabled   | Public job feed.                                                                                            |
+| `freehire`          | enabled   | Public aggregator REST API (no auth) — tech-first facets, best-effort SLA.                                 |
 | `naukri`            | disabled  | Undocumented `jobapi/v3/search`; opt-in.                                                                    |
 | `linkedin_browser`  | disabled  | Native browser-driven discovery. Violates LinkedIn UA §8.2 — opt-in only. Requires `--features browser` and a `li_at` cookie stored in the OS keychain. |
 | `mcp_jobs`          | disabled  | Generic MCP-server adapter for community job-search MCPs. Per-server opt-in.                                |

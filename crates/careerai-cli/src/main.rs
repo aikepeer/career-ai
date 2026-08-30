@@ -13,6 +13,7 @@ mod commands;
 mod cookies;
 mod digest;
 mod review;
+mod salary;
 mod service;
 mod sources_sync;
 mod status;
@@ -220,6 +221,24 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Command::Salary {
+            company,
+            city,
+            json,
+            list_all,
+            validate,
+        } => {
+            salary::run(
+                &cwd,
+                &salary::SalaryArgs {
+                    company,
+                    city,
+                    json,
+                    list_all,
+                    validate,
+                },
+            )?;
+        }
         Command::Inspect { application_id } => {
             commands::inspect::run(&cwd, &application_id).await?;
         }

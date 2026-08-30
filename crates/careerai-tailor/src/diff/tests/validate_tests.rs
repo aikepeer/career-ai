@@ -17,7 +17,7 @@ fn rejects_summary_reword_invented_employer() {
         ops: super::full_coverage_ops(),
         cover_letter: "short".into(),
     };
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { .. }),
         "got {err:?}"
@@ -36,7 +36,7 @@ fn rejects_summary_reword_empty() {
         ops: super::full_coverage_ops(),
         cover_letter: "short".into(),
     };
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("summary reword new_text is empty")),
         "got {err:?}"
@@ -59,7 +59,7 @@ fn rejects_cover_letter_over_word_cap() {
         ops: super::full_coverage_ops(),
         cover_letter: words,
     };
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::CoverLetterTooLong { .. }),
         "got {err:?}"
@@ -79,7 +79,7 @@ fn rejects_move_before_unparseable_target() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(matches!(err, TailorError::BadPath(_)), "got {err:?}");
 }
 
@@ -92,7 +92,7 @@ fn rejects_path_missing_entry() {
     let mut ops = super::full_coverage_ops();
     ops.push(keep("experience[5].bullets[0]"));
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("missing entry")),
         "got {err:?}"
@@ -113,7 +113,7 @@ fn rejects_move_before_target_missing_bullet() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("missing bullet")),
         "got {err:?}"

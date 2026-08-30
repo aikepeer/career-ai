@@ -16,10 +16,10 @@ validator.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true }
-pdf-extract = "0.9"
+pdf-extract = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 csv = "1"
-quick-xml = "0.37"
+quick-xml.workspace = true
 regex = "1"
 
 [dev-dependencies]

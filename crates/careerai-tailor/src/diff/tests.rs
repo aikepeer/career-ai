@@ -208,7 +208,7 @@ fn accepts_valid_reorder_and_keep() {
     ];
     let doc = minimal_doc(ops);
     validate(&doc, &profile, "").unwrap();
-    let view = apply(doc, profile).unwrap();
+    let view = apply(doc, profile, "").unwrap();
     // Moved bullet[1] to front of experience[0].
     assert_eq!(view.experience[0].bullets.len(), 2);
     assert!(view.experience[0].bullets[0].contains("Led team"));
@@ -343,4 +343,62 @@ fn bullet_path_parse_rejects_garbage() {
         let err = BulletPath::parse(s).unwrap_err();
         assert!(matches!(err, TailorError::BadPath(_)));
     }
+}
+
+#[test]
+fn apply_keeps_jd_vocabulary_allowance_from_parse() {
+    // Regression: parse_and_validate() allows JD-derived proper nouns
+    // in rewords (jd_text), but diff::apply() re-validates defensively.
+    // If apply() re-validates with an EMPTY jd_text, every reword that
+    // aligned with JD terminology passes parse but fails apply — the
+    // whole `tailor --limit N` path breaks. The allowance must be
+    // carried through.
+    let profile = fixture_profile();
+    let jd_text = "Senior Software Engineer, Android Automotive at Waymo. \
+                   Build fleet management systems for autonomous vehicles.";
+    let doc = DiffDoc {
+        prompt_version: "tailor.v1".into(),
+        summary: Some(SummaryOp::Keep),
+        ops: vec![
+            DiffOp {
+                path: "experience[0].bullets[0]".into(),
+                kind: OpKind::Reword {
+                    new_text: "Fleet Management: Architected fleet telemetry for Waymo vehicles."
+                        .into(),
+                },
+            },
+            keep("experience[0].bullets[1]"),
+            keep("experience[1].bullets[0]"),
+            keep("projects[0].bullets[0]"),
+        ],
+        cover_letter: "short".into(),
+    };
+    // Sanity: parse-time validation accepts it with the JD text.
+    validate(&doc, &profile, jd_text).unwrap();
+    // The fix: apply() must accept it too (not re-reject with "").
+    apply(doc, profile.clone(), jd_text).unwrap();
+
+    // And the guardrail still bites without the JD allowance.
+    let doc2 = DiffDoc {
+        prompt_version: "tailor.v1".into(),
+        summary: Some(SummaryOp::Keep),
+        ops: vec![
+            DiffOp {
+                path: "experience[0].bullets[0]".into(),
+                kind: OpKind::Reword {
+                    new_text: "Fleet Management: Architected fleet telemetry for Waymo vehicles."
+                        .into(),
+                },
+            },
+            keep("experience[0].bullets[1]"),
+            keep("experience[1].bullets[0]"),
+            keep("projects[0].bullets[0]"),
+        ],
+        cover_letter: "short".into(),
+    };
+    let err = apply(doc2, profile, "").unwrap_err();
+    assert!(
+        matches!(err, TailorError::InventedContent { .. }),
+        "expected invented-content rejection without JD allowance, got {err:?}"
+    );
 }

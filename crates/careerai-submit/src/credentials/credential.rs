@@ -61,18 +61,46 @@ fn save_to_file(username: &str, secret: &str) -> Result<()> {
     }
     let json = serde_json::to_string_pretty(&map)
         .map_err(|e| SubmitError::SourceDisabled(format!("serialize credentials: {e}")))?;
-    fs::write(&path, json)
-        .map_err(|e| SubmitError::SourceDisabled(format!("write credentials file: {e}")))?;
+    write_secrets_file(&path, json.as_bytes())
+}
 
-    // Restrict to owner-only on Unix. The file contains plaintext secrets.
+/// Atomically write the plaintext secrets file with owner-only
+/// permissions. The file is created with mode 0600 up front (via
+/// `OpenOptionsExt::mode`) — never write-then-chmod, which leaves a
+/// window where the file exists world-readable under the process umask.
+/// Writes go through a temp file + rename so a crash mid-write cannot
+/// leave a truncated secrets file behind.
+fn write_secrets_file(path: &std::path::Path, contents: &[u8]) -> Result<()> {
     #[cfg(unix)]
     {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt;
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        // Temp file: create with 0600 atomically, in the same dir so the
+        // rename below is same-filesystem.
+        let tmp_path = path.with_extension("json.tmp");
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        opts.mode(0o600);
+        let mut f = opts
+            .open(&tmp_path)
+            .map_err(|e| SubmitError::SourceDisabled(format!("open credentials tmp file: {e}")))?;
+        f.write_all(contents)
+            .and_then(|()| f.sync_all())
+            .map_err(|e| SubmitError::SourceDisabled(format!("write credentials tmp file: {e}")))?;
+        drop(f);
+        fs::rename(&tmp_path, path)
+            .map_err(|e| SubmitError::SourceDisabled(format!("rename credentials file: {e}")))?;
+        // Cover the case where an old file already existed with loose perms.
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
             .map_err(|e| SubmitError::SourceDisabled(format!("set credentials file perms: {e}")))?;
+        Ok(())
     }
-
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents)
+            .map_err(|e| SubmitError::SourceDisabled(format!("write credentials file: {e}")))
+    }
 }
 
 fn delete_from_file(username: &str) {
@@ -88,7 +116,7 @@ fn delete_from_file(username: &str) {
         return;
     }
     if let Ok(json) = serde_json::to_string_pretty(&map) {
-        let _ = fs::write(&path, json);
+        let _ = write_secrets_file(&path, json.as_bytes());
     }
 }
 

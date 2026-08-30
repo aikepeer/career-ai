@@ -159,6 +159,23 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: SourcesCommand,
     },
+    /// Benchmark a company's salary against your own `salary_data.json`.
+    Salary {
+        /// Company name to look up (fuzzy-matched).
+        company: Option<String>,
+        /// Narrow the lookup to a city.
+        #[arg(long)]
+        city: Option<String>,
+        /// Emit raw JSON instead of the table.
+        #[arg(long)]
+        json: bool,
+        /// List every company in the data file.
+        #[arg(long = "list-all")]
+        list_all: bool,
+        /// Validate the data file's shape and report duplicates.
+        #[arg(long)]
+        validate: bool,
+    },
     /// Show the pipeline dashboard.
     Status {
         #[command(subcommand)]
@@ -173,7 +190,6 @@ pub(crate) enum Command {
 
 pub(crate) fn init_tracing(log_flag: Option<&str>) {
     use std::fs::OpenOptions;
-    use std::path::PathBuf;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::{fmt, EnvFilter, Layer};
@@ -183,22 +199,43 @@ pub(crate) fn init_tracing(log_flag: Option<&str>) {
         None => EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
     };
 
-    let log_dir = PathBuf::from("data/logs");
+    // Logs live under the resolved career-ai root, never the invocation
+    // CWD — `careerai` can be run from anywhere and runit services do not
+    // share the developer's working directory.
+    let log_dir = careerai_core::paths::resolve_root_env()
+        .join("data")
+        .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
     let log_file_path = log_dir.join("careerai.log");
 
-    let file_layer = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file_path)
-        .ok()
-        .map(|file| {
-            fmt::layer()
-                .with_writer(file)
-                .with_ansi(false)
-                .with_target(true)
-                .with_filter(filter.clone())
-        });
+    // The log may capture listing text and LLM output; keep it owner-only
+    // like the credentials file (mode 0600 from creation, no umask window).
+    let file_layer = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .open(&log_file_path)
+        }
+        #[cfg(not(unix))]
+        {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_file_path)
+        }
+    }
+    .ok()
+    .map(|file| {
+        fmt::layer()
+            .with_writer(file)
+            .with_ansi(false)
+            .with_target(true)
+            .with_filter(filter.clone())
+    });
 
     let stderr_layer = fmt::layer()
         .with_writer(std::io::stderr)
