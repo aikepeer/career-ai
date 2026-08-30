@@ -139,6 +139,20 @@ pub(crate) enum Command {
         #[arg(long, default_value = "24h")]
         since: String,
     },
+    /// List submitted applications that have gone quiet (no response
+    /// for N days) — follow-up candidates.
+    Followups {
+        /// Minimum quiet days before an application is listed.
+        #[arg(long, default_value_t = 10)]
+        days: u32,
+    },
+    /// Verify shortlisted listings are still open on their source board
+    /// before spending LLM tokens tailoring them.
+    Liveness {
+        /// Restrict the check to one source (e.g. `greenhouse`).
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Tools for MCP-server discovery sources.
     Mcp {
         #[command(subcommand)]
@@ -175,6 +189,10 @@ pub(crate) enum Command {
         /// Validate the data file's shape and report duplicates.
         #[arg(long)]
         validate: bool,
+        /// Compare your profile's compensation target against the market
+        /// index for the matched company.
+        #[arg(long)]
+        gap: bool,
     },
     /// Show the pipeline dashboard.
     Status {

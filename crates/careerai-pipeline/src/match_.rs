@@ -127,6 +127,24 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
             ))
             .copied()
             .context("bug: scored listing missing from post_filter map")?;
+
+        // apply_once_at_company (AIHawk): a company with an existing
+        // application is never shortlisted again — the operator already
+        // has a live shot there.
+        if cfg.matching.apply_once_at_company
+            && queries::has_application_for_company(&pool, &scored.listing.company).await?
+        {
+            filtered_out += 1;
+            queries::transition(
+                &pool,
+                &db_row.id,
+                ListingState::FilteredOut,
+                Some("apply-once company"),
+            )
+            .await?;
+            continue;
+        }
+
         queries::set_score(&pool, &db_row.id, f64::from(scored.score)).await?;
         queries::transition(
             &pool,

@@ -12,7 +12,9 @@
 pub mod apply;
 pub mod config_cmd;
 pub mod discover;
+pub mod followups;
 pub mod inspect;
+pub mod liveness;
 pub mod llm;
 pub mod match_;
 pub mod mcp;

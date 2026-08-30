@@ -11,6 +11,11 @@ pub mod filters;
 pub mod rank;
 pub mod rules;
 pub mod score;
+pub mod tier;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+pub mod tests_shared;
 
 pub use bullet_score::{BulletScorer, JaccardBulletScorer};
 pub use error::{MatchError, Result};
@@ -18,3 +23,4 @@ pub use filters::{classify, Decision};
 pub use rank::{rank_all, score_histogram, split_at_threshold, Scored};
 pub use rules::FilterRules;
 pub use score::{flatten_profile, JaccardScorer, Scorer};
+pub use tier::{tier_for, Tier};

@@ -18,6 +18,7 @@ careerai-tailor = { path = "../careerai-tailor" }
 careerai-render = { path = "../careerai-render" }
 careerai-submit = { path = "../careerai-submit" }
 careerai-notify = { path = "../careerai-notify" }
+reqwest.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 serde.workspace = true
@@ -46,6 +47,7 @@ sqlx.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true }
 which.workspace = true
+wiremock = "0.6"
 
 [lints]
 workspace = true

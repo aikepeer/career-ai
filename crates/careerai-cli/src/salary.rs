@@ -31,9 +31,47 @@ If you don't have salary data, the salary step is simply skipped.";
 pub struct SalaryArgs {
     pub company: Option<String>,
     pub city: Option<String>,
+    pub flags: SalaryFlags,
+}
+
+/// Boolean switches for the salary command. Grouped so clippy's
+/// `struct_excessive_bools` stays quiet.
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_excessive_bools)] // four independent CLI flags
+pub struct SalaryFlags {
     pub json: bool,
     pub list_all: bool,
     pub validate: bool,
+    pub gap: bool,
+}
+
+/// Parse "$150K-200K" / "150000-200000" / "€90k" into (low, high)
+/// numbers when possible. Returns `None` for unparseable ranges.
+fn parse_target_range(range: &str) -> Option<(f64, f64)> {
+    let digits: Vec<f64> = range
+        .split(|c: char| !c.is_alphanumeric())
+        .filter_map(|tok| {
+            let tok = tok.trim();
+            if tok.is_empty() {
+                return None;
+            }
+            let (num_part, mult) = match tok.chars().last() {
+                Some('k' | 'K') => (&tok[..tok.len() - 1], 1000.0),
+                _ => (tok, 1.0),
+            };
+            if num_part.is_empty() {
+                return None;
+            }
+            let mut n: f64 = num_part.parse().ok()?;
+            n *= mult;
+            Some(n)
+        })
+        .collect();
+    match digits.as_slice() {
+        [low, high] if high >= low => Some((*low, *high)),
+        [single] => Some((*single, *single)),
+        _ => None,
+    }
 }
 
 pub fn run(root: &Path, args: &SalaryArgs) -> Result<()> {
@@ -47,7 +85,7 @@ pub fn run(root: &Path, args: &SalaryArgs) -> Result<()> {
     let data =
         SalaryData::load(&data_path).with_context(|| format!("load {}", data_path.display()))?;
 
-    if args.validate {
+    if args.flags.validate {
         let warnings = data.warnings();
         if warnings.is_empty() {
             println!("salary data OK ({} companies)", data.companies.len());
@@ -59,8 +97,8 @@ pub fn run(root: &Path, args: &SalaryArgs) -> Result<()> {
         return Ok(());
     }
 
-    if args.list_all {
-        if args.json {
+    if args.flags.list_all {
+        if args.flags.json {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&data).context("serialize salary data")?
@@ -85,7 +123,51 @@ pub fn run(root: &Path, args: &SalaryArgs) -> Result<()> {
         return Ok(());
     }
 
-    if args.json {
+    // --gap (career-ops salary-gap): compare the profile's target comp
+    // against the matched company's market index.
+    if args.flags.gap {
+        let profile_path = careerai_core::paths::profile_path(root);
+        if profile_path.exists() {
+            let text = std::fs::read_to_string(&profile_path).unwrap_or_default();
+            if let Ok(profile) = careerai_profile::schema::Profile::from_yaml(&text) {
+                if !profile.compensation.target_range.is_empty() {
+                    let target = &profile.compensation.target_range;
+                    let range = parse_target_range(target);
+                    println!("\n--- Compensation gap ---");
+                    println!("Your target: {target}");
+                    if let Some(min) = profile.compensation.minimum.split_whitespace().next() {
+                        println!("Walk-away minimum: {min}");
+                    }
+                    for c in &hits {
+                        if let Some((_, best_idx)) = best_category_index(c) {
+                            let baseline = data.metadata.index_baseline;
+                            let diff_pct = ((best_idx - baseline) / baseline) * 100.0;
+                            println!(
+                                "{} market index: {best_idx:.1} ({diff_pct:+.1}% vs baseline)",
+                                c.company
+                            );
+                            if let (Some((low, _)), true) = (range, diff_pct >= 0.0) {
+                                println!(
+                                    "Verdict: market pays {diff_pct:+.0}% above baseline — \
+                                     target of {low:.0} currency units is {} the market median",
+                                    if low >= baseline {
+                                        "at or above"
+                                    } else {
+                                        "below"
+                                    }
+                                );
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        println!("No profile compensation configured — set `compensation.target_range` in profile/profile.yaml.");
+        return Ok(());
+    }
+
+    if args.flags.json {
         let json: Vec<&CompanySalary> = hits;
         println!(
             "{}",
@@ -97,6 +179,15 @@ pub fn run(root: &Path, args: &SalaryArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Highest-index category of a company entry (the best-paying category
+/// is the one a candidate negotiates against).
+fn best_category_index(c: &CompanySalary) -> Option<(&str, f64)> {
+    c.categories
+        .iter()
+        .filter_map(|(name, cat)| cat.index.map(|i| (name.as_str(), i)))
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 /// Human-readable company entry: header + category table with count,
@@ -182,9 +273,12 @@ mod tests {
             &SalaryArgs {
                 company: Some("Acme".into()),
                 city: None,
-                json: false,
-                list_all: false,
-                validate: false,
+                flags: SalaryFlags {
+                    json: false,
+                    list_all: false,
+                    validate: false,
+                    gap: false,
+                },
             },
         )
         .unwrap_err();
@@ -201,9 +295,12 @@ mod tests {
             &SalaryArgs {
                 company: Some("Novo Nordisk".into()),
                 city: None,
-                json: false,
-                list_all: false,
-                validate: false,
+                flags: SalaryFlags {
+                    json: false,
+                    list_all: false,
+                    validate: false,
+                    gap: false,
+                },
             },
         )
         .is_ok());
@@ -230,12 +327,59 @@ mod tests {
             &SalaryArgs {
                 company: Some("Starbucks".into()),
                 city: None,
-                json: false,
-                list_all: false,
-                validate: false,
+                flags: SalaryFlags {
+                    json: false,
+                    list_all: false,
+                    validate: false,
+                    gap: false,
+                },
             },
         );
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_target_range_handles_k_and_dash() {
+        assert_eq!(
+            parse_target_range("$150K-200K"),
+            Some((150_000.0, 200_000.0))
+        );
+        assert_eq!(parse_target_range("€90k"), Some((90_000.0, 90_000.0)));
+        assert_eq!(
+            parse_target_range("120000-150000"),
+            Some((120_000.0, 150_000.0))
+        );
+        assert_eq!(parse_target_range("n/a"), None);
+        assert_eq!(parse_target_range(""), None);
+    }
+
+    #[test]
+    fn best_category_index_picks_highest() {
+        let c = CompanySalary {
+            company: "Acme".into(),
+            city: None,
+            categories: [
+                (
+                    "engineering".to_string(),
+                    careerai_core::salary::Category {
+                        count: None,
+                        index: Some(105.0),
+                    },
+                ),
+                (
+                    "ml_ai".to_string(),
+                    careerai_core::salary::Category {
+                        count: None,
+                        index: Some(118.0),
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let (name, idx) = best_category_index(&c).unwrap();
+        assert_eq!(name, "ml_ai");
+        assert!((idx - 118.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -252,9 +396,12 @@ mod tests {
             &SalaryArgs {
                 company: None,
                 city: None,
-                json: false,
-                list_all: false,
-                validate: true,
+                flags: SalaryFlags {
+                    json: false,
+                    list_all: false,
+                    validate: true,
+                    gap: false,
+                },
             },
         )
         .is_ok());

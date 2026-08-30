@@ -369,6 +369,7 @@ dependencies = [
  "careerai-dashboard",
  "careerai-db",
  "careerai-llm",
+ "careerai-match",
  "careerai-notify",
  "careerai-pipeline",
  "careerai-profile",
@@ -551,6 +552,7 @@ dependencies = [
  "careerai-submit",
  "careerai-tailor",
  "chrono",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
@@ -558,6 +560,7 @@ dependencies = [
  "tokio",
  "tracing",
  "which 7.0.3",
+ "wiremock",
 ]
 
 [[package]]

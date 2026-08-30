@@ -126,6 +126,23 @@ pub async fn find_latest_application_for_listing(
     Ok(row)
 }
 
+/// Whether any application exists for `company` (any state). Powers the
+/// `apply_once_at_company` match gate — one application per company,
+/// ported from AIHawk's work-preferences.
+pub async fn has_application_for_company(pool: &SqlitePool, company: &str) -> Result<bool> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT a.id
+         FROM applications a
+         JOIN listings l ON l.id = a.listing_id
+         WHERE l.company = ? COLLATE NOCASE
+         LIMIT 1",
+    )
+    .bind(company)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}
+
 pub async fn set_application_state(pool: &SqlitePool, id: &str, state: &str) -> Result<()> {
     let res = sqlx::query("UPDATE applications SET state = ?, updated_at = ? WHERE id = ?")
         .bind(state)

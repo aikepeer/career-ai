@@ -24,6 +24,21 @@ pub fn merge_pair(base: Profile, other: Profile) -> Profile {
             roles.dedup();
             roles
         },
+        archetypes: if base.archetypes.is_empty() {
+            other.archetypes
+        } else {
+            base.archetypes
+        },
+        narrative: if base.narrative.is_empty() {
+            other.narrative
+        } else {
+            base.narrative
+        },
+        compensation: if base.compensation.is_empty() {
+            other.compensation
+        } else {
+            base.compensation
+        },
     }
 }
 

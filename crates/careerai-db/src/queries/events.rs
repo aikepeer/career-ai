@@ -68,6 +68,58 @@ pub async fn latest_submission_time(
     Ok(row.map(|r| r.0))
 }
 
+/// One submitted application that has gone quiet: no `responded`
+/// transition, and its latest submission is older than the follow-up
+/// window. Powers `careerai followups` (ported from career-ops
+/// `followup-cadence.mjs`).
+#[derive(Debug, Clone)]
+pub struct StaleSubmission {
+    pub listing_id: String,
+    pub title: String,
+    pub company: String,
+    pub source: String,
+    pub url: String,
+    pub submitted_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// List submitted applications that have gone quiet for `min_days` or
+/// more and never received a `responded` transition. Oldest first.
+pub async fn list_stale_submissions(
+    pool: &SqlitePool,
+    min_days: i64,
+) -> Result<Vec<StaleSubmission>> {
+    let cutoff = format!("-{min_days} days");
+    let rows: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
+        "SELECT l.id, l.title, l.company, l.source, l.url, MAX(e.created_at) AS submitted_at
+         FROM events e
+         JOIN listings l ON l.id = e.listing_id
+         WHERE e.to_state = 'submitted'
+           AND l.id NOT IN (
+               SELECT DISTINCT listing_id FROM events WHERE to_state = 'responded'
+           )
+         GROUP BY l.id
+         HAVING julianday(MAX(e.created_at)) <= julianday('now', ?1)
+         ORDER BY submitted_at ASC",
+    )
+    .bind(cutoff)
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|(listing_id, title, company, source, url, ts)| {
+            let submitted_at = chrono::DateTime::parse_from_rfc3339(&ts)
+                .map_or_else(|_| chrono::Utc::now(), |t| t.with_timezone(&chrono::Utc));
+            Ok(StaleSubmission {
+                listing_id,
+                title,
+                company,
+                source,
+                url,
+                submitted_at,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -93,5 +145,73 @@ mod tests {
         assert_eq!(evs[0].listing_id, id);
         assert_eq!(evs[0].to_state, "shortlisted");
         assert_eq!(evs[1].to_state, "discovered");
+    }
+
+    #[tokio::test]
+    async fn stale_submissions_exclude_responded_and_recent() {
+        // Backdated events: insert directly (the transition helper stamps
+        // `now`, which is what the real pipeline does). `events.id` is an
+        // INTEGER AUTOINCREMENT column — bind numeric ids.
+        async fn backdated_submit(pool: &SqlitePool, id: &str, days_ago: i64, ev_id: i64) {
+            let ts = (chrono::Utc::now() - chrono::Duration::days(days_ago)).to_rfc3339();
+            sqlx::query(
+                "INSERT INTO events (id, listing_id, from_state, to_state, note, created_at)
+                 VALUES (?, ?, 'prepared', 'submitted', 'test', ?)",
+            )
+            .bind(ev_id)
+            .bind(id)
+            .bind(ts)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+
+        let pool = pool_in_memory().await.unwrap();
+        // A: submitted 15 days ago, never responded → stale.
+        let (a, _) = insert_or_ignore(&pool, &fixture("greenhouse", "stale-a"))
+            .await
+            .unwrap();
+        // B: submitted 3 days ago → too fresh.
+        let (b, _) = insert_or_ignore(&pool, &fixture("greenhouse", "stale-b"))
+            .await
+            .unwrap();
+        // C: submitted 15 days ago but responded 10 days ago → excluded.
+        let (c, _) = insert_or_ignore(&pool, &fixture("greenhouse", "stale-c"))
+            .await
+            .unwrap();
+
+        let mut ev_id = 1000i64;
+        backdated_submit(&pool, &a, 15, ev_id).await;
+        ev_id += 1;
+        backdated_submit(&pool, &b, 3, ev_id).await;
+        ev_id += 1;
+        backdated_submit(&pool, &c, 15, ev_id).await;
+        ev_id += 1;
+        // C's response.
+        sqlx::query(
+            "INSERT INTO events (id, listing_id, from_state, to_state, note, created_at)
+             VALUES (?, ?, 'submitted', 'responded', 'test', ?)",
+        )
+        .bind(ev_id)
+        .bind(&c)
+        .bind((chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let stale = list_stale_submissions(&pool, 10).await.unwrap();
+        assert_eq!(stale.len(), 1, "expected only A: {stale:?}");
+        assert_eq!(stale[0].listing_id, a);
+        assert_eq!(stale[0].company, "Acme Robotics");
+
+        // A tighter window (3 days) admits A and B (15 and 3 days old)
+        // but never C (responded).
+        let tight = list_stale_submissions(&pool, 3).await.unwrap();
+        let ids: Vec<&str> = tight.iter().map(|s| s.listing_id.as_str()).collect();
+        assert!(ids.contains(&a.as_str()) && ids.contains(&b.as_str()));
+        assert!(!ids.contains(&c.as_str()));
+        // A looser window (20 days) admits nobody — everything is fresher
+        // than the cutoff.
+        assert!(list_stale_submissions(&pool, 20).await.unwrap().is_empty());
     }
 }

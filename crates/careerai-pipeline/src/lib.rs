@@ -32,8 +32,10 @@ use careerai_profile::Profile;
 mod apply;
 mod digest;
 mod discover;
+mod followups;
 mod inspect;
 mod linkedin;
+mod liveness;
 mod match_;
 mod rematch;
 mod render;
@@ -47,8 +49,10 @@ pub use discover::{
     build_sources, build_sources_for_name, discover_all, discover_one, DiscoveryReport,
     NewListingRow,
 };
+pub use followups::{list_followups, FollowupItem};
 pub use inspect::{inspect_show, InspectReport};
 pub use linkedin::{confirm_linkedin_submit, list_drafted_linkedin};
+pub use liveness::{check_liveness, Liveness, LivenessRow};
 pub use match_::{match_all, match_one, MatchReport};
 pub use rematch::{rematch_shortlisted, RematchReport};
 pub use render::{render_all, render_one, RenderedOutcome};

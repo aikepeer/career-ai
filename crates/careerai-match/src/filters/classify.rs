@@ -45,6 +45,26 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
     {
         return Decision::Reject("excluded title");
     }
+    // AIHawk-style `title_blacklist`: supplements rules.yaml exclusions.
+    if cfg
+        .matching
+        .title_blacklist
+        .iter()
+        .any(|t| title_lc.contains(&t.to_lowercase()))
+    {
+        return Decision::Reject("blacklisted title");
+    }
+    // AIHawk-style `company_blacklist`: never shortlist these companies.
+    let company_lc = listing.company.to_lowercase();
+    if !company_lc.is_empty()
+        && cfg
+            .matching
+            .company_blacklist
+            .iter()
+            .any(|c| company_lc.contains(&c.to_lowercase()))
+    {
+        return Decision::Reject("blacklisted company");
+    }
 
     if !cfg.user.locations.is_empty() {
         let locations_lc: Vec<String> = cfg
@@ -55,6 +75,18 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
             .collect();
         if !location_ok(listing, &locations_lc) {
             return Decision::Reject("location not in allowlist");
+        }
+    }
+    // AIHawk-style `location_blacklist`: applied on top of the allowlist.
+    if let Some(loc) = &listing.location {
+        let loc_lc = loc.to_lowercase();
+        if cfg
+            .matching
+            .location_blacklist
+            .iter()
+            .any(|l| loc_lc.contains(&l.to_lowercase()))
+        {
+            return Decision::Reject("blacklisted location");
         }
     }
 

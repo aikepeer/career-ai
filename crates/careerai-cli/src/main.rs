@@ -168,6 +168,12 @@ async fn main() -> Result<()> {
             let cfg = load_cfg(&cwd)?;
             digest::run_digest(&cwd, &cfg, &since).await?;
         }
+        Command::Followups { days } => {
+            commands::followups::run(&cwd, days).await?;
+        }
+        Command::Liveness { source } => {
+            commands::liveness::run(&cwd, source.as_deref()).await?;
+        }
         Command::Mcp { command } => match command {
             McpCommand::Probe => {
                 let cfg = load_cfg(&cwd)?;
@@ -227,15 +233,19 @@ async fn main() -> Result<()> {
             json,
             list_all,
             validate,
+            gap,
         } => {
             salary::run(
                 &cwd,
                 &salary::SalaryArgs {
                     company,
                     city,
-                    json,
-                    list_all,
-                    validate,
+                    flags: salary::SalaryFlags {
+                        json,
+                        list_all,
+                        validate,
+                        gap,
+                    },
                 },
             )?;
         }
