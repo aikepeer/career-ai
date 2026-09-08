@@ -20,7 +20,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{Html, IntoResponse},
     Json,
@@ -507,6 +507,29 @@ pub async fn api_timing(State(state): State<Arc<AppState>>) -> impl IntoResponse
 pub async fn api_salary_ranges(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match careerai_db::queries::list_salary_ranges(&state.pool, 100).await {
         Ok(ranges) => (StatusCode::OK, Json(ranges)).into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F02: `GET /api/v1/match-reasons/:listing_id` — return the structured
+/// match reasons (matched/missing keywords, filter reason, legitimacy tier)
+/// for a single listing. Returns 404 with `{ "match_reasons": null }` if
+/// the listing has no recorded match reasons yet.
+pub async fn api_match_reasons(
+    State(state): State<Arc<AppState>>,
+    Path(listing_id): Path<String>,
+) -> impl IntoResponse {
+    match careerai_db::queries::fetch_match_reasons(&state.pool, &listing_id).await {
+        Ok(Some(row)) => (StatusCode::OK, Json(row)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "match_reasons": null })),
+        )
+            .into_response(),
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": err.to_string() })),

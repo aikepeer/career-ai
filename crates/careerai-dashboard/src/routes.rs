@@ -146,6 +146,11 @@ pub fn build(state: Arc<AppState>) -> Router {
         )
         .route("/api/v1/timing", get(handlers::api_timing))
         .route("/api/v1/salary-ranges", get(handlers::api_salary_ranges))
+        // F02: explainable match cards
+        .route(
+            "/api/v1/match-reasons/:listing_id",
+            get(handlers::api_match_reasons),
+        )
         .route("/api/v1/market-pulse", get(handlers::api_market_pulse))
         .route(
             "/api/v1/interview-feedback",

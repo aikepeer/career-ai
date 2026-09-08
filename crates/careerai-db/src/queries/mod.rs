@@ -31,6 +31,7 @@ pub mod interview_feedback;
 pub mod linkedin;
 pub mod listings;
 pub mod market_pulse;
+pub mod match_reasons;
 pub mod patterns;
 pub mod payloads;
 pub mod quality;
@@ -75,6 +76,7 @@ pub use listings::{
     transition_if,
 };
 pub use market_pulse::{weekly_market_summary, CompanyHiring, MarketPulse, SkillFrequency};
+pub use match_reasons::{fetch_match_reasons, upsert_match_reasons, MatchReasonRow};
 pub use patterns::{
     advance_rates, detect_reposts, funnel_velocity, rejection_latencies, AdvanceRate,
     FunnelVelocity, RejectionLatency, Repost,

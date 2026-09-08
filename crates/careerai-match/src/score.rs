@@ -124,6 +124,46 @@ pub(crate) fn tokenize(text: &str) -> HashSet<String> {
         .collect()
 }
 
+/// F02: Structured match breakdown — the matched and missing keywords
+/// that explain *why* a listing got its score. Used by the pipeline to
+/// persist match reasons for explainable match cards.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MatchBreakdown {
+    /// Profile tokens that appear in the listing title or description.
+    pub matched_keywords: Vec<String>,
+    /// Configured domain keywords that are missing from the listing.
+    pub missing_keywords: Vec<String>,
+}
+
+/// Compute the match breakdown for a listing against a profile.
+/// `domain_keywords` are the configured keywords from `cfg.domains` —
+/// any that are absent from the listing are reported as missing.
+#[must_use]
+pub fn match_breakdown(profile_text: &str, listing: &RawListing, domain_keywords: &[String]) -> MatchBreakdown {
+    let profile_tokens = tokenize(profile_text);
+    let listing_text = format!("{} {}", listing.title, listing.description);
+    let listing_tokens = tokenize(&listing_text);
+
+    let matched_keywords: Vec<String> = profile_tokens
+        .intersection(&listing_tokens)
+        .cloned()
+        .collect();
+
+    let missing_keywords: Vec<String> = domain_keywords
+        .iter()
+        .filter(|kw| {
+            let kw_lc = kw.to_lowercase();
+            !listing_text.to_lowercase().contains(&kw_lc)
+        })
+        .cloned()
+        .collect();
+
+    MatchBreakdown {
+        matched_keywords,
+        missing_keywords,
+    }
+}
+
 /// Deliberately small stopword list — we want domain tokens (rust, ros,
 /// embedded, llm) intact.
 const STOPWORDS: &[&str] = &[
