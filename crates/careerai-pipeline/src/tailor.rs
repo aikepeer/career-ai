@@ -110,12 +110,15 @@ async fn tailor_one_with_pool(
     let score = listing.score.unwrap_or(0.0) as f32;
     let min_llm_score = cfg.llm.llm_min_score;
 
-    // Fast-path to local deterministic tailoring:
-    // 1. If not in live mode AND strategy is local (or no test fixtures present).
-    // 2. If environment explicitly overrides CAREERAI_TAILOR_STRATEGY=local.
-    // 3. If in live mode with strategy == "hybrid", but the listing score is below llm_min_score.
-    let use_local = (!is_live && (cfg.llm.strategy == "local" || !fixtures_dir(root).is_dir()))
+    // R05: strategy == "local" is authoritative — it routes to local
+    // deterministic tailoring even when is_live is true. The dashboard
+    // sets CAREERAI_LLM_LIVE=1 for all subprocesses, which would
+    // otherwise override a `local` strategy and make the LLM call
+    // unavoidable. The env override CAREERAI_TAILOR_STRATEGY=local and
+    // the hybrid below-threshold path remain as additional local routes.
+    let use_local = cfg.llm.strategy == "local"
         || std::env::var("CAREERAI_TAILOR_STRATEGY").as_deref() == Ok("local")
+        || (!is_live && !fixtures_dir(root).is_dir())
         || (is_live
             && cfg.llm.strategy == "hybrid"
             && listing.score.is_some()

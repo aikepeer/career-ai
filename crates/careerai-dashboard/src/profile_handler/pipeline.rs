@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use super::pipeline_args::build_command_args;
-use super::pipeline_types::{CliRunArgs, CliRunRequest};
+use super::pipeline_types::CliRunRequest;
 
 /// In-process guard so concurrent `discover`/`match`/`run` clicks never
 /// double-run the same stages or contend on SQLite. The guard is held for
@@ -32,7 +32,7 @@ fn resolve_cli_executable() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("careerai"))
 }
 
-async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
+pub async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
     let argv = match build_command_args(req) {
         Ok(argv) => argv,
         Err(e) => {
@@ -53,93 +53,192 @@ async fn run_cli_request(req: &CliRunRequest) -> impl IntoResponse {
     };
 
     let exe = resolve_cli_executable();
-    // Run the child from the app root (same resolution the CLI binary
-    // uses) so dashboard-invoked commands read the same config/, data/,
-    // profile/ tree regardless of where the dashboard process started.
     let cli_root = careerai_core::paths::resolve_root_env();
-
-    // Explicitly pass through `CAREERAI_LLM_LIVE=1` so dashboard-spawned
-    // `tailor`/`render` commands use the live LLM backend instead of
-    // falling back to nonexistent MockLlm fixtures. This is necessary
-    // because the runit service script may not export this env var.
-    // Also pass `CAREERAI_ROOT` so subprocesses find the DB + config.
     let careerai_root =
         std::env::var("CAREERAI_ROOT").unwrap_or_else(|_| cli_root.to_string_lossy().to_string());
     let run_timeout = std::time::Duration::from_secs(600);
-    match tokio::time::timeout(
-        run_timeout,
-        tokio::process::Command::new(&exe)
-            .args(&argv)
-            .current_dir(&cli_root)
-            .env("CAREERAI_LLM_LIVE", "1")
-            .env("CAREERAI_ROOT", careerai_root)
-            .output(),
-    )
-    .await
+
+    // Extract the listing_id (if any) for the command-log entry so the
+    // Events tab can link a failed tailor/render to the right listing.
+    let listing_id = req
+        .args
+        .listing_id
+        .as_deref()
+        .or(req.args.application_id.as_deref());
+
+    // Run the subprocess and capture a structured result. The same
+    // `CmdOutcome` feeds both the HTTP response and the `command_log`
+    // audit entry — no body re-reading needed.
+    let outcome = run_subprocess(&exe, &argv, &cli_root, &careerai_root, run_timeout).await;
+
+    tracing::info!(
+        target = "careerai::dashboard",
+        command = %req.command,
+        status = %outcome.log_status,
+        exit_code = ?outcome.exit_code,
+        "dashboard pipeline subprocess completed",
+    );
+
+    // Persist to the command_log audit table so failures surface in the
+    // Events tab alongside pipeline state transitions. Best-effort — a
+    // DB error here must not mask the command's own result.
+    if let Some(pool) = open_db_pool().await {
+        let _ = careerai_db::queries::log_command(
+            &pool,
+            &req.command,
+            listing_id,
+            &outcome.log_status,
+            outcome.exit_code,
+            Some(&outcome.message),
+        )
+        .await;
+    }
+
+    outcome.into_response()
+}
+
+/// Structured outcome of a dashboard-spawned CLI subprocess. Carries
+/// enough data to build both the HTTP response and the `command_log`
+/// audit entry from a single source of truth.
+struct CmdOutcome {
+    http_status: StatusCode,
+    body: serde_json::Value,
+    log_status: String,
+    exit_code: Option<i32>,
+    message: String,
+}
+
+impl IntoResponse for CmdOutcome {
+    fn into_response(self) -> axum::response::Response {
+        (self.http_status, Json(self.body)).into_response()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_subprocess(
+    exe: &std::path::Path,
+    argv: &[std::ffi::OsString],
+    cli_root: &std::path::Path,
+    careerai_root: &str,
+    run_timeout: std::time::Duration,
+) -> CmdOutcome {
+    // R06: spawn the child explicitly so we can kill it on timeout.
+    // The previous code used `Command::output()` inside a `tokio::time::timeout`
+    // — when the timeout fired, the `output()` future was dropped but the
+    // child process kept running, leaking a tailor/render subprocess that
+    // could hold the pipeline lock for the full 10-minute window.
+    let mut child = match tokio::process::Command::new(exe)
+        .args(argv)
+        .current_dir(cli_root)
+        .env("CAREERAI_LLM_LIVE", "1")
+        .env("CAREERAI_ROOT", careerai_root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
     {
-        Ok(Ok(out)) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            let message = format!("{stdout}\n{stderr}").trim().to_string();
-            tracing::info!(
-                target = "careerai::dashboard",
-                command = %req.command,
-                success = out.status.success(),
-                exit_code = ?out.status.code(),
-                "dashboard pipeline subprocess completed"
-            );
-            if out.status.success() {
-                (
-                    StatusCode::OK,
-                    Json(serde_json::json!({ "status": "success", "message": message })),
-                )
-                    .into_response()
+        Ok(c) => c,
+        Err(e) => {
+            return CmdOutcome {
+                http_status: StatusCode::INTERNAL_SERVER_ERROR,
+                body: serde_json::json!({ "status": "error", "error": e.to_string() }),
+                log_status: "error".into(),
+                exit_code: None,
+                message: e.to_string(),
+            };
+        }
+    };
+
+    // R06: take the piped stdout/stderr handles before waiting so we can
+    // read them after `wait()` completes. Use `child.wait()` (borrows
+    // `&mut self`) instead of `child.wait_with_output()` (takes `self`)
+    // so that on timeout we still own `child` and can `kill()` it.
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+
+    let wait_result = tokio::time::timeout(run_timeout, child.wait()).await;
+
+    match wait_result {
+        Ok(Ok(status)) => {
+            let stdout = match stdout_handle {
+                Some(mut h) => {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = Vec::new();
+                    let _ = h.read_to_end(&mut buf).await;
+                    String::from_utf8_lossy(&buf).to_string()
+                }
+                None => String::new(),
+            };
+            let stderr = match stderr_handle {
+                Some(mut h) => {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = Vec::new();
+                    let _ = h.read_to_end(&mut buf).await;
+                    String::from_utf8_lossy(&buf).to_string()
+                }
+                None => String::new(),
+            };
+            let raw_msg = format!("{stdout}\n{stderr}").trim().to_string();
+            let message = crate::details::strip_ansi_codes(&raw_msg);
+            let exit_code = status.code();
+            if status.success() {
+                CmdOutcome {
+                    http_status: StatusCode::OK,
+                    body: serde_json::json!({ "status": "success", "message": message }),
+                    log_status: "success".into(),
+                    exit_code: Some(0),
+                    message,
+                }
             } else {
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Json(serde_json::json!({
+                CmdOutcome {
+                    http_status: StatusCode::UNPROCESSABLE_ENTITY,
+                    body: serde_json::json!({
                         "status": "failed",
                         "message": message,
-                        "exit_code": out.status.code(),
-                    })),
-                )
-                    .into_response()
+                        "exit_code": exit_code,
+                    }),
+                    log_status: "failed".into(),
+                    exit_code,
+                    message,
+                }
             }
         }
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "status": "error", "error": e.to_string() })),
-        )
-            .into_response(),
-        Err(_) => (
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(serde_json::json!({
-                "status": "timeout",
-                "error": "Command execution timed out after 10 minutes"
-            })),
-        )
-            .into_response(),
+        Ok(Err(e)) => CmdOutcome {
+            http_status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: serde_json::json!({ "status": "error", "error": e.to_string() }),
+            log_status: "error".into(),
+            exit_code: None,
+            message: e.to_string(),
+        },
+        Err(_) => {
+            // R06: explicitly kill the timed-out child so it cannot
+            // continue running in the background and hold the pipeline lock.
+            let _ = child.kill().await;
+            let _ = child.wait().await; // reap the zombie
+            CmdOutcome {
+                http_status: StatusCode::GATEWAY_TIMEOUT,
+                body: serde_json::json!({
+                    "status": "timeout",
+                    "error": "Command execution timed out after 10 minutes"
+                }),
+                log_status: "timeout".into(),
+                exit_code: None,
+                message: "Command execution timed out after 10 minutes".into(),
+            }
+        }
     }
+}
+
+/// Open the SQLite pool from `CAREERAI_ROOT`. Best-effort — returns
+/// `None` if the DB is unavailable (the command result still reaches
+/// the caller).
+async fn open_db_pool() -> Option<sqlx::SqlitePool> {
+    let root = careerai_core::paths::resolve_root_env();
+    let path = root.join("data").join("careerai.sqlite");
+    careerai_db::pool_from_path(&path).await.ok()
 }
 
 pub async fn api_cli_run(Json(req): Json<CliRunRequest>) -> impl IntoResponse {
     run_cli_request(&req).await
-}
-
-pub async fn api_pipeline_discover() -> impl IntoResponse {
-    run_cli_request(&CliRunRequest {
-        command: "discover".to_string(),
-        args: CliRunArgs::default(),
-    })
-    .await
-}
-
-pub async fn api_pipeline_match() -> impl IntoResponse {
-    run_cli_request(&CliRunRequest {
-        command: "match".to_string(),
-        args: CliRunArgs::default(),
-    })
-    .await
 }
 
 #[cfg(test)]

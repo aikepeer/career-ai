@@ -127,6 +127,7 @@ async fn forced_backend_failure_does_not_use_fixtures() -> TestResult {
     let (root, mut cfg, listing_id) = setup().await;
     write_fixtures(root.path());
     cfg.llm.backend = BackendChoice::Goose;
+    cfg.llm.strategy = "llm".to_string();
     let previous = enable_live();
     let previous_path = std::env::var("PATH").ok();
     std::env::set_var("PATH", root.path().join("empty-bin"));
@@ -155,6 +156,7 @@ async fn malformed_live_output_does_not_fallback_or_cache() -> TestResult {
     let stub = root.path().join("malformed-cli");
     write_stub(&stub, "#!/bin/sh\ncat >/dev/null\nprintf '%s' 'not-json'\n");
     cfg.llm.backend = BackendChoice::CustomCli(stub.display().to_string());
+    cfg.llm.strategy = "llm".to_string();
     let previous = enable_live();
     let result = tailor_one(root.path(), &cfg, &listing_id).await;
     restore_live(previous);
@@ -194,6 +196,7 @@ esac
     );
     write_stub(&stub, &script);
     cfg.llm.backend = BackendChoice::CustomCli(stub.display().to_string());
+    cfg.llm.strategy = "llm".to_string();
     let previous = enable_live();
     let result = tailor_one(root.path(), &cfg, &listing_id).await;
     restore_live(previous);

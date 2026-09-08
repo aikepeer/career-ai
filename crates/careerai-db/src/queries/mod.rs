@@ -22,10 +22,23 @@ pub mod analytics;
 pub mod applications;
 pub mod applications_sync;
 pub mod artifacts;
+pub mod command_log;
+pub mod content_library;
+pub mod employer_outcomes;
 pub mod events;
+pub mod followups;
+pub mod interview_feedback;
 pub mod linkedin;
 pub mod listings;
+pub mod market_pulse;
+pub mod patterns;
 pub mod payloads;
+pub mod quality;
+pub mod salary;
+pub mod similarity;
+pub mod submission_attempts;
+pub mod timing;
+pub mod variants;
 
 pub use analytics::{
     query_intelligence_records, query_source_performance, ApplicationIntelligenceRecord,
@@ -39,15 +52,54 @@ pub use applications_sync::{
     list_applications_by_state_and_source, transition_application_and_listing,
 };
 pub use artifacts::{all_artifact_paths, attach_artifact, list_artifacts};
+pub use command_log::{list_recent_commands, log_command, CommandLogEntry};
+pub use content_library::{
+    fetch_bullets_for_domain, fetch_cover_letter_for_domain, library_stats, store_bullet,
+    store_cover_letter, DomainEntry, LibraryStats,
+};
 pub use events::{
     count_submissions_since, events_for, latest_submission_time, list_recent_events,
     list_stale_submissions, StaleSubmission,
 };
+pub use followups::{
+    create_follow_up, dismiss_follow_up, list_pending_follow_ups,
+    list_pending_follow_ups_with_listing, mark_follow_up_handled, mark_follow_up_sent,
+    snooze_follow_up, update_follow_up_body, FollowUp, FollowUpWithListing,
+};
+pub use interview_feedback::{
+    feedback_for_listing, list_feedback, save_feedback, InterviewFeedback,
+};
 pub use linkedin::{claim_drafted_application, list_drafted_linkedin};
 pub use listings::{
     find_by_external_id, find_by_id, insert_or_ignore, list_by_state, set_score, transition,
+    transition_if,
+};
+pub use market_pulse::{weekly_market_summary, CompanyHiring, MarketPulse, SkillFrequency};
+pub use patterns::{
+    advance_rates, detect_reposts, funnel_velocity, rejection_latencies, AdvanceRate,
+    FunnelVelocity, RejectionLatency, Repost,
 };
 pub use payloads::{find_payload_by_application_id, write_payload};
+pub use quality::{fetch_quality_score, store_quality_score, QualityScoreRow};
+pub use salary::{
+    list_salary_ranges, salary_stats_by_role, store_salary_range, SalaryRange, SalaryStats,
+};
+pub use similarity::{find_similar_tailored, record_similarity_index, SimilarTailoredResult};
+pub use timing::{
+    best_submission_windows, submission_timing_stats, DayOfWeekStats, TimeWindowStats,
+};
+pub use variants::{
+    list_variants_with_outcome, record_variant, update_variant_response, VariantWithOutcome,
+};
+pub use employer_outcomes::{
+    delete_outcome, outcomes_for_application, outcomes_for_listing, list_recent_outcomes,
+    record_outcome, EmployerOutcome, OUTCOME_TYPES,
+};
+pub use submission_attempts::{
+    claim_submission_attempt, fetch_attempt_by_id, latest_attempt_for_application,
+    list_uncertain_attempts, mark_attempt_failed, mark_attempt_submitted, mark_attempt_uncertain,
+    SubmissionAttempt,
+};
 
 #[cfg(test)]
 pub(crate) mod test_support {

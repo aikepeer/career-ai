@@ -46,8 +46,12 @@ pub async fn api_force_shortlist(
             .into_response();
     }
 
-    // Read the current state first so we never move a terminal listing
-    // (submitted/failed/skipped/responded) backwards through the pipeline.
+    // R13: the read-check below is for UX (404 / already-shortlisted /
+    // conflict). The actual state change uses `transition_if` so the
+    // conditional UPDATE + event INSERT are atomic — a concurrent worker
+    // cannot advance the listing between this check and the write. If
+    // `transition_if` returns false the state changed under us; report
+    // conflict rather than silently regressing it.
     let listing = match db_queries::find_by_id(&state.pool, &id).await {
         Ok(l) => l,
         Err(careerai_db::error::DbError::NotFound(_)) => {
@@ -98,17 +102,26 @@ pub async fn api_force_shortlist(
             .into_response();
     }
 
-    match db_queries::transition(
+    match db_queries::transition_if(
         &state.pool,
         &id,
+        &[ListingState::Discovered, ListingState::FilteredOut],
         ListingState::Shortlisted,
         Some("manually shortlisted from dashboard"),
     )
     .await
     {
-        Ok(()) => (
+        Ok(true) => (
             StatusCode::OK,
             Json(serde_json::json!({ "status": "success", "id": id })),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "listing state changed before shortlist; refresh and retry",
+                "id": id,
+            })),
         )
             .into_response(),
         Err(err) => (

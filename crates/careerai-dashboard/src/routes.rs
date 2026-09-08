@@ -1,19 +1,62 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{get, post},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{delete, get, post},
     Router,
 };
 
 use crate::handlers;
 use crate::AppState;
 
+/// Serve the PWA manifest JSON.
+async fn serve_manifest() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("Content-Type", "application/manifest+json")],
+        include_str!("../static/manifest.json"),
+    )
+}
+
+/// Serve the PWA service worker script.
+async fn serve_sw() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("Content-Type", "application/javascript")],
+        include_str!("../static/sw.js"),
+    )
+}
+
 pub fn build(state: Arc<AppState>) -> Router {
     let auth_state = state.clone();
     Router::new()
         .route("/", get(handlers::index))
         .route("/healthz", get(handlers::healthz))
-        .route("/api/v1/snapshot", get(handlers::api_snapshot))
+        .route("/sw-manifest", get(serve_manifest))
+        .route("/sw.js", get(serve_sw))
+        .route(
+            "/static/workspace.js",
+            get(|| async {
+                (
+                    [
+                        ("Content-Type", "application/javascript"),
+                        ("Cache-Control", "no-cache"),
+                    ],
+                    include_str!("../static/workspace.js"),
+                )
+            }),
+        )
+        .route(
+            "/static/workspace.css",
+            get(|| async {
+                (
+                    [("Content-Type", "text/css"), ("Cache-Control", "no-cache")],
+                    include_str!("../static/workspace.css"),
+                )
+            }),
+        )
+        .route("/api/v1/activity", get(crate::activity::api_activity))
         .route("/api/v1/events", get(handlers::api_events))
         .route(
             "/api/v1/config",
@@ -47,26 +90,80 @@ pub fn build(state: Arc<AppState>) -> Router {
             "/api/v1/config/keywords",
             post(crate::profile_handler::api_config_keywords),
         )
-        .route(
-            "/api/v1/pipeline/discover",
-            post(crate::profile_handler::api_pipeline_discover),
-        )
-        .route(
-            "/api/v1/pipeline/match",
-            post(crate::profile_handler::api_pipeline_match),
-        )
         .route("/api/v1/cli/run", post(crate::profile_handler::api_cli_run))
         .route(
             "/api/v1/listings/:id/shortlist",
             post(handlers::api_force_shortlist),
         )
         .route("/api/v1/chat", post(crate::chat::api_chat_agent))
+        // Analytics + content library + LLM costs
+        .route("/api/v1/analytics", get(handlers::api_analytics))
+        .route(
+            "/api/v1/content-library",
+            get(handlers::api_content_library),
+        )
+        .route("/api/v1/llm-costs", get(handlers::api_llm_costs))
+        // New feature endpoints
+        .route(
+            "/api/v1/source-attribution",
+            get(handlers::api_source_attribution),
+        )
+        .route("/api/v1/follow-ups", get(handlers::api_follow_ups))
+        .route("/api/v1/referrals", get(handlers::api_referrals))
+        .route(
+            "/api/v1/follow-ups/check",
+            post(handlers::api_check_follow_ups),
+        )
+        .route("/api/v1/variants", get(handlers::api_variants))
+        // F04: employer-outcome timeline
+        .route("/api/v1/outcomes", post(handlers::api_record_outcome))
+        .route("/api/v1/outcomes", get(handlers::api_list_recent_outcomes))
+        .route("/api/v1/outcomes/types", get(handlers::api_outcome_types))
+        .route(
+            "/api/v1/outcomes/by-listing/:listing_id",
+            get(handlers::api_list_outcomes),
+        )
+        .route(
+            "/api/v1/outcomes/by-id/:id",
+            delete(handlers::api_delete_outcome),
+        )
+        // F05: follow-up inbox lifecycle
+        .route(
+            "/api/v1/follow-ups/:id/snooze",
+            post(handlers::api_snooze_follow_up),
+        )
+        .route(
+            "/api/v1/follow-ups/:id/dismiss",
+            post(handlers::api_dismiss_follow_up),
+        )
+        .route(
+            "/api/v1/follow-ups/:id/handle",
+            post(handlers::api_handle_follow_up),
+        )
+        .route(
+            "/api/v1/follow-ups/:id/body",
+            post(handlers::api_update_follow_up_body),
+        )
+        .route("/api/v1/timing", get(handlers::api_timing))
+        .route("/api/v1/salary-ranges", get(handlers::api_salary_ranges))
+        .route("/api/v1/market-pulse", get(handlers::api_market_pulse))
+        .route(
+            "/api/v1/interview-feedback",
+            get(handlers::api_interview_feedback).post(handlers::api_save_interview_feedback),
+        )
         // Threshold management
         .route("/api/config/threshold", post(handlers::api_save_threshold))
         .route(
             "/api/match/rematch-shortlisted",
             post(handlers::api_rematch_shortlisted),
         )
+        // Snapshot + pipeline wrappers
+        .route("/api/v1/snapshot", get(handlers::api_snapshot))
+        .route(
+            "/api/v1/pipeline/discover",
+            post(handlers::api_pipeline_discover),
+        )
+        .route("/api/v1/pipeline/match", post(handlers::api_pipeline_match))
         .layer(axum::middleware::from_fn(
             crate::security::enforce_same_origin,
         ))

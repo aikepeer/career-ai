@@ -136,6 +136,56 @@ pub async fn transition(
     tx.commit().await?;
     Ok(())
 }
+/// Atomically transition a listing's state only if its current state is
+/// one of `expected`. Returns `Ok(true)` if the transition happened,
+/// `Ok(false)` if the current state did not match (no rows affected),
+/// or an error on database failure.
+///
+/// R13: this closes the TOCTOU window between a dashboard read-check and
+/// a separate `transition` call — the conditional UPDATE and event INSERT
+/// run in one transaction, so a concurrent worker cannot advance the
+/// listing between the check and the write.
+pub async fn transition_if(
+    pool: &SqlitePool,
+    id: &str,
+    expected: &[ListingState],
+    to: ListingState,
+    note: Option<&str>,
+) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    let prev: Option<(String,)> = sqlx::query_as("SELECT state FROM listings WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let from = match prev {
+        Some((s,)) => s,
+        None => {
+            tx.rollback().await.ok();
+            return Err(DbError::NotFound(id.to_string()));
+        }
+    };
+    if !expected.iter().any(|e| e.as_str() == from) {
+        tx.rollback().await.ok();
+        return Ok(false);
+    }
+    let now = Utc::now();
+    sqlx::query("UPDATE listings SET state = ?, updated_at = ? WHERE id = ? AND state = ?")
+        .bind(to.as_str())
+        .bind(now)
+        .bind(id)
+        .bind(&from)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("INSERT INTO events (listing_id, from_state, to_state, note) VALUES (?, ?, ?, ?)")
+        .bind(id)
+        .bind(&from)
+        .bind(to.as_str())
+        .bind(note)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(true)
+}
 
 pub async fn set_score(pool: &SqlitePool, id: &str, score: f64) -> Result<()> {
     let res = sqlx::query("UPDATE listings SET score = ?, updated_at = ? WHERE id = ?")

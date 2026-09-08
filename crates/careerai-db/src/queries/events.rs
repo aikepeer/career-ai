@@ -12,19 +12,19 @@ use crate::models::Event;
 pub async fn events_for(pool: &SqlitePool, listing_id: &str) -> Result<Vec<Event>> {
     let rows = sqlx::query_as(
         "SELECT id, listing_id, from_state, to_state, note, created_at
-         FROM events WHERE listing_id = ? ORDER BY created_at ASC",
+         FROM events WHERE listing_id = ?
+         ORDER BY created_at ASC, id ASC",
     )
     .bind(listing_id)
     .fetch_all(pool)
     .await?;
     Ok(rows)
 }
-
 /// Fetch recent audit events ordered by created_at DESC with limit and offset.
 pub async fn list_recent_events(pool: &SqlitePool, limit: u32, offset: u32) -> Result<Vec<Event>> {
     let rows = sqlx::query_as(
         "SELECT id, listing_id, from_state, to_state, note, created_at
-         FROM events ORDER BY created_at DESC LIMIT ? OFFSET ?",
+         FROM events ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
     )
     .bind(i64::from(limit))
     .bind(i64::from(offset))

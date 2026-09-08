@@ -44,8 +44,25 @@ pub async fn rollback_one_with_pool(
     };
 
     let from_state = listing.state.clone();
+    // R08: reject forward target states. Rollback must only move
+    // backward through the pipeline — a target of `submitted`,
+    // `prepared`, `rendered`, or `tailored` from a `shortlisted` or
+    // `discovered` listing would advance the listing, not roll it back.
     let to_state = match target {
-        Some(t) => t.to_string(),
+        Some(t) => {
+            let parsed: ListingState = t
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid target state '{t}': {e}"))?;
+            let from_parsed: ListingState = from_state
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid current state '{from_state}': {e}"))?;
+            if !is_backward_transition(&from_parsed, &parsed) {
+                anyhow::bail!(
+                    "rollback target '{t}' is not backward from state '{from_state}'"
+                );
+            }
+            t.to_string()
+        }
         None => match from_state.as_str() {
             "submitted" | "prepared" | "rendered" => "tailored".to_string(),
             "tailored" => "shortlisted".to_string(),
@@ -62,6 +79,28 @@ pub async fn rollback_one_with_pool(
             // Wrap deletes + transition in a single transaction so a failed
             // DELETE cannot leave orphaned rows while the state advances.
             let mut tx = pool.begin().await.context("begin rollback transaction")?;
+
+            // R08: delete dependent rows before the application row to
+            // satisfy FK constraints. The submission_attempts table has
+            // ON DELETE CASCADE, but follow_ups, application_variants, and
+            // interview_feedback do not — deleting the application first
+            // would raise an FK violation.
+            sqlx::query("DELETE FROM follow_ups WHERE application_id = ?")
+                .bind(&app.id)
+                .execute(&mut *tx)
+                .await
+                .context("delete follow_ups on rollback")?;
+            sqlx::query("DELETE FROM application_variants WHERE application_id = ?")
+                .bind(&app.id)
+                .execute(&mut *tx)
+                .await
+                .context("delete application_variants on rollback")?;
+            sqlx::query("DELETE FROM interview_feedback WHERE application_id = ?")
+                .bind(&app.id)
+                .execute(&mut *tx)
+                .await
+                .context("delete interview_feedback on rollback")?;
+
             sqlx::query("DELETE FROM artifacts WHERE application_id = ?")
                 .bind(&app.id)
                 .execute(&mut *tx)
@@ -149,6 +188,33 @@ pub async fn rollback_all(
         }
     }
     Ok(outcomes)
+}
+/// R08: returns true if `to` is a backward (or same-level) transition
+/// from `from`. The pipeline order is:
+///   discovered → shortlisted → tailored → rendered → prepared → submitted → responded
+/// Backward means `to` appears at or before `from` in this sequence.
+/// `failed` and `skipped` are terminal side-states; rolling back from
+/// them to any main-line state is allowed.
+fn is_backward_transition(from: &ListingState, to: &ListingState) -> bool {
+    let rank = |s: &ListingState| -> usize {
+        match s {
+            ListingState::Discovered | ListingState::FilteredOut => 0,
+            ListingState::Shortlisted => 1,
+            ListingState::Tailored => 2,
+            ListingState::Rendered | ListingState::Drafted => 3,
+            ListingState::Prepared => 4,
+            ListingState::Submitted => 5,
+            ListingState::Responded => 6,
+            ListingState::Failed | ListingState::Skipped => 7,
+        }
+    };
+    // If from is a terminal state, any non-terminal target is backward.
+    let from_rank = rank(from);
+    let to_rank = rank(to);
+    if from_rank == 7 {
+        return to_rank < 7;
+    }
+    to_rank <= from_rank
 }
 
 #[cfg(test)]

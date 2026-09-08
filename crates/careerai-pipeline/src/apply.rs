@@ -86,6 +86,19 @@ pub async fn apply_one(
     // case-insensitively here so a "LinkedIn" or "LINKEDIN" row doesn't
     // silently bypass the assist-mode short-circuit.
     if listing.source.eq_ignore_ascii_case("linkedin") && cfg.submit.linkedin.interactive_only {
+        // R03: validate the application is in a state eligible for
+        // drafting (rendered or prepared) before transitioning. Without
+        // this guard, a re-entrant call (e.g. daemon tick while a prior
+        // apply is still settling, or a manual retry on an already-
+        // drafted row) would silently regress a submitted or failed
+        // application back to drafted.
+        if !matches!(application.state.as_str(), "rendered" | "prepared") {
+            anyhow::bail!(
+                "application {} is in state '{}'; cannot transition to drafted (expected 'rendered' or 'prepared')",
+                application.id,
+                application.state
+            );
+        }
         queries::transition_application_and_listing(
             &pool,
             &application.id,
@@ -107,7 +120,7 @@ pub async fn apply_one(
 
     let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
     let outcome =
-        careerai_submit::submit_application(&pool, &submit_cfg, &cfg.rates, root, application_id)
+        careerai_submit::submit_application(&pool, &submit_cfg, &cfg.rates, root, &application.id)
             .await
             .context("submit_application")?;
 
@@ -225,11 +238,23 @@ pub async fn retry_application(
 
 async fn pre_submit_state(pool: &careerai_db::SqlitePool, listing_id: &str) -> Result<String> {
     let events = queries::events_for(pool, listing_id).await?;
+    // R04: find the most recent `failed` event and return its from_state.
+    // If no failed event exists (e.g. manual failure marking), fall back
+    // to the most recent `prepared` event, then to `rendered`. A `prepared`
+    // application that was manually failed would otherwise regress to
+    // `rendered` on retry, losing its prepared artifacts.
     let pre_submit = events
         .iter()
         .rev()
         .find(|event| event.to_state == "failed")
         .and_then(|event| event.from_state.clone())
+        .or_else(|| {
+            events
+                .iter()
+                .rev()
+                .find(|event| event.to_state == "prepared")
+                .map(|event| event.to_state.clone())
+        })
         .unwrap_or_else(|| ListingState::Rendered.as_str().to_string());
     Ok(pre_submit)
 }

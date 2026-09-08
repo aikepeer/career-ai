@@ -33,6 +33,46 @@ fn shared_rate_limiter() -> std::sync::Arc<RateLimiter> {
         .clone()
 }
 
+/// Result of dispatching a submitter from the source name.
+enum Dispatch {
+    Ready(Box<dyn Submitter>),
+    Skip(&'static str),
+    Unknown(String),
+}
+
+/// Build the per-source `Submitter` from the lowercased source name.
+/// Browser-based submitters (LinkedIn, Naukri) are gated behind the
+/// `browser` feature.
+fn dispatch_submitter(source_lc: &str, cfg: &SubmitConfig) -> Dispatch {
+    match source_lc {
+        "greenhouse" => Dispatch::Ready(Box::new(GreenhouseSubmitter::new())),
+        "lever" => Dispatch::Ready(Box::new(LeverSubmitter::new())),
+        "ashby" => Dispatch::Ready(Box::new(AshbySubmitter::new())),
+        "teamtailor" => Dispatch::Ready(Box::new(TeamtailorSubmitter::new())),
+        "smartrecruiters" => Dispatch::Ready(Box::new(SmartRecruitersSubmitter::new())),
+        #[cfg(feature = "browser")]
+        "linkedin" => Dispatch::Ready(Box::new(crate::linkedin::LinkedinSubmitter::new(
+            crate::linkedin::LinkedinConfig::from_core(cfg),
+            shared_rate_limiter(),
+        ))),
+        #[cfg(not(feature = "browser"))]
+        "linkedin" => Dispatch::Skip(
+            "linkedin requires --features browser; rebuild with `cargo build -p careerai-cli --features browser`",
+        ),
+        #[cfg(feature = "browser")]
+        "naukri" => Dispatch::Ready(Box::new(crate::naukri::NaukriSubmitter::new(
+            crate::naukri::NaukriConfig::from_core(cfg),
+            shared_rate_limiter(),
+        ))),
+        #[cfg(not(feature = "browser"))]
+        "naukri" => Dispatch::Skip(
+            "naukri requires --features browser; rebuild with `cargo build -p careerai-cli --features browser`",
+        ),
+        "remotive" | "remoteok" => Dispatch::Skip("feed-only source (no HTTP submitter available)"),
+        other => Dispatch::Unknown(other.to_owned()),
+    }
+}
+
 /// Submit a prepared application. Routes to the correct per-source
 /// `Submitter` based on the listing's `source` column. Honors dry-run
 /// and per-source `enabled` flags.
@@ -43,7 +83,20 @@ pub async fn submit_application(
     root: &Path,
     application_id: &str,
 ) -> Result<SubmitOutcome> {
-    let application = queries::find_application_by_id(pool, application_id).await?;
+    let application = match queries::find_application_by_id(pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            match queries::find_latest_application_for_listing(pool, application_id).await {
+                Ok(Some(a)) => a,
+                _ => {
+                    return Err(SubmitError::Db(careerai_db::DbError::NotFound(format!(
+                        "application not found: {application_id}"
+                    ))))
+                }
+            }
+        }
+        Err(e) => return Err(SubmitError::Db(e)),
+    };
     let state_str = application.state.as_str();
     if state_str != ListingState::Rendered.as_str()
         && state_str != ListingState::Prepared.as_str()
@@ -79,52 +132,12 @@ pub async fn submit_application(
         return mark_skipped(pool, &application, &listing, "source disabled").await;
     }
 
-    let submitter: Box<dyn Submitter> = match source_lc.as_str() {
-        "greenhouse" => Box::new(GreenhouseSubmitter::new()),
-        "lever" => Box::new(LeverSubmitter::new()),
-        "ashby" => Box::new(AshbySubmitter::new()),
-        "teamtailor" => Box::new(TeamtailorSubmitter::new()),
-        "smartrecruiters" => Box::new(SmartRecruitersSubmitter::new()),
-        #[cfg(feature = "browser")]
-        "linkedin" => Box::new(crate::linkedin::LinkedinSubmitter::new(
-            crate::linkedin::LinkedinConfig::from_core(cfg),
-            shared_rate_limiter(),
-        )),
-        #[cfg(not(feature = "browser"))]
-        "linkedin" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "linkedin requires --features browser; rebuild with `cargo build -p careerai-cli --features browser`",
-            )
-            .await;
+    let submitter: Box<dyn Submitter> = match dispatch_submitter(&source_lc, cfg) {
+        Dispatch::Ready(s) => s,
+        Dispatch::Skip(reason) => {
+            return mark_skipped(pool, &application, &listing, reason).await;
         }
-        #[cfg(feature = "browser")]
-        "naukri" => Box::new(crate::naukri::NaukriSubmitter::new(
-            crate::naukri::NaukriConfig::from_core(cfg),
-            shared_rate_limiter(),
-        )),
-        #[cfg(not(feature = "browser"))]
-        "naukri" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "naukri requires --features browser; rebuild with `cargo build -p careerai-cli --features browser`",
-            )
-            .await;
-        }
-        "remotive" | "remoteok" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "feed-only source (no HTTP submitter available)",
-            )
-            .await;
-        }
-        other => return Err(SubmitError::UnknownSource(other.to_owned())),
+        Dispatch::Unknown(other) => return Err(SubmitError::UnknownSource(other)),
     };
 
     let decision = if cfg.auto_submit {
@@ -259,6 +272,14 @@ async fn run_live(
     submitter: &dyn Submitter,
     ctx: &SubmitContext<'_>,
 ) -> Result<SubmitOutcome> {
+    // R01: claim a submission attempt row before any network I/O. This
+    // gives us a durable record of the attempt even if the process
+    // crashes mid-submit, and prevents concurrent workers from
+    // double-submitting.
+    let attempt = queries::claim_submission_attempt(pool, &ctx.application.id, None)
+        .await
+        .map_err(SubmitError::from)?;
+
     match submitter.submit(ctx).await {
         Ok(remote_id) => {
             info!(
@@ -266,8 +287,31 @@ async fn run_live(
                 source = submitter.name(),
                 application_id = %ctx.application.id,
                 remote_id = %remote_id,
+                attempt_id = attempt.id,
                 "submitted"
             );
+
+            // R01: record the successful outcome on the attempt row
+            // before transitioning state. If this fails we still proceed
+            // — the state transition is the source of truth for
+            // pipeline flow, the attempt row is for audit/recovery.
+            if let Err(e) = queries::mark_attempt_submitted(
+                pool,
+                attempt.id,
+                Some(&remote_id),
+                None,
+            )
+            .await
+            {
+                warn!(
+                    target: "submit",
+                    application_id = %ctx.application.id,
+                    attempt_id = attempt.id,
+                    error = %e,
+                    "mark_attempt_submitted failed (non-blocking)",
+                );
+            }
+
             queries::transition_application_and_listing(
                 pool,
                 &ctx.application.id,
@@ -277,6 +321,38 @@ async fn run_live(
                 Some(&format!("submitted via {}", submitter.name())),
             )
             .await?;
+
+            // Record A/B variant for this submission. The variant label
+            // is derived deterministically from the application ID so the
+            // same application always gets the same label.
+            let variant_label = if ctx.application.id.bytes().fold(0u8, u8::wrapping_add) % 2 == 0 {
+                "A"
+            } else {
+                "B"
+            };
+            let metadata = serde_json::json!({
+                "source": submitter.name(),
+                "listing_id": &ctx.listing.id,
+                "attempt_id": attempt.id,
+            })
+            .to_string();
+            if let Err(e) = queries::record_variant(
+                pool,
+                &ctx.application.id,
+                variant_label,
+                Some(&metadata),
+                Some(&ctx.application.profile_hash),
+            )
+            .await
+            {
+                warn!(
+                    target: "submit",
+                    application_id = %ctx.application.id,
+                    error = %e,
+                    "record_variant failed (non-blocking)",
+                );
+            }
+
             Ok(SubmitOutcome::Submitted { remote_id })
         }
         Err(err) => {
@@ -284,9 +360,39 @@ async fn run_live(
                 target: "submit",
                 source = submitter.name(),
                 application_id = %ctx.application.id,
+                attempt_id = attempt.id,
                 error = %err,
                 "submission failed"
             );
+
+            // R01: classify the failure. Network/timeout errors after the
+            // request was sent are "uncertain" — the remote may have
+            // received it. Structural/policy errors are "failed".
+            let is_uncertain = is_uncertain_error(&err);
+            if is_uncertain {
+                if let Err(e) = queries::mark_attempt_uncertain(pool, attempt.id, &err.to_string())
+                    .await
+                {
+                    warn!(
+                        target: "submit",
+                        application_id = %ctx.application.id,
+                        attempt_id = attempt.id,
+                        error = %e,
+                        "mark_attempt_uncertain failed (non-blocking)",
+                    );
+                }
+            } else if let Err(e) =
+                queries::mark_attempt_failed(pool, attempt.id, &err.to_string()).await
+            {
+                warn!(
+                    target: "submit",
+                    application_id = %ctx.application.id,
+                    attempt_id = attempt.id,
+                    error = %e,
+                    "mark_attempt_failed failed (non-blocking)",
+                );
+            }
+
             let note = format!("failed: {err}");
             if let Err(transition_err) = queries::transition_application_and_listing(
                 pool,
@@ -307,6 +413,17 @@ async fn run_live(
             }
             Err(err)
         }
+    }
+}
+
+/// R01: classify whether a submit error means the remote may have
+/// received the request despite the error. HTTP status errors and
+/// structural/policy errors are definitive failures. Network/timeout
+/// errors are uncertain — the request may have reached the server.
+fn is_uncertain_error(err: &SubmitError) -> bool {
+    match err {
+        SubmitError::Http(e) => e.is_timeout() || e.is_connect(),
+        _ => false,
     }
 }
 

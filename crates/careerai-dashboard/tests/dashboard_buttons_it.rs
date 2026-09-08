@@ -648,9 +648,10 @@ async fn explorer_endpoint_returns_json_array() {
     }
 
     let body = curl_get(&format!("http://127.0.0.1:{port}/api/v1/explorer")).await;
+    // R17: explorer returns { items, total, limit, offset } for pagination
     assert!(
-        body.starts_with('['),
-        "explorer must return a JSON array: {body:.200}"
+        body.contains("\"items\""),
+        "explorer must return items field: {body:.200}"
     );
     assert!(
         body.contains("Senior Rust Engineer"),

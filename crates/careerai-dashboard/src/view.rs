@@ -74,6 +74,7 @@ pub struct StateCounts {
     pub tailored: u64,
     pub rendered: u64,
     pub drafted: u64,
+    pub total_tailored: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -83,6 +84,8 @@ pub struct EventLogItem {
     pub from_state: Option<String>,
     pub to_state: String,
     pub note: Option<String>,
+    pub summary: String,
+    pub raw_payload: Option<String>,
     pub timestamp: DateTime<Utc>,
     pub relative_time: String,
     pub severity: String,
@@ -226,6 +229,8 @@ pub struct DiscoveredExplorerItem {
     pub url: String,
     pub application_id: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
+    pub legitimacy: String,
+    pub eligibility: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -240,4 +245,107 @@ pub struct IndexView {
     pub config: ConfigView,
     pub action_items: Vec<ActionItem>,
     pub discovered_explorer: Vec<DiscoveredExplorerItem>,
+    /// Total listing count (cheap COUNT) for the badge. The actual rows
+    /// load lazily via `/api/v1/explorer` after the page renders.
+    pub explorer_total: u64,
+    /// True when the explorer rows were NOT included in the initial SSR
+    /// render (lazy-load mode). The template shows a loading placeholder.
+    pub explorer_lazy: bool,
+    /// LLM cost + token savings summary (from costs.jsonl).
+    pub llm_cost: LlmCostSummary,
+    /// Content library stats (cover letters + bullets indexed by domain).
+    pub content_library: ContentLibraryView,
+}
+
+/// Aggregate LLM cost + token-savings summary, read from the JSONL
+/// cost log. Populated server-side so the KPI strip renders immediately.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LlmCostSummary {
+    pub total_cost_usd: f64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub call_count: u64,
+    pub model: String,
+    /// Estimated savings from cache hits + similarity/content-library reuse
+    /// (calls that did NOT go to the provider). Each avoided call is
+    /// valued at the average cost per live call.
+    pub estimated_savings_usd: f64,
+}
+
+/// Content library stats for the dashboard: how many cover letters and
+/// bullets are indexed, broken down by domain + role.
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+pub struct ContentLibraryView {
+    pub bullet_count: u64,
+    pub cover_letter_count: u64,
+    pub domains: Vec<ContentDomainEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ContentDomainEntry {
+    pub domain: String,
+    pub role: String,
+    pub bullets: u64,
+    pub cover_letters: u64,
+}
+
+// ---- Feature view structs ----
+
+/// Source attribution: per-source ranking by response rate.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SourceAttributionView {
+    pub source: String,
+    pub discovered: i64,
+    pub submitted: i64,
+    pub responded: i64,
+    pub response_rate: f64,
+}
+
+/// Skill gap heatmap entry.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SkillGapViewEntry {
+    pub skill: String,
+    pub frequency: usize,
+    pub percentage: f32,
+    pub category: String,
+}
+
+/// Application quality score display.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct QualityScoreView {
+    pub overall: f32,
+    pub jd_relevance: f32,
+    pub skill_coverage: f32,
+    pub cover_letter_depth: f32,
+    pub bullet_density: f32,
+    pub recommendations: Vec<String>,
+}
+
+/// Follow-up summary for the dashboard.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FollowUpView {
+    pub id: i64,
+    pub application_id: String,
+    pub listing_id: String,
+    pub company: String,
+    pub title: String,
+    pub status: String,
+    pub scheduled_at: String,
+    /// R18: full body, not a truncated preview. The client decides how
+    /// much to display; the full draft is needed for editing.
+    pub body: String,
+    /// R18: cadence step (1 = first reminder, 2 = second, etc.).
+    #[serde(default)]
+    pub cadence_step: i64,
+}
+
+/// Referral opportunity.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ReferralView {
+    pub listing_id: String,
+    pub company: String,
+    pub title: String,
+    pub url: String,
+    pub connection_source: String,
 }

@@ -3,12 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0a0f1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CareerAI">
+<link rel="manifest" href="/sw-manifest">
 <title>career-ai · Dashboard</title>
 <style>{{ css | safe }}</style>
+<link rel="stylesheet" href="/static/workspace.css">
+<script src="/static/workspace.js" defer></script>
 <script>
 (function() {
-  var theme = localStorage.getItem('careerai-theme');
-  if (theme) { document.documentElement.setAttribute('data-theme', theme); }
+  var theme = 'light';
+  try { theme = localStorage.getItem('careerai-theme') || 'light'; } catch(e) {}
+  document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
   window._toggleTheme = function() {
     var cur = document.documentElement.getAttribute('data-theme');
     if (!cur) {
@@ -16,19 +24,16 @@
     }
     var next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('careerai-theme', next);
+    try { localStorage.setItem('careerai-theme', next); } catch(e) {}
   };
 })();
 </script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to workspace</a>
 
-<!-- Loading screen overlay -->
-<div class="loader-overlay" id="loader-overlay">
-  <div class="loader-logo">career-ai</div>
-  <div class="loader-bar"><div class="loader-bar-fill" id="loader-bar-fill"></div></div>
-  <div class="loader-pct" id="loader-pct">0%</div>
-</div>
+<!-- Instant Top Loading Indicator -->
+<div class="top-load-bar" id="top-load-bar"><div class="top-load-fill" id="top-load-fill"></div></div>
 
 <!-- Scroll progress bar -->
 <div class="scroll-progress" id="scroll-progress"></div>
@@ -42,47 +47,70 @@
   <div class="brand-container">
     <div class="brand-glow"></div>
     <span class="brand">career-ai</span>
-    <span class="brand-sub">MVP Dashboard</span>
+    <span class="brand-sub">CAREER WORKSPACE</span>
   </div>
 
-  <nav class="tab-nav">
+  <nav class="tab-nav" aria-label="Workspace navigation">
     <button class="nav-btn active" id="tab-btn-funnel" onclick="switchTab('funnel')">
-      <span class="nav-icon">⌁</span> Mission Control
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span> Mission Control
     </button>
     <button class="nav-btn" id="tab-btn-events" onclick="switchTab('events')">
-      <span class="nav-icon">⚡</span> Audit Events
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span> Audit Events
       {% if view.recent_events | length > 0 %}
       <span class="tab-badge">{{ view.recent_events | length }}</span>
       {% endif %}
     </button>
     <button class="nav-btn" id="tab-btn-config" onclick="switchTab('config')">
-      <span class="nav-icon">⚙️</span> Config & Sources
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></span> Config & Sources
     </button>
     <button class="nav-btn" id="tab-btn-actions" onclick="switchTab('actions')">
-      <span class="nav-icon">🎯</span> Action Center
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M9 6V3h6v3M8 13l3 3 5-6"/></svg></span> Action Center
       {% if view.action_items | length > 0 %}
       <span class="tab-badge badge-accent">{{ view.action_items | length }}</span>
       {% endif %}
     </button>
     <button class="nav-btn" id="tab-btn-explorer" onclick="switchTab('explorer')">
-      <span class="nav-icon">🔍</span> Discovered Explorer
-      {% if view.discovered_explorer | length > 0 %}
-      <span class="tab-badge">{{ view.discovered_explorer | length }}</span>
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></span> Discovered Explorer
+      {% if view.explorer_total > 0 %}
+      <span class="tab-badge" id="explorer-badge">{{ view.explorer_total }}</span>
       {% endif %}
     </button>
     <button class="nav-btn" id="tab-btn-commands" onclick="switchTab('commands')">
-      <span class="nav-icon">⌨️</span> CLI Commands
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="m6 8 4 4-4 4m7 0h5"/></svg></span> CLI Commands
     </button>
-    <button class="nav-btn" id="tab-btn-canvas" onclick="switchTab('canvas')">
-      <span class="nav-icon">✦</span> Spatial Journey
+    <button class="nav-btn" id="tab-btn-analytics" onclick="switchTab('analytics')">
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h17M7 16v-5M12 16V5M17 16V8"/></svg></span> Analytics
+    </button>
+    <button class="nav-btn" id="tab-btn-bounties" onclick="switchTab('bounties')">
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8v6a4 4 0 0 1-8 0ZM8 5H4v3a4 4 0 0 0 4 4m8-7h4v3a4 4 0 0 1-4 4m-4 1v6m-4 2h8"/></svg></span> Bounty Board
     </button>
     <button class="nav-btn" id="tab-btn-chat" onclick="switchTab('chat')">
-      <span class="nav-icon">🤖</span> AI Assistant
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 1-8 8H4l1-5a8 8 0 1 1 15-3Z"/><path d="M8 10h8M8 14h5"/></svg></span> AI Assistant
       <span class="tab-badge badge-accent">AI</span>
     </button>
   </nav>
 
   <div class="header-right">
+    <!-- Notification Bell & Activity Center -->
+    <div class="notification-wrapper" id="notification-wrapper">
+      <button class="notification-bell-btn" id="notification-bell-btn" onclick="toggleNotificationDrawer()" title="Activity & Notifications" aria-label="Notifications">
+        <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <span class="notification-badge" id="notification-badge" style="display:none;">0</span>
+      </button>
+      <div class="notification-drawer" id="notification-drawer" style="display:none;">
+        <div class="notification-drawer-header">
+          <span>Command & Task Activity</span>
+          <button class="notification-clear-btn" onclick="clearNotifications()">Clear</button>
+        </div>
+        <div class="notification-drawer-list" id="notification-drawer-list">
+          <div class="notification-empty">No recent command activity</div>
+        </div>
+      </div>
+    </div>
+
     <div class="timer-pill" title="Auto-refresh countdown">
       <span class="timer-dot"></span>
       <span id="countdown-text">{{ refresh_seconds }}s</span>
@@ -97,214 +125,113 @@
   </div>
 </header>
 
-<main class="main-content">
+<!-- Floating Task Progress Toasts (Top Right) -->
+<div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+<main class="main-content" id="main-content" tabindex="-1">
+  <div class="workspace-topbar"><div class="workspace-breadcrumb"><span>Workspace</span><span aria-hidden="true">/</span><strong id="workspace-current-page">Mission Control</strong></div><div class="workspace-top-actions"><time class="workspace-date" id="workspace-date"></time><button id="command-trigger" class="command-trigger" aria-haspopup="dialog" aria-controls="command-palette"><span>Jump to…</span> <kbd>⌘ / Ctrl K</kbd></button></div></div>
+  <p id="workspace-status" class="workspace-status" role="status" aria-live="polite"></p>
   <!-- TAB 1: PIPELINE & FUNNEL -->
   <div id="tab-funnel" class="tab-panel active">
-    <section class="mission-hero" aria-labelledby="mission-title">
-      <div class="mission-grid-overlay" aria-hidden="true"></div>
-      <div class="mission-copy">
-        <div class="mission-eyebrow"><span class="live-beacon"></span> Career operating system · live</div>
-        <h1 id="mission-title">Your next role is already <span>in motion.</span></h1>
-        {% if view.config.profile %}
-        <p class="mission-lede">CareerAI turns {{ view.config.profile.name }}’s experience into a continuously improving search, tailored résumé, and interview-ready pipeline.</p>
-        <div class="candidate-signals" aria-label="Candidate profile signals">
-          <span>{{ view.config.profile.experience_count }} career chapters</span>
-          <span>{{ view.config.profile.skill_count }} indexed skills</span>
-          <span>{{ view.config.profile.target_roles | length }} target roles</span>
-        </div>
+    <div class="workspace-welcome">
+      <div>
+        <span class="workspace-eyebrow">A little focus. A big next chapter.</span>
+        <h1 id="mission-title">Your next move starts here.</h1>
+        <p>{% if view.config.profile %}Welcome back, {{ view.config.profile.name }}. {% endif %}Find the right opportunities. Make every application count.</p>
+      </div>
+      <span class="workspace-local">Your personal workspace</span>
+    </div>
+    <section class="workspace-hero" aria-labelledby="mission-title">
+      <div class="focus-hero">
+        <span class="workspace-eyebrow">Your daily focus</span>
+        {% if not view.config.profile %}
+        <h2>A better search<br>starts with your story.</h2>
+        <p>Add your experience and the roles you want. Your profile gives every match a meaningful starting point.</p>
+        <div class="focus-actions"><button class="focus-primary" onclick="openProfileSetup()">Set up your profile <span aria-hidden="true">↗</span></button><button class="focus-secondary" onclick="switchTab('explorer')">Explore jobs →</button></div>
+        {% elif view.state_counts.rendered > 0 or view.state_counts.drafted > 0 %}
+        <h2>Your preparation<br>is ready to pay off.</h2>
+        <p>You have {{ view.state_counts.rendered }} rendered applications and {{ view.state_counts.drafted }} drafts. Review your work and choose the next step.</p>
+        <div class="focus-actions"><button class="focus-primary" onclick="switchTab('actions')">Review applications <span aria-hidden="true">↗</span></button><button class="focus-secondary" onclick="switchTab('explorer')">Explore jobs →</button></div>
+        {% elif view.kpi.shortlisted_active > 0 %}
+        <h2>Great matches.<br>Thoughtful next steps.</h2>
+        <p>{{ view.kpi.shortlisted_active }} shortlisted opportunities are waiting. Start with the roles that feel like a real step forward.</p>
+        <div class="focus-actions"><button class="focus-primary" onclick="switchTab('actions')">Review your shortlist <span aria-hidden="true">↗</span></button><button class="focus-secondary" onclick="switchTab('explorer')">Explore jobs →</button></div>
         {% else %}
-        <p class="mission-lede">Build your career story once. CareerAI discovers, matches, tailors, renders, and tracks every opportunity from one living profile.</p>
-        <div class="candidate-signals" aria-label="Candidate setup status">
-          <span>Profile waiting</span><span>Local-first</span><span>Human controlled</span>
-        </div>
+        <h2>Make room for<br>your next opportunity.</h2>
+        <p>Your profile is ready. Explore discovered roles, refine your search, and build a shortlist worth your time.</p>
+        <div class="focus-actions"><button class="focus-primary" onclick="switchTab('explorer')">Find your next role <span aria-hidden="true">↗</span></button><button class="focus-secondary" onclick="switchTab('config')">Tune your search →</button></div>
         {% endif %}
-        <div class="mission-actions">
-          <button type="button" class="mission-primary" onclick="runCliCommand('run', {}, this)">
-            <span class="mission-primary-icon">↗</span>
-            <span><strong>Engage autopilot</strong><small>Run the full pipeline safely</small></span>
-          </button>
-          <button type="button" class="mission-secondary" onclick="switchTab('explorer')">Explore opportunities <span>→</span></button>
-        </div>
-        <div class="mission-safety"><span>✓</span> Dry-run by default · your approval stays in the loop</div>
+        <small class="focus-footnote">Thoughtful applications · dry-run by default · you stay in control</small>
+        <svg class="focus-hero-art" viewBox="0 0 240 240" aria-hidden="true"><circle cx="140" cy="120" r="95"/><circle cx="140" cy="120" r="70"/><circle cx="140" cy="120" r="44"/><path d="M30 195 C 90 195, 75 100, 125 114 S 166 65, 212 43"/><circle class="path-point" cx="125" cy="114" r="7"/><circle class="path-point" cx="212" cy="43" r="9"/></svg>
       </div>
-
-      <div class="orbit-console" aria-label="Live pipeline orbit visualization">
-        <div class="orbit orbit-outer"></div>
-        <div class="orbit orbit-middle"></div>
-        <div class="orbit orbit-inner"></div>
-        <div class="orbit-scan"></div>
-        <div class="orbit-node node-discover"><i></i><span>Discover</span><b>{{ view.kpi.today_discovered }}</b></div>
-        <div class="orbit-node node-match"><i></i><span>Match</span><b>{{ view.state_counts.shortlisted }}</b></div>
-        <div class="orbit-node node-tailor"><i></i><span>Tailor</span><b>{{ view.state_counts.tailored }}</b></div>
-        <div class="orbit-node node-offer"><i></i><span>Apply</span><b>{{ view.kpi.applied_lifetime }}</b></div>
-        <div class="orbit-core">
-          <span class="orbit-core-label">CAREER</span>
-          <strong>AI</strong>
-          <small>autonomy core</small>
-        </div>
-      </div>
-
-      <aside class="mission-brief" aria-label="Current mission status">
-        <div class="brief-topline"><span>Today’s mission</span><b>0{{ guided.current_number }}/07</b></div>
-        {% for step in guided.steps %}
-        {% if step.status == "current" %}
-        <div class="brief-current">
-          <span class="brief-kicker">Now in focus</span>
-          <h2>{{ step.title }}</h2>
-          <p>{{ step.hint }}</p>
-          <button type="button" onclick="switchTab('{{ step.tab }}')">Open step {{ step.number }} <span>↗</span></button>
-        </div>
-        {% endif %}
-        {% endfor %}
-        <div class="brief-progress" aria-label="Step {{ guided.current_number }} of 7">
-          <div class="brief-progress-track"><span class="brief-progress-fill brief-progress-{{ guided.current_number }}"></span></div>
-          <div><span>Profile</span><span>Opportunity</span><span>Offer</span></div>
-        </div>
-        <div class="brief-status-grid">
-          <div><small>Agent</small><strong class="status-live">Active</strong></div>
-          <div><small>Strategy</small><strong>{{ view.config.llm_strategy }}</strong></div>
-        </div>
+      <aside class="weekly-card" aria-labelledby="weekly-title">
+        <div class="card-topline"><h2 id="weekly-title">A week of progress</h2><small>Your pace, your target</small></div>
+        <div class="weekly-value"><span id="weekly-submitted">—</span> <small>/ <span id="weekly-goal-label">10</span> applications</small></div>
+        <progress id="weekly-progress" max="10" value="0" aria-label="Applications submitted toward your weekly target"></progress>
+        <p id="weekly-caption" class="weekly-caption" role="status">Loading this week’s activity…</p>
+        <ol id="activity-chart" class="activity-chart" aria-label="Applications submitted in the last seven days"></ol>
+        <div class="weekly-settings"><span id="activity-status">Actual submissions, including recorded responses</span><label for="weekly-goal">Target <input id="weekly-goal" type="number" min="1" max="100" step="1" value="10" title="Weekly application target, saved in this browser"></label></div>
+        <button id="activity-retry" class="text-button" hidden>Retry activity</button>
       </aside>
     </section>
 
-    <section class="career-story" aria-labelledby="story-title">
-      <div class="story-heading">
-        <div>
-          <span class="story-kicker">One story · three realities</span>
-          <h2 id="story-title">From career history to career velocity.</h2>
-        </div>
-        <p>Every signal in your past becomes leverage for the next move—without the repetitive application grind.</p>
-      </div>
-
-      <div class="story-acts">
-        <article class="story-act act-manual">
-          <div class="act-label"><span>Act 01</span><b>The manual grind</b></div>
-          <h3>Your energy disappears into forms.</h3>
-          <p class="act-intro">The same facts, rewritten for every portal. The same résumé, uploaded again.</p>
-          <div class="paper-stack" aria-hidden="true">
-            <span class="manual-error-toast">Required field missing</span>
-            <span class="manual-rejected-stamp">Rejected</span>
-            <span class="manual-spinner"><i></i> uploading 99%</span>
-            <div class="paper paper-back"><span>FORM 08/19</span></div>
-            <div class="paper paper-mid"><span>WORK HISTORY</span><i></i><i></i><i></i></div>
-            <div class="paper paper-front">
-              <div class="paper-head"><span>APPLICATION</span><b>!</b></div>
-              <i></i><i></i><i class="paper-field-short"></i>
-              <em>UPLOAD RESUME AGAIN</em>
-              <strong>FORMAT ERROR</strong>
-            </div>
-            <span class="manual-cursor">↖</span>
-          </div>
-          <div class="manual-fragment-line" aria-hidden="true">
-            <span class="fragment-done"></span><i></i><span></span><i></i><span class="fragment-error"></span><i></i><span></span>
-          </div>
-          <div class="grind-stats">
-            <span><b>42</b><small>fields / role</small></span>
-            <span><b>∞</b><small>context switches</small></span>
-            <span><b>0</b><small>energy left</small></span>
-          </div>
-        </article>
-
-        <article class="story-act act-career">
-          <div class="act-label"><span>Act 02</span><b>Your career genome</b></div>
-          {% if view.config.profile %}
-          <div class="career-card-head">
-            <div class="career-avatar" aria-hidden="true">◎</div>
-            <div><h3>{{ view.config.profile.name }}</h3><p>{{ view.config.profile.location }}</p></div>
-            <span>LIVE PROFILE</span>
-          </div>
-          <div class="career-workbench">
-            <div class="career-timeline" role="list" aria-label="Career timeline">
-              {% for moment in view.config.profile.career_story %}
-              <button type="button" class="career-moment {% if loop.first %}active{% endif %}" role="listitem" data-era="{{ moment.era }}" data-title="{{ moment.title }}" data-organization="{{ moment.organization }}" data-proof="{{ moment.proof }}" onclick="activateCareerMoment(this)">
-                <span class="moment-node moment-{{ moment.kind }}"></span>
-                <span class="moment-copy">
-                  <small>{{ moment.era }}</small>
-                  <strong>{{ moment.title }}</strong>
-                  <em>{{ moment.organization }}</em>
-                  <span class="moment-proof">{{ moment.proof }}</span>
-                </span>
-              </button>
-              {% endfor %}
-            </div>
-            <aside class="resume-live-preview" aria-label="Resume canvas preview">
-              <div class="resume-preview-head"><span>LIVE RÉSUMÉ</span><i></i></div>
-              <strong id="resume-preview-title">Career signal selected</strong>
-              <small id="resume-preview-org">Building candidate context…</small>
-              <div class="resume-preview-lines" aria-hidden="true"><i></i><i></i><i></i></div>
-              <p id="resume-preview-proof">Select a milestone to render its evidence into the résumé canvas.</p>
-              <div class="skill-unlock"><span>Skill unlocked</span><b id="resume-preview-skill">EXPERIENCE</b></div>
-            </aside>
-          </div>
-          <div class="genome-footer"><span>Résumé signal</span><strong>{{ view.config.profile.skill_count }} skills · {{ view.config.profile.experience_count }} roles · continuously enriched</strong></div>
-          {% else %}
-          <div class="career-empty">
-            <span>+</span><h3>Your story starts here</h3>
-            <p>Import a résumé or LinkedIn archive and CareerAI will turn it into a living, editable timeline.</p>
-            <button type="button" onclick="switchTab('config')">Build my profile →</button>
-          </div>
-          {% endif %}
-        </article>
-
-        <article class="story-act act-autopilot">
-          <div class="act-label"><span>Act 03</span><b>CareerAI autopilot</b></div>
-          <h3>One profile. A system that moves.</h3>
-          <p class="act-intro">Your search becomes an observable pipeline, with a human checkpoint where it matters.</p>
-          <div class="autopilot-engine" aria-hidden="true">
-            <span class="engine-core"><i></i></span>
-            <span class="engine-label">AUTOFILL ENGINE</span>
-            <span class="engine-scan">ATS CLEAR</span>
-          </div>
-          <div class="automation-flow" data-current-step="{{ guided.current_number }}">
-            <span class="pipeline-packet" aria-hidden="true"></span>
-            {% for step in guided.steps %}
-            <button type="button" class="automation-step automation-{{ step.status }}" onclick="switchTab('{{ step.tab }}')">
-              <span class="automation-index">0{{ step.number }}</span>
-              <span class="automation-copy"><strong>{{ step.title }}</strong><small>{{ step.command }}</small></span>
-              <span class="automation-state">{% if step.status == "done" %}✓{% elif step.status == "current" %}RUN{% else %}·{% endif %}</span>
-            </button>
-            {% endfor %}
-          </div>
-          <div class="autopilot-footer"><span class="live-beacon"></span><strong>System ready</strong><small>Next action: {{ guided.headline }}</small></div>
-        </article>
-      </div>
-    </section>
-
-    <div class="operations-divider">
-      <span>Live operations</span><i></i><small>Real data · real actions · full traceability</small>
-    </div>
-
-    <div class="copilot-hint-banner" style="background:hsl(217 33% 15%); border:1px solid hsl(217 33% 25%); border-left:4px solid hsl(160 84% 39%); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; gap:12px;">
-      <div style="font-size:13px; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
-        <span>💡 <strong>CareerAI Step Hint:</strong> You have <strong>{{ view.kpi.shortlisted_active }}</strong> shortlisted jobs. Click <em>"🎯 Tailor"</em> on any card or use the batch bar below to tailor & render applications at scale.</span>
-      </div>
-      <button type="button" class="btn-primary" onclick="switchTab('chat'); usePromptChip('How do I tailor and render 100 jobs?')" style="padding:4px 10px; font-size:11px; white-space:nowrap;">🤖 Ask Agent ↗</button>
-    </div>
-    <section class="kpi-strip" role="kpi-strip">
+    <section class="kpi-strip" aria-label="Pipeline summary">
       <div class="kpi">
         <div class="kpi-num" data-count="{{ view.kpi.today_discovered }}">{{ view.kpi.today_discovered }}</div>
-        <div class="kpi-label">Discovered Today</div>
-        <div class="kpi-sub">Across active job sources</div>
+        <div class="kpi-label">New opportunities today</div>
+        <div class="kpi-sub">Discovered since midnight UTC</div>
       </div>
       <div class="kpi">
         <div class="kpi-num accent-amber" data-count="{{ view.kpi.shortlisted_active }}">{{ view.kpi.shortlisted_active }}</div>
-        <div class="kpi-label">Shortlisted Active</div>
+        <div class="kpi-label">Ready to tailor</div>
         <div class="kpi-sub">Ready for LLM tailoring</div>
       </div>
       <div class="kpi">
         <div class="kpi-num accent-indigo" data-count="{{ view.kpi.applied_lifetime }}">{{ view.kpi.applied_lifetime }}</div>
-        <div class="kpi-label">Applied Lifetime</div>
+        <div class="kpi-label">Applications sent</div>
         <div class="kpi-sub">Submitted & responded</div>
       </div>
       <div class="kpi">
         <div class="kpi-num accent-emerald">{{ view.kpi.response_rate_label }}</div>
-        <div class="kpi-label">Response Rate</div>
-        <div class="kpi-sub">Interview & callback ratio</div>
+        <div class="kpi-label">Response rate</div>
+        <div class="kpi-sub">Recorded responses / applications</div>
       </div>
     </section>
 
+    <div class="workspace-grid">
+      <section class="workspace-card" aria-labelledby="next-up-title">
+        <div class="workspace-card-heading"><h2 id="next-up-title">A clear next step</h2><button onclick="switchTab('actions')">Action center ↗</button></div>
+        <p class="workspace-card-subtitle">A few meaningful moves, one at a time.</p>
+        {% if not view.config.profile %}
+        <button class="focus-task" onclick="openProfileSetup()"><span class="task-icon">01</span><span><strong>Make this workspace yours</strong><small>Import a resume and review your profile</small></span><span class="task-arrow">↗</span></button>
+        {% else %}
+        <button class="focus-task" onclick="switchTab('actions')"><span class="task-icon">01</span><span><strong>Prepare your strongest applications</strong><small>{{ view.state_counts.shortlisted }} shortlisted · {{ view.state_counts.tailored }} tailored</small></span><span class="task-arrow">↗</span></button>
+        {% endif %}
+        <button class="focus-task" onclick="switchTab('explorer')"><span class="task-icon">02</span><span><strong>Discover a role that fits</strong><small>{{ view.kpi.today_discovered }} new today · {{ view.explorer_total }} in your workspace</small></span><span class="task-arrow">↗</span></button>
+        <button class="focus-task" onclick="switchTab('analytics')"><span class="task-icon">03</span><span><strong>Keep the conversation going</strong><small>Review follow-ups, responses and interview feedback</small></span><span class="task-arrow">↗</span></button>
+      </section>
+      <section class="workspace-card" aria-labelledby="top-matches-title">
+        <div class="workspace-card-heading"><h2 id="top-matches-title">Worth a closer look</h2><button onclick="switchTab('explorer')">All opportunities ↗</button></div>
+        <p class="workspace-card-subtitle">Your highest-scoring shortlisted roles.</p>
+        {% for col in view.columns %}{% if col.state == 'shortlisted' %}
+        {% if col.top | length > 0 %}
+        {% for card in col.top | slice(end=3) %}
+        <div class="match-preview">
+          <span class="match-monogram" aria-hidden="true">{{ card.company | truncate(length=1, end="") | upper }}</span>
+          <div class="match-preview-info"><button onclick="openAppModal('{{ card.id | js | safe }}')">{{ card.title }}</button><small>{{ card.company }}</small></div>
+          <span class="match-fit">{% if card.score is number %}{{ (card.score * 100) | round(method='floor') }}% match{% else %}Unscored{% endif %}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="workspace-empty"><strong>Your next match is out there.</strong>Shortlist a role from the explorer, or run matching after setting up your profile.<br><button class="text-button" onclick="switchTab('explorer')">Explore opportunities →</button></div>
+        {% endif %}
+        {% endif %}{% endfor %}
+      </section>
+    </div>
+
+    <details class="workspace-details"><summary>Your setup checklist · {{ guided.headline }}</summary>
     <!-- NUMBERED GUIDED PATH: the operator's 1→7 sequence -->
-    <section class="guided-path" role="guided-path">
+    <section class="guided-path" aria-label="Setup checklist">
       <div class="guided-head">
         <h2>🧭 Guided Path</h2>
         <p class="guided-headline">{{ guided.headline }}</p>
@@ -327,6 +254,8 @@
         {% endfor %}
       </ol>
     </section>
+
+    </details>
 
     <!-- VISUAL APPLICATION FLOW STEPPER -->
     <div class="pipeline-stepper">
@@ -372,7 +301,7 @@
       </div>
     </div>
 
-    <section class="funnel" id="job-pipeline" role="funnel">
+    <section class="funnel" id="job-pipeline" aria-label="Application pipeline">
       {% for col in view.columns %}
       <div class="col" data-stage="{{ col.state }}">
         <div class="col-head">
@@ -519,12 +448,15 @@
           </article>
           {% endfor %}
           {% endif %}
+          {% if col.count > col.top | length %}
+          <p class="empty">Showing the top {{ col.top | length }} of {{ col.count }}. <button class="text-button" onclick="switchTab('explorer')">Browse opportunities →</button></p>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
     </section>
 
-    <section class="next-steps" role="next-steps">
+    <section class="next-steps" aria-label="Recommended next steps">
       <div class="section-title">
         <span>⚡ System Recommendations & Next Steps</span>
       </div>
@@ -541,6 +473,110 @@
       </div>
       {% endif %}
     </section>
+    <details class="workspace-details"><summary>How your career story connects</summary>
+    <section class="career-story" aria-labelledby="story-title">
+      <div class="story-heading">
+        <div>
+          <span class="story-kicker">One story · three realities</span>
+          <h2 id="story-title">From career history to career velocity.</h2>
+        </div>
+        <p>Every signal in your past becomes leverage for the next move—without the repetitive application grind.</p>
+      </div>
+
+      <div class="story-acts">
+        <article class="story-act act-manual">
+          <div class="act-label"><span>Act 01</span><b>The manual grind</b></div>
+          <h3>Your energy disappears into forms.</h3>
+          <p class="act-intro">The same facts, rewritten for every portal. The same résumé, uploaded again.</p>
+          <div class="paper-stack" aria-hidden="true">
+            <span class="manual-error-toast">Required field missing</span>
+            <span class="manual-rejected-stamp">Rejected</span>
+            <span class="manual-spinner"><i></i> uploading 99%</span>
+            <div class="paper paper-back"><span>FORM 08/19</span></div>
+            <div class="paper paper-mid"><span>WORK HISTORY</span><i></i><i></i><i></i></div>
+            <div class="paper paper-front">
+              <div class="paper-head"><span>APPLICATION</span><b>!</b></div>
+              <i></i><i></i><i class="paper-field-short"></i>
+              <em>UPLOAD RESUME AGAIN</em>
+              <strong>FORMAT ERROR</strong>
+            </div>
+            <span class="manual-cursor">↖</span>
+          </div>
+          <div class="manual-fragment-line" aria-hidden="true">
+            <span class="fragment-done"></span><i></i><span></span><i></i><span class="fragment-error"></span><i></i><span></span>
+          </div>
+          <div class="grind-stats">
+            <span><b>42</b><small>fields / role</small></span>
+            <span><b>∞</b><small>context switches</small></span>
+            <span><b>0</b><small>energy left</small></span>
+          </div>
+        </article>
+
+        <article class="story-act act-career">
+          <div class="act-label"><span>Act 02</span><b>Your career genome</b></div>
+          {% if view.config.profile %}
+          <div class="career-card-head">
+            <div class="career-avatar" aria-hidden="true">◎</div>
+            <div><h3>{{ view.config.profile.name }}</h3><p>{{ view.config.profile.location }}</p></div>
+            <span>LIVE PROFILE</span>
+          </div>
+          <div class="career-workbench">
+            <div class="career-timeline" role="list" aria-label="Career timeline">
+              {% for moment in view.config.profile.career_story %}
+              <button type="button" class="career-moment {% if loop.first %}active{% endif %}" role="listitem" data-era="{{ moment.era }}" data-title="{{ moment.title }}" data-organization="{{ moment.organization }}" data-proof="{{ moment.proof }}" onclick="activateCareerMoment(this)">
+                <span class="moment-node moment-{{ moment.kind }}"></span>
+                <span class="moment-copy">
+                  <small>{{ moment.era }}</small>
+                  <strong>{{ moment.title }}</strong>
+                  <em>{{ moment.organization }}</em>
+                  <span class="moment-proof">{{ moment.proof }}</span>
+                </span>
+              </button>
+              {% endfor %}
+            </div>
+            <aside class="resume-live-preview" aria-label="Resume canvas preview">
+              <div class="resume-preview-head"><span>LIVE RÉSUMÉ</span><i></i></div>
+              <strong id="resume-preview-title">Career signal selected</strong>
+              <small id="resume-preview-org">Building candidate context…</small>
+              <div class="resume-preview-lines" aria-hidden="true"><i></i><i></i><i></i></div>
+              <p id="resume-preview-proof">Select a milestone to render its evidence into the résumé canvas.</p>
+              <div class="skill-unlock"><span>Skill unlocked</span><b id="resume-preview-skill">EXPERIENCE</b></div>
+            </aside>
+          </div>
+          <div class="genome-footer"><span>Résumé signal</span><strong>{{ view.config.profile.skill_count }} skills · {{ view.config.profile.experience_count }} roles · continuously enriched</strong></div>
+          {% else %}
+          <div class="career-empty">
+            <span>+</span><h3>Your story starts here</h3>
+            <p>Import a résumé or LinkedIn archive and CareerAI will turn it into a living, editable timeline.</p>
+            <button type="button" onclick="switchTab('config')">Build my profile →</button>
+          </div>
+          {% endif %}
+        </article>
+
+        <article class="story-act act-autopilot">
+          <div class="act-label"><span>Act 03</span><b>CareerAI autopilot</b></div>
+          <h3>One profile. A system that moves.</h3>
+          <p class="act-intro">Your search becomes an observable pipeline, with a human checkpoint where it matters.</p>
+          <div class="autopilot-engine" aria-hidden="true">
+            <span class="engine-core"><i></i></span>
+            <span class="engine-label">AUTOFILL ENGINE</span>
+            <span class="engine-scan">ATS CLEAR</span>
+          </div>
+          <div class="automation-flow" data-current-step="{{ guided.current_number }}">
+            <span class="pipeline-packet" aria-hidden="true"></span>
+            {% for step in guided.steps %}
+            <button type="button" class="automation-step automation-{{ step.status }}" onclick="switchTab('{{ step.tab }}')">
+              <span class="automation-index">0{{ step.number }}</span>
+              <span class="automation-copy"><strong>{{ step.title }}</strong><small>{{ step.command }}</small></span>
+              <span class="automation-state">{% if step.status == "done" %}✓{% elif step.status == "current" %}RUN{% else %}·{% endif %}</span>
+            </button>
+            {% endfor %}
+          </div>
+          <div class="autopilot-footer"><span class="live-beacon"></span><strong>System ready</strong><small>Next action: {{ guided.headline }}</small></div>
+        </article>
+      </div>
+    </section>
+    </details>
   </div>
 
   <!-- TAB 2: SYSTEM AUDIT EVENTS -->
@@ -552,16 +588,16 @@
         <p class="panel-desc">Follow every state transition, system choice, and candidate touchpoint from one immutable operational history.</p>
       </div>
       <div class="panel-head-stats">
-        <div><small>Events in view</small><strong>{{ view.recent_events | length }}</strong></div>
+        <div><small>Events in view</small><strong id="events-stat-count">{{ view.recent_events | length }}</strong></div>
         <div><small>System of record</small><strong>SQLite</strong></div>
-        <span class="panel-live"><i></i> Trace stream live</span>
+        <button type="button" class="btn-refresh-feed" onclick="refreshEventsTable()" title="Refresh events feed">🔄 Refresh Feed</button>
       </div>
     </div>
 
     <div class="filter-bar">
       <div class="search-box">
         <span class="search-icon">🔍</span>
-        <input type="text" id="event-search" placeholder="Search event notes, listing ID..." oninput="filterEvents()">
+        <input type="text" id="event-search" placeholder="Search event notes, payload, listing ID..." oninput="filterEvents()">
       </div>
       <div class="filter-pills">
         <span class="filter-pill active" onclick="filterEventsSeverity('all', this)">All Severities</span>
@@ -571,25 +607,30 @@
       </div>
     </div>
 
-    <div class="table-container">
+    <div class="table-container audit-table-container">
       <table class="audit-table">
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Severity</th>
-            <th>Listing ID</th>
-            <th>Transition</th>
+            <th style="width: 100px;">Time</th>
+            <th style="width: 85px;">Severity</th>
+            <th style="width: 170px;">Listing ID</th>
+            <th style="width: 200px;">Transition</th>
             <th>Note & Payload</th>
           </tr>
         </thead>
         <tbody id="events-tbody">
           {% if view.recent_events | length == 0 %}
           <tr>
-            <td colspan="5" class="empty-cell">No recent system events recorded.</td>
+            <td colspan="5" class="empty-cell">
+              <div class="empty-events-state">
+                <span class="empty-icon">📋</span>
+                <p>No recent system events recorded.</p>
+              </div>
+            </td>
           </tr>
           {% else %}
           {% for ev in view.recent_events %}
-          <tr class="event-row" data-severity="{{ ev.severity }}" data-search="{% if ev.listing_id %}{{ ev.listing_id | lower }}{% endif %} {% if ev.note %}{{ ev.note | lower }}{% endif %}">
+          <tr class="event-row" data-severity="{{ ev.severity }}" data-search="{% if ev.listing_id %}{{ ev.listing_id | lower }}{% endif %} {% if ev.summary %}{{ ev.summary | lower }}{% elif ev.note %}{{ ev.note | lower }}{% endif %} {% if ev.raw_payload %}{{ ev.raw_payload | lower }}{% endif %}">
             <td class="time-cell" title="{{ ev.timestamp }}">
               <span class="rel-time">{{ ev.relative_time }}</span>
             </td>
@@ -597,15 +638,40 @@
               <span class="sev-badge sev-{{ ev.severity }}">{{ ev.severity }}</span>
             </td>
             <td>
-              <span class="code-link" onclick="openAppModal('{{ ev.listing_id | js | safe }}')">{{ ev.listing_id }}</span>
+              {% if ev.listing_id and ev.listing_id != "" and ev.listing_id != "00000000-0000-0000-0000-000000000000" %}
+                <span class="listing-id-pill" onclick="openAppModal('{{ ev.listing_id | js | safe }}')" title="View Listing Details">{{ ev.listing_id }}</span>
+              {% else %}
+                <span class="muted-dash">—</span>
+              {% endif %}
             </td>
             <td>
-              <span class="transition-pill">
-                {% if ev.from_state %}{{ ev.from_state }}{% else %}start{% endif %} → <strong>{{ ev.to_state }}</strong>
+              <span class="transition-pill transition-{{ ev.severity }}">
+                {% if ev.from_state %}{{ ev.from_state }}{% else %}start{% endif %} <span class="arrow-glyph">→</span> <strong>{{ ev.to_state }}</strong>
               </span>
             </td>
             <td class="note-cell">
-              {{ ev.note | default(value="State transition executed") }}
+              <div class="event-note-wrapper">
+                <div class="event-summary-line sev-text-{{ ev.severity }}">
+                  {% if ev.severity == "error" %}
+                    <span class="event-icon sev-error-icon">✕</span>
+                  {% elif ev.severity == "warn" %}
+                    <span class="event-icon sev-warn-icon">!</span>
+                  {% else %}
+                    <span class="event-icon sev-info-icon">●</span>
+                  {% endif %}
+                  <span class="event-summary-text">{{ ev.summary | default(value=ev.note | default(value="State transition executed")) }}</span>
+                </div>
+                {% if ev.raw_payload %}
+                <details class="event-payload-details">
+                  <summary class="event-payload-summary">
+                    <span class="payload-toggle-icon">▸</span>
+                    <span class="payload-toggle-text">Execution Log Details</span>
+                    <button type="button" class="btn-copy-payload" onclick="event.stopPropagation(); copyPayloadText(this)" title="Copy log to clipboard">📋 Copy</button>
+                  </summary>
+                  <pre class="event-raw-log"><code>{{ ev.raw_payload }}</code></pre>
+                </details>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -766,7 +832,7 @@
             <div class="source-stats">
               <span class="source-count">{{ src.listing_count }} jobs</span>
               {% if src.url %}
-              <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="source-portal-btn" title="Open {{ src.name }} portal">🌐 portal ↗</a>
+              <a href="{{ src.url | posting_url }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();" class="source-portal-btn" title="Open {{ src.name }} portal">🌐 portal ↗</a>
               {% else %}
               <span class="source-portal-btn" style="opacity:0.2;">—</span>
               {% endif %}
@@ -1192,6 +1258,43 @@
           <button type="button" onclick="switchTab('commands')">Inspect command controls <span>→</span></button>
         </article>
       </div>
+
+      <!-- Quick Actions: interview prep, email outreach, negotiation -->
+      <div class="quick-actions-row" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:16px;">
+        <div class="quick-action-card">
+          <div class="quick-action-icon">🎤</div>
+          <div class="quick-action-body">
+            <div class="quick-action-label">Interview Prep</div>
+            <p class="quick-action-desc">Generate STAR stories + role-specific questions from your profile.</p>
+            <button type="button" class="btn-primary btn-sm" onclick="switchTab('commands'); setTimeout(function(){ var sel=document.getElementById('cmd-select'); if(sel){ sel.value='interview'; sel.dispatchEvent(new Event('change')); } }, 100);">Generate Prep <span>→</span></button>
+        </div>
+        </div>
+        <div class="quick-action-card">
+          <div class="quick-action-icon">✉️</div>
+          <div class="quick-action-body">
+            <div class="quick-action-label">Cold Email</div>
+            <p class="quick-action-desc">Draft a personalized outreach email to a hiring manager or recruiter.</p>
+            <button type="button" class="btn-primary btn-sm" onclick="switchTab('commands'); setTimeout(function(){ var sel=document.getElementById('cmd-select'); if(sel){ sel.value='email'; sel.dispatchEvent(new Event('change')); } }, 100);">Draft Email <span>→</span></button>
+        </div>
+        </div>
+        <div class="quick-action-card">
+          <div class="quick-action-icon">💼</div>
+          <div class="quick-action-body">
+            <div class="quick-action-label">Negotiate</div>
+            <p class="quick-action-desc">Generate a salary negotiation script with talking points and market data.</p>
+            <button type="button" class="btn-primary btn-sm" onclick="switchTab('commands'); setTimeout(function(){ var sel=document.getElementById('cmd-select'); if(sel){ sel.value='negotiate'; sel.dispatchEvent(new Event('change')); } }, 100);">Build Script <span>→</span></button>
+        </div>
+        </div>
+        <div class="quick-action-card">
+          <div class="quick-action-icon">📈</div>
+          <div class="quick-action-body">
+            <div class="quick-action-label">Upskill Plan</div>
+            <p class="quick-action-desc">Identify skill gaps and generate a targeted learning plan for target roles.</p>
+            <button type="button" class="btn-primary btn-sm" onclick="runCliCommand('upskill', {}, this)">Analyze Gaps <span>→</span></button>
+        </div>
+        </div>
+      </div>
+
       <div class="actions-section">
         <h3>📝 Drafted Applications Awaiting Approval</h3>
         <button type="button" class="btn-primary" onclick="runCliCommand('review', {}, this)" style="margin:8px 0 12px; padding:6px 12px; font-size:12px;">🔍 Review Drafted LinkedIn</button>
@@ -1215,7 +1318,7 @@
             <div class="action-card-footer">
               <span class="action-state-pill">{{ item.state }}</span>
               {% if item.action_url %}
-              <a href="{{ item.action_url }}" target="_blank" rel="noopener" class="action-btn">{{ item.action_label }} ↗</a>
+              <a href="{{ item.action_url | posting_url }}" target="_blank" rel="noopener" class="action-btn">{{ item.action_label }} ↗</a>
               {% else %}
               <button class="action-btn" onclick="openAppModal('{{ item.id | js | safe }}')">{{ item.action_label }} →</button>
               {% endif %}
@@ -1237,7 +1340,7 @@
         <p class="panel-desc">Search the entire discovery universe, inspect why roles moved, and restore high-potential opportunities in one move.</p>
       </div>
       <div class="panel-head-stats">
-        <div><small>Indexed listings</small><strong>{{ view.discovered_explorer | length }}</strong></div>
+        <div><small>Indexed listings</small><strong id="explorer-count">{{ view.explorer_total }}</strong></div>
         <div><small>Shortlisted</small><strong>{{ view.state_counts.shortlisted }}</strong></div>
         <span class="panel-live"><i></i> Ranking surface ready</span>
       </div>
@@ -1250,6 +1353,8 @@
       <button type="button" class="btn-primary" onclick="switchTab('chat'); usePromptChip('Analyze my current job match pipeline statistics')" style="padding:4px 10px; font-size:11px; white-space:nowrap;">🤖 Match Diagnostics ↗</button>
     </div>
 
+    <div class="saved-search-toolbar"><span>Quick views</span><button type="button" data-search-preset="all">All opportunities</button><button type="button" data-search-preset="remote">Remote opportunities</button><button type="button" id="save-search-toggle">＋ Save this search</button><div id="saved-searches" aria-label="Saved searches"></div></div>
+    <form id="save-search-form" hidden><label for="saved-search-name">Search name</label><input id="saved-search-name" class="form-control" maxlength="40" required placeholder="e.g. Remote Rust roles"><button class="btn-primary" type="submit">Save in this browser</button></form>
     <!-- E-Commerce Shopping-Style Multi-Select Filter Panel -->
     <div class="filter-panel-card" style="margin-bottom:16px;">
       <div class="filter-group-row">
@@ -1269,20 +1374,23 @@
 
       <div class="filter-group-row" style="margin-top:10px;">
         <span class="filter-group-title">⚡ Listing Status:</span>
-        <label class="checkbox-pill"><input type="checkbox" id="flt-state-discovered" onchange="filterExplorerTable()" checked> ✨ Discovered</label>
+        <label class="checkbox-pill"><input type="checkbox" id="flt-state-discovered" onchange="filterExplorerTable()" checked> Active pipeline</label>
         <label class="checkbox-pill"><input type="checkbox" id="flt-state-filtered" onchange="filterExplorerTable()" checked> 🚫 Filtered Out</label>
         <button class="chip-btn" onclick="resetExplorerFilters()" style="margin-left:auto;">🔄 Reset All Filters</button>
       </div>
     </div>
 
     <div class="explorer-toolbar" style="display:flex; gap:10px; margin-bottom:16px; align-items:center;">
-      <input type="text" id="explorer-search-input" class="form-control" placeholder="Search postings by job title, company, or skills..." oninput="filterExplorerTable()" style="flex:1;">
+      <input aria-label="Search opportunities by title, company, location or source" type="search" id="explorer-search-input" class="form-control" placeholder="Search title, company, location or source…" oninput="filterExplorerTable()" style="flex:1;">
       <button type="button" class="btn-primary" onclick="runCliCommand('discover', {}, this)" style="padding:8px 14px; font-size:12px;">⚡ Run Discover</button>
       <button type="button" class="btn-primary" onclick="runCliCommand('match', {}, this)" style="padding:8px 14px; font-size:12px; background:hsl(160 84% 39%);">🎯 Run Matcher</button>
       <button type="button" class="btn-primary" onclick="runCliCommand('run', {}, this)" style="padding:8px 14px; font-size:12px; background:hsl(207 90% 54%);" title="Run the full pipeline (dry-run by default)">🚀 Run All</button>
     </div>
 
-    <div class="table-container">
+<p id="explorer-result-status" class="explorer-result-status" role="status"></p>
+<p id="explorer-load-error" class="explorer-result-status" role="alert" hidden></p>
+<div id="explorer-no-results" class="workspace-empty" hidden><strong>No roles match these filters.</strong>Try a broader search or <button class="text-button" onclick="resetExplorerFilters()">clear your filters</button>.</div>
+        <div class="table-container">
       <table class="data-table">
         <thead>
           <tr>
@@ -1297,6 +1405,13 @@
           </tr>
         </thead>
         <tbody id="explorer-tbody">
+          {% if view.explorer_lazy %}
+          <tr id="explorer-loading-row">
+            <td colspan="8" class="empty-cell" style="text-align:center; padding:24px;">
+              <span class="explorer-spinner"></span> Loading listings…
+            </td>
+          </tr>
+          {% else %}
           {% if view.discovered_explorer | length == 0 %}
           <tr>
             <td colspan="8" class="empty-cell">No discovered jobs found in database. Run <code>careerai discover</code> to populate listings.</td>
@@ -1304,9 +1419,9 @@
           {% else %}
           {% for item in view.discovered_explorer %}
           <tr class="explorer-row" data-search="{% if item.title %}{{ item.title | lower }}{% endif %} {% if item.company %}{{ item.company | lower }}{% endif %} {% if item.location %}{{ item.location | lower }}{% endif %}" data-remote="{{ item.is_remote }}" data-state="{{ item.state }}">
-            <td><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="title-link">{% if item.title %}{{ item.title }}{% else %}Listing {{ item.id }}{% endif %}</a></td>
+            <td><a href="{{ item.url | posting_url }}" target="_blank" rel="noopener noreferrer" class="title-link">{% if item.title %}{{ item.title }}{% else %}Listing {{ item.id }}{% endif %}</a></td>
             <td><code class="listing-id-cell" title="Click to copy — use with `careerai tailor <id>`" onclick="copyCliCommand('{{ item.id | js | safe }}', this)">{{ item.id }}</code></td>
-            <td>🏢 {% if item.company %}{{ item.company }}{% else %}Unspecified{% endif %}</td>
+            <td>🏢 {% if item.company %}{{ item.company }}{% else %}Unspecified{% endif %} {% if item.legitimacy == "suspicious" %}<span class="legit-badge legit-suspicious" title="Suspicious listing — possible scam or ghost job">🔴</span>{% elif item.legitimacy == "caution" %}<span class="legit-badge legit-caution" title="Proceed with caution — minor red flags">🟡</span>{% else %}<span class="legit-badge legit-ok" title="No red flags detected">🟢</span>{% endif %}</td>
             <td>📍 {% if item.location %}{{ item.location }}{% else %}Remote / Unspecified{% endif %}</td>
             <td><span class="pill pill-info">{{ item.source }}</span></td>
             <td><span class="sev-badge sev-{% if item.state == 'discovered' %}info{% else %}warn{% endif %}">{{ item.state }}</span></td>
@@ -1331,6 +1446,7 @@
             </td>
           </tr>
           {% endfor %}
+          {% endif %}
           {% endif %}
         </tbody>
       </table>
@@ -1430,6 +1546,12 @@ careerai shortlist show [--limit N]        list currently shortlisted listings
 careerai applied [--source S] [--limit N]  show submitted applications
 careerai inspect &lt;application-id&gt;         dump application row + history + artifacts
 careerai digest [--since 24h]              daily pipeline summary
+careerai patterns                          repost/ghost-job detection + funnel velocity
+careerai upskill                           skill gap analysis vs shortlisted JDs
+careerai analyze-profile                    ATS readiness + quantification audit
+careerai interview &lt;listing-id&gt;            STAR stories + likely interview questions
+careerai email &lt;listing-id&gt;                 draft a cold application email (draft-only)
+careerai negotiate &lt;listing-id&gt;           salary negotiation script + talking points
 careerai sources sync [--apply]            merge seeded ATS companies into local.yaml
 careerai sources discover-web [--apply]    discover job portals via web-search agent
 careerai mcp probe                         probe MCP job sources for reachability
@@ -1444,117 +1566,188 @@ careerai service uninstall                 disable + remove the systemd unit</pr
     </details>
   </div>
 
+  <!-- TAB: ANALYTICS -->
+  <div id="tab-analytics" class="tab-panel">
+    <div class="usage-summary">      <div class="kpi">
+        <div class="kpi-num accent-rose">${{ view.llm_cost.total_cost_usd | round(precision=2) }}</div>
+        <div class="kpi-label">LLM Cost</div>
+        <div class="kpi-sub">{{ view.llm_cost.call_count }} calls · {{ view.llm_cost.model | default(value="—") }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-num accent-cyan">{{ view.llm_cost.total_input_tokens }} + {{ view.llm_cost.total_output_tokens }}</div>
+        <div class="kpi-label">Tokens Used</div>
+        <div class="kpi-sub">{{ view.llm_cost.total_cache_read_tokens }} cache-read · {{ view.content_library.cover_letter_count }} letters in library</div>
+      </div>
+</div>
+    <div class="panel-header" style="margin-bottom:16px;">
+      <h2>📊 Pattern Analytics</h2>
+      <p class="panel-sub">Repost detection, funnel velocity, advance rates, and rejection latencies across all sources.</p>
+    </div>
+
+    <div id="analytics-loading" style="text-align:center; padding:40px; color:var(--text-secondary);">
+      Loading analytics data…
+    </div>
+
+    <div id="analytics-content" style="display:none;">
+      <!-- LLM Cost + Content Library Summary -->
+      <div class="analytics-cards-row" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:20px;">
+        <div class="analytics-card" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px;">
+          <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">LLM Spend</div>
+          <div style="font-size:22px; font-weight:700; color:var(--text-primary); margin-top:4px;">${{ view.llm_cost.total_cost_usd | round(precision=4) }}</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">{{ view.llm_cost.call_count }} live calls · {{ view.llm_cost.total_cache_read_tokens }} cache-read tokens</div>
+        </div>
+        <div class="analytics-card" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px;">
+          <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Content Library</div>
+          <div style="font-size:22px; font-weight:700; color:var(--text-primary); margin-top:4px;">{{ view.content_library.cover_letter_count }} letters · {{ view.content_library.bullet_count }} bullets</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">{{ view.content_library.domains | length }} domain{{ view.content_library.domains | length | pluralize }} indexed for reuse</div>
+        </div>
+        <div class="analytics-card" style="background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px;">
+          <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Model</div>
+          <div style="font-size:16px; font-weight:700; color:var(--text-primary); margin-top:4px;">{{ view.llm_cost.model | default(value="No calls yet") }}</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">Strategy: {{ view.config.llm_strategy }} · Backend: {{ view.config.llm_backend }}</div>
+        </div>
+      </div>
+
+      <!-- Content Library Domains -->
+      {% if view.content_library.domains | length > 0 %}
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">Content Library by Domain</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th>Domain</th><th>Role</th><th>Cover Letters</th><th>Bullets</th></tr>
+          </thead>
+          <tbody>
+            {% for d in view.content_library.domains %}
+            <tr>
+              <td>{{ d.domain }}</td>
+              <td>{{ d.role }}</td>
+              <td>{{ d.cover_letters }}</td>
+              <td>{{ d.bullets }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      <!-- Reposts -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">🔁 Repost Detection <span id="reposts-count" style="color:var(--text-secondary); font-weight:400;"></span></h3>
+        <div id="analytics-reposts"></div>
+      </div>
+
+      <!-- Funnel Velocity -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">📈 Funnel Velocity by Source</h3>
+        <div id="analytics-funnel"></div>
+      </div>
+
+      <!-- Advance Rates -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">🎯 Advance Rates (Submitted → Responded)</h3>
+        <div id="analytics-advance"></div>
+      </div>
+
+      <!-- Rejection Latencies -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">⏱️ Rejection Latencies</h3>
+        <div id="analytics-rejections"></div>
+      </div>
+
+      <!-- Source Attribution -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">🏆 Source Attribution — Best Performing Sources</h3>
+        <div id="analytics-source-attribution"></div>
+      </div>
+
+      <!-- Application Timing Intelligence -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">📅 Application Timing Intelligence — Best Days to Submit</h3>
+        <div id="analytics-timing"></div>
+      </div>
+
+      <!-- A/B Variant Tracking -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">🧪 A/B Variant Tracking — Which Resume Style Converts</h3>
+        <div id="analytics-variants"></div>
+      </div>
+
+      <!-- Salary Benchmarking -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">💰 Salary Benchmarking</h3>
+        <div id="analytics-salary"></div>
+      </div>
+
+      <!-- Weekly Market Pulse -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">📡 Weekly Market Pulse</h3>
+        <div id="analytics-market-pulse"></div>
+      </div>
+
+      <!-- Follow-up Scheduler -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">📬 Follow-up Scheduler
+          <button type="button" class="btn-primary" style="padding:3px 8px; font-size:10px; margin-left:8px;" onclick="checkFollowUps(this)">Check Now</button>
+        </h3>
+        <div id="analytics-follow-ups"></div>
+      </div>
+
+      <!-- Interview Feedback Loop -->
+      <div style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">🎤 Interview Feedback Loop</h3>
+        <div id="analytics-interview-feedback"></div>
+        <details style="margin-top:8px;">
+          <summary style="cursor:pointer; font-size:12px; color:var(--accent-cyan);">+ Log new interview feedback</summary>
+          <div style="margin-top:10px; display:grid; gap:6px; max-width:500px;">
+            <input id="fb-app-id" placeholder="Application ID" class="form-control" style="font-size:12px; padding:4px 8px;">
+            <input id="fb-listing-id" placeholder="Listing ID" class="form-control" style="font-size:12px; padding:4px 8px;">
+            <input id="fb-company" placeholder="Company" class="form-control" style="font-size:12px; padding:4px 8px;">
+            <input id="fb-title" placeholder="Job Title" class="form-control" style="font-size:12px; padding:4px 8px;">
+            <textarea id="fb-questions" placeholder="Questions asked (one per line)" class="form-control" style="font-size:12px; padding:4px 8px; min-height:60px;"></textarea>
+            <label style="font-size:11px; color:var(--text-secondary);">Rating: <select id="fb-rating" style="font-size:12px;"><option value="5">5 - Excellent</option><option value="4">4 - Good</option><option value="3" selected>3 - OK</option><option value="2">2 - Poor</option><option value="1">1 - Bad</option></select></label>
+            <textarea id="fb-went-well" placeholder="What went well" class="form-control" style="font-size:12px; padding:4px 8px;"></textarea>
+            <textarea id="fb-improve" placeholder="What to improve" class="form-control" style="font-size:12px; padding:4px 8px;"></textarea>
+            <button type="button" class="btn-primary" style="font-size:12px; padding:6px 12px; justify-self:start;" onclick="saveInterviewFeedback(this)">Save Feedback</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
   <!-- TAB 7: SPATIAL CAREER CANVAS -->
-  <div id="tab-canvas" class="tab-panel">
-    <div class="panel-header mission-panel-head head-canvas">
+  <div id="tab-bounties" class="tab-panel">
+    <div class="panel-header mission-panel-head head-bounties">
       <div class="panel-head-main">
-        <span class="panel-kicker"><i></i> Experimental spatial mode</span>
-        <h2>Your career is a world, not a workflow.</h2>
-        <p class="panel-desc">Pan, zoom, and move between the evidence you built, the portal work the engine absorbs, and the interviews waiting on the horizon.</p>
+        <span class="panel-kicker"><i></i> Reward hunting</span>
+        <h2>Earn while you build. Bounties, hackathons & coding rewards.</h2>
+        <p class="panel-desc">Curated platforms where developers win cash, prizes, and reputation. Filter by category, reward type, or skill match.</p>
       </div>
       <div class="panel-head-stats">
-        <div><small>World zones</small><strong>3</strong></div>
-        <div><small>Canvas mode</small><strong>Live</strong></div>
-        <span class="panel-live"><i></i> Drag to explore</span>
+        <div><small>Platforms tracked</small><strong id="bounty-platform-count">—</strong></div>
+        <div><small>Total opportunities</small><strong id="bounty-total-count">—</strong></div>
+        <span class="panel-live"><i></i> Curated directory</span>
       </div>
     </div>
 
-    <section class="spatial-shell" aria-labelledby="spatial-title">
-      <header class="spatial-toolbar">
-        <div>
-          <span class="spatial-overline">Career world / 01</span>
-          <h3 id="spatial-title">From accumulated proof to calendar-ready opportunity.</h3>
-        </div>
-        <nav class="spatial-zone-nav" aria-label="Focus a spatial canvas zone">
-          <button type="button" onclick="focusSpatialZone('experience', this)"><i class="zone-a-dot"></i><span>Experience</span><kbd>1</kbd></button>
-          <button type="button" onclick="focusSpatialZone('nightmare', this)"><i class="zone-b-dot"></i><span>Portal nightmare</span><kbd>2</kbd></button>
-          <button type="button" onclick="focusSpatialZone('horizon', this)"><i class="zone-c-dot"></i><span>Interview horizon</span><kbd>3</kbd></button>
-        </nav>
-        <div class="spatial-zoom-controls" aria-label="Canvas zoom controls">
-          <button type="button" onclick="zoomSpatialCanvas(-0.12)" title="Zoom out" aria-label="Zoom out">−</button>
-          <span id="spatial-zoom-label">72%</span>
-          <button type="button" onclick="zoomSpatialCanvas(0.12)" title="Zoom in" aria-label="Zoom in">+</button>
-          <button type="button" onclick="resetSpatialCanvas()" title="Reset canvas" aria-label="Reset canvas">⌂</button>
-        </div>
-      </header>
-
-      <div class="spatial-viewport" id="spatial-viewport" tabindex="0" aria-label="Zoomable career journey canvas. Drag to pan; use plus and minus to zoom.">
-        <div class="spatial-canvas" id="spatial-canvas">
-          <div class="spatial-world-grid" aria-hidden="true"></div>
-          <svg class="spatial-connections" viewBox="0 0 1900 1080" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id="career-path-gradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#818cf8"></stop><stop offset=".5" stop-color="#22d3ee"></stop><stop offset="1" stop-color="#34d399"></stop></linearGradient>
-              <filter id="career-path-glow"><feGaussianBlur stdDeviation="4" result="blur"></feGaussianBlur><feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
-            </defs>
-            <path class="world-path world-path-base" d="M500 435 C690 320 720 700 925 545 S1260 285 1430 480"></path>
-            <path class="world-path world-path-live" d="M500 435 C690 320 720 700 925 545 S1260 285 1430 480"></path>
-          </svg>
-
-          <article class="spatial-zone zone-experience" data-spatial-zone="experience">
-            <span class="zone-coordinate">ZONE A · 09°27′</span>
-            <header><span class="zone-number">01</span><div><small>Accumulated proof</small><h3>The experience constellation</h3></div></header>
-            <p>Every degree, role, and hard-won skill remains connected. Select a node to surface its proof.</p>
-            {% if view.config.profile %}
-            <div class="spatial-profile-card">
-              <span class="spatial-avatar">◎</span><div><strong>{{ view.config.profile.name }}</strong><small>{{ view.config.profile.experience_count }} roles · {{ view.config.profile.skill_count }} skills</small></div><i>LIVE</i>
-            </div>
-            <div class="spatial-timeline">
-              {% for moment in view.config.profile.career_story %}
-              <button type="button" class="spatial-moment {% if loop.first %}active{% endif %}" onclick="activateSpatialMoment(this)">
-                <i></i><span><small>{{ moment.era }}</small><strong>{{ moment.title }}</strong><em>{{ moment.organization }}</em></span><b>↗</b>
-              </button>
-              {% endfor %}
-            </div>
-            {% else %}
-            <button type="button" class="spatial-empty-profile" onclick="switchTab('config')">Import your profile to ignite this constellation <span>↗</span></button>
-            {% endif %}
-            <div class="zone-orbit zone-orbit-a" aria-hidden="true"><i></i><i></i><i></i></div>
-          </article>
-
-          <article class="spatial-zone zone-nightmare" data-spatial-zone="nightmare">
-            <span class="zone-coordinate">ZONE B · 100× PARALLEL</span>
-            <header><span class="zone-number">02</span><div><small>Work absorbed</small><h3>The portal nightmare, contained.</h3></div></header>
-            <p>Forms fragment into machine-sized tasks. The engine fills, validates, and queues them while you stay in control.</p>
-            <div class="portal-simulation" id="portal-simulation">
-              <div class="portal-swarm" id="portal-swarm" aria-hidden="true"></div>
-              <div class="portal-engine-core">
-                <span class="engine-ring engine-ring-a"></span><span class="engine-ring engine-ring-b"></span>
-                <i>AI</i><strong>100</strong><small>portals orchestrated</small>
-              </div>
-              <div class="portal-stat portal-stat-left"><span>42 → 0</span><small>manual fields</small></div>
-              <div class="portal-stat portal-stat-right"><span>1×</span><small>human approval</small></div>
-            </div>
-            <div class="portal-progress"><span><i></i></span><small>Autofill engine distributing candidate context…</small></div>
-          </article>
-
-          <article class="spatial-zone zone-horizon" data-spatial-zone="horizon">
-            <span class="zone-coordinate">ZONE C · NEXT 14 DAYS</span>
-            <header><span class="zone-number">03</span><div><small>Opportunity realized</small><h3>The interview horizon</h3></div></header>
-            <p>A clean queue turns preparation into conversations, with space left for the decisions only you can make.</p>
-            <div class="interview-queue">
-              <div class="queue-item queue-ready"><span>01</span><div><strong>Application pack</strong><small>{{ view.state_counts.rendered }} ready to submit</small></div><i>✓</i></div>
-              <div class="queue-connector"><i></i><i></i><i></i></div>
-              <div class="queue-item queue-human"><span>02</span><div><strong>Human checkpoint</strong><small>Review, approve, send</small></div><i>◎</i></div>
-            </div>
-            <div class="interview-calendar" aria-label="Illustrative interview calendar">
-              <div class="calendar-head"><span>Interview runway</span><small>Next 2 weeks</small></div>
-              <div class="calendar-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
-              <div class="calendar-grid" aria-hidden="true">
-                {% for n in range(start=1, end=15) %}<i class="{% if n == 3 or n == 8 or n == 12 %}calendar-slot{% endif %}">{{ n }}</i>{% endfor %}
-              </div>
-            </div>
-            <button type="button" class="horizon-action" onclick="switchTab('actions')">Open interview & action center <span>↗</span></button>
-            <div class="zone-orbit zone-orbit-c" aria-hidden="true"><i></i><i></i><i></i></div>
-          </article>
-
-          <div class="world-packet" aria-hidden="true"><i></i></div>
-          <span class="world-note world-note-a">PAST SIGNALS</span><span class="world-note world-note-b">AUTOMATION BRIDGE</span><span class="world-note world-note-c">FUTURE CONVERSATIONS</span>
-        </div>
-
-        <div class="spatial-minimap" aria-hidden="true"><i class="minimap-a"></i><i class="minimap-b"></i><i class="minimap-c"></i><span id="spatial-minimap-window"></span></div>
-        <div class="spatial-instructions"><span>Drag to pan</span><i></i><span>Scroll to zoom</span><i></i><span>1–3 to travel</span></div>
+    <div class="filter-bar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="bounty-search" placeholder="Search by platform, skill, or reward..." oninput="filterBountyCards(this.value)">
       </div>
-    </section>
+      <div class="filter-pills">
+        <span class="filter-pill active" onclick="filterBountyCategory('all', this)">All</span>
+        <span class="filter-pill" onclick="filterBountyCategory('bug-bounty', this)">🐛 Bug Bounty</span>
+        <span class="filter-pill" onclick="filterBountyCategory('hackathon', this)">🏆 Hackathon</span>
+        <span class="filter-pill" onclick="filterBountyCategory('coding', this)">💻 Coding</span>
+        <span class="filter-pill" onclick="filterBountyCategory('opensource', this)">📦 Open Source</span>
+        <span class="filter-pill" onclick="filterBountyCategory('ai-ml', this)">🧠 AI/ML</span>
+        <span class="filter-pill" onclick="filterBountyCategory('web3', this)">⛓️ Web3</span>
+      </div>
+    </div>
+
+    <div class="bounty-grid" id="bounty-grid">
+      <div class="bounty-loader">Loading bounty opportunities...</div>
+    </div>
   </div>
 
   <!-- TAB 8: AI CHAT ASSISTANT -->
@@ -1678,28 +1871,280 @@ careerai service uninstall                 disable + remove the systemd unit</pr
   </div>
 </div>
 
+<dialog id="command-palette" class="command-dialog" aria-label="Jump to a workspace page">
+  <div class="command-dialog-head"><input id="command-search" type="search" aria-label="Search workspace pages" placeholder="Where would you like to go?" autocomplete="off"><button id="command-close" aria-label="Close command palette">Esc</button></div>
+  <div id="command-results" class="command-results"></div>
+  <div class="command-dialog-foot"><span>↑ ↓ to navigate · Enter to open</span><span id="command-count" role="status"></span></div>
+</dialog>
 <footer>
-  <span>career-ai · Modern Dark Obsidian MVP Dashboard · {{ build_version }}</span>
+  <span>career-ai · Built for your next chapter · {{ build_version }}</span>
 </footer>
 
 <script>
+// --- Real-time Notification & Progress Toast Engine ---
+var _activeNotifications = [];
+var _notificationHistory = [];
+
+function toggleNotificationDrawer() {
+  var drawer = document.getElementById('notification-drawer');
+  var btn = document.getElementById('notification-bell-btn');
+  if (!drawer) return;
+  var isHidden = drawer.style.display === 'none' || !drawer.style.display;
+  drawer.style.display = isHidden ? 'flex' : 'none';
+  if (btn) btn.classList.toggle('active', isHidden);
+}
+
+document.addEventListener('click', function(e) {
+  var wrapper = document.getElementById('notification-wrapper');
+  var drawer = document.getElementById('notification-drawer');
+  if (wrapper && drawer && !wrapper.contains(e.target) && drawer.style.display !== 'none') {
+    drawer.style.display = 'none';
+    var btn = document.getElementById('notification-bell-btn');
+    if (btn) btn.classList.remove('active');
+  }
+});
+
+function updateNotificationBadge() {
+  var badge = document.getElementById('notification-badge');
+  var btn = document.getElementById('notification-bell-btn');
+  if (!badge) return;
+  var runningCount = _activeNotifications.length;
+  if (runningCount > 0) {
+    badge.textContent = runningCount;
+    badge.style.display = 'flex';
+    badge.classList.add('badge-running');
+    if (btn) btn.classList.add('has-running');
+  } else if (_notificationHistory.length > 0) {
+    badge.textContent = _notificationHistory.length;
+    badge.style.display = 'flex';
+    badge.classList.remove('badge-running');
+    if (btn) btn.classList.remove('has-running');
+  } else {
+    badge.style.display = 'none';
+    if (btn) btn.classList.remove('has-running');
+  }
+  renderNotificationDrawerList();
+}
+
+function renderNotificationDrawerList() {
+  var list = document.getElementById('notification-drawer-list');
+  if (!list) return;
+  var allItems = _activeNotifications.concat(_notificationHistory);
+  if (allItems.length === 0) {
+    list.innerHTML = '<div class="notification-empty">No recent command activity</div>';
+    return;
+  }
+  var html = '';
+  allItems.slice(0, 25).forEach(function(item) {
+    var icon = item.icon || (item.status === 'running' ? '⏳' : item.status === 'success' ? '✅' : '❌');
+    var badgeClass = item.status === 'running' ? 'badge-running' : item.status === 'success' ? 'badge-success' : 'badge-error';
+    html += '<div class="notification-item">' +
+      '<div class="notification-item-icon">' + icon + '</div>' +
+      '<div class="notification-item-body">' +
+        '<div class="notification-item-title">' +
+          '<span>' + escapeHtml(item.title) + '</span>' +
+          '<span class="task-toast-badge ' + badgeClass + '">' + item.status + '</span>' +
+        '</div>' +
+        '<div class="notification-item-desc">' + escapeHtml(item.message) + '</div>' +
+        '<div class="notification-item-time">' + (item.time || 'Just now') + '</div>' +
+      '</div>' +
+    '</div>';
+  });
+  list.innerHTML = html;
+}
+
+function clearNotifications() {
+  _notificationHistory = [];
+  updateNotificationBadge();
+}
+
+function createNotificationToast(title, initialMessage, icon) {
+  var id = 'toast-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+  var container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  var iconEmoji = icon || '⚡';
+  var toast = document.createElement('div');
+  toast.id = id;
+  toast.className = 'task-toast';
+  toast.innerHTML = 
+    '<div class="task-toast-header">' +
+      '<div class="task-toast-title-group">' +
+        '<span class="task-toast-icon">' + iconEmoji + '</span>' +
+        '<span class="task-toast-title">' + escapeHtml(title) + '</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;">' +
+        '<span class="task-toast-badge badge-running" id="' + id + '-badge">Running</span>' +
+        '<button class="task-toast-close" onclick="dismissToast(\'' + id + '\')" title="Dismiss">×</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="task-toast-body" id="' + id + '-body">' + escapeHtml(initialMessage) + '</div>' +
+    '<div class="task-toast-progress-track">' +
+      '<div class="task-toast-progress-fill running" id="' + id + '-fill"></div>' +
+    '</div>';
+  
+  container.appendChild(toast);
+
+  var taskObj = {
+    id: id,
+    title: title,
+    message: initialMessage,
+    status: 'running',
+    icon: iconEmoji,
+    time: new Date().toLocaleTimeString()
+  };
+  _activeNotifications.unshift(taskObj);
+  updateNotificationBadge();
+
+  return {
+    id: id,
+    update: function(msg) {
+      taskObj.message = msg;
+      var body = document.getElementById(id + '-body');
+      if (body) body.textContent = msg;
+      renderNotificationDrawerList();
+    },
+    success: function(msg, autoCloseDelay) {
+      taskObj.status = 'success';
+      taskObj.message = msg || 'Completed successfully';
+      taskObj.time = new Date().toLocaleTimeString();
+      _activeNotifications = _activeNotifications.filter(function(t) { return t.id !== id; });
+      _notificationHistory.unshift(taskObj);
+      updateNotificationBadge();
+
+      var badge = document.getElementById(id + '-badge');
+      var body = document.getElementById(id + '-body');
+      var fill = document.getElementById(id + '-fill');
+      if (badge) { badge.className = 'task-toast-badge badge-success'; badge.textContent = 'Success'; }
+      if (body) { body.textContent = msg || 'Completed successfully'; }
+      if (fill) { fill.className = 'task-toast-progress-fill success'; }
+
+      setTimeout(function() {
+        dismissToast(id);
+      }, autoCloseDelay !== undefined ? autoCloseDelay : 2500);
+    },
+    error: function(errMsg, autoCloseDelay) {
+      taskObj.status = 'error';
+      taskObj.message = errMsg || 'Execution failed';
+      taskObj.time = new Date().toLocaleTimeString();
+      _activeNotifications = _activeNotifications.filter(function(t) { return t.id !== id; });
+      _notificationHistory.unshift(taskObj);
+      updateNotificationBadge();
+
+      var badge = document.getElementById(id + '-badge');
+      var body = document.getElementById(id + '-body');
+      var fill = document.getElementById(id + '-fill');
+      if (badge) { badge.className = 'task-toast-badge badge-error'; badge.textContent = 'Failed'; }
+      if (body) { body.textContent = errMsg || 'Execution failed'; }
+      if (fill) { fill.className = 'task-toast-progress-fill error'; }
+
+      setTimeout(function() {
+        dismissToast(id);
+      }, autoCloseDelay !== undefined ? autoCloseDelay : 4500);
+    }
+  };
+}
+
+function dismissToast(id) {
+  var toast = document.getElementById(id);
+  if (!toast) return;
+  toast.classList.add('toast-closing');
+  setTimeout(function() {
+    if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+  }, 260);
+  _activeNotifications = _activeNotifications.filter(function(t) { return t.id !== id; });
+  updateNotificationBadge();
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getCommandMeta(command, args) {
+  switch (command) {
+    case 'discover':
+      return { title: 'Discovering Jobs', icon: '🔍', desc: 'Ingesting listings across all active source adapters...' };
+    case 'tailor':
+      if (args && args.all) return { title: 'Tailoring All Shortlisted', icon: '✨', desc: 'Running LLM tailoring for all shortlisted jobs...' };
+      if (args && args.limit) return { title: 'Tailoring Top ' + args.limit + ' Jobs', icon: '✨', desc: 'Running LLM tailoring...' };
+      return { title: 'Tailoring Resume', icon: '✨', desc: 'Tailoring resume & generating cover letter...' };
+    case 'render':
+      if (args && args.all) return { title: 'Rendering All Artifacts', icon: '📄', desc: 'Compiling DOCX & PDF files for tailored jobs...' };
+      return { title: 'Rendering Artifacts', icon: '📄', desc: 'Rendering DOCX and PDF resume files...' };
+    case 'apply':
+      if (args && args.all) return { title: 'Submitting Applications', icon: '🚀', desc: 'Executing batch application submissions...' };
+      return { title: 'Submitting Application', icon: '🚀', desc: 'Submitting application to job board...' };
+    case 'match':
+      return { title: 'Matching Listings', icon: '🎯', desc: 'Scoring listings against profile vector...' };
+    case 'run':
+      return { title: 'Autopilot Pipeline', icon: '⚡', desc: 'Executing full pipeline: match → tailor → render → apply...' };
+    case 'retry':
+      return { title: 'Retrying Application', icon: '🔄', desc: 'Resetting failed application state and retrying...' };
+    case 'inspect':
+      return { title: 'Inspecting Application', icon: '🔎', desc: 'Loading audit trails and artifacts...' };
+    case 'review':
+      return { title: 'Reviewing Drafts', icon: '📝', desc: 'Loading drafted applications for approval...' };
+    case 'interview':
+      return { title: 'Interview Prep', icon: '🎤', desc: 'Generating STAR stories & role-specific questions...' };
+    case 'email':
+      return { title: 'Cold Email Draft', icon: '✉️', desc: 'Drafting personalized outreach email...' };
+    case 'negotiate':
+      return { title: 'Negotiation Script', icon: '💼', desc: 'Building salary negotiation talking points...' };
+    case 'upskill':
+      return { title: 'Skill Gap Analysis', icon: '📈', desc: 'Analyzing skill gaps & generating learning plan...' };
+    case 'rollback':
+      return { title: 'Rolling Back', icon: '↩️', desc: 'Reverting application to previous pipeline stage...' };
+    case 'rematch':
+      return { title: 'Rematching', icon: '🎯', desc: 'Re-scoring shortlisted listings against profile...' };
+    case 'patterns':
+      return { title: 'Pattern Detection', icon: '📊', desc: 'Detecting repost/ghost-job patterns...' };
+    default:
+      return { title: 'Running ' + command, icon: '⚙️', desc: 'Executing command...' };
+  }
+}
+
 function switchTab(tabId) {
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  if (!document.getElementById('tab-' + tabId)) return;
+  document.querySelectorAll('.nav-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-current', 'false'); });
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   
   var btn = document.getElementById('tab-btn-' + tabId);
   var panel = document.getElementById('tab-' + tabId);
   if (btn) {
     btn.classList.add('active');
+    btn.setAttribute('aria-current', 'page');
+    var breadcrumb = document.getElementById('workspace-current-page');
+    if (breadcrumb) breadcrumb.textContent = Array.from(btn.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
     try { btn.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' }); } catch(e) {}
   }
-  if (panel) panel.classList.add('active');
+  if (panel) {
+    panel.classList.add('active');
+    panel.querySelectorAll('.reveal').forEach(function(el) { el.classList.add('revealed'); });
+  }
   try { localStorage.setItem('careerai-active-tab', tabId); } catch(e) {}
   try {
     var url = new URL(window.location.href);
     url.searchParams.set('tab', tabId);
     window.history.replaceState({}, '', url);
   } catch(e) {}
+
+  if (tabId === 'explorer' && typeof lazyLoadExplorer === 'function') {
+    lazyLoadExplorer();
+  }
+  if (tabId === 'analytics' && typeof lazyLoadAnalytics === 'function') {
+    lazyLoadAnalytics();
+  }
 }
 
 function activateCareerMoment(button, skipScroll) {
@@ -1756,6 +2201,75 @@ function filterFunnelStage(stage, pillEl) {
   });
 }
 
+function copyPayloadText(btn) {
+  var details = btn.closest('details');
+  if (!details) return;
+  var code = details.querySelector('pre code');
+  if (!code) return;
+  var text = code.innerText || code.textContent;
+  navigator.clipboard.writeText(text).then(function() {
+    var oldText = btn.innerText;
+    btn.innerText = '✓ Copied';
+    setTimeout(function() { btn.innerText = oldText; }, 2000);
+  }).catch(function() {
+    btn.innerText = 'Failed';
+  });
+}
+
+function refreshEventsTable() {
+  var tbody = document.getElementById('events-tbody');
+  var statsCount = document.getElementById('events-stat-count');
+  if (!tbody) return;
+  tbody.style.opacity = '0.5';
+  fetch('/api/v1/events')
+    .then(function(res) { return res.json(); })
+    .then(function(events) {
+      tbody.style.opacity = '1';
+      if (!Array.isArray(events) || events.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell"><div class="empty-events-state"><span class="empty-icon">📋</span><p>No recent system events recorded.</p></div></td></tr>';
+        if (statsCount) statsCount.innerText = '0';
+        return;
+      }
+      if (statsCount) statsCount.innerText = String(events.length);
+      var html = '';
+      events.forEach(function(ev) {
+        var sev = ev.severity || 'info';
+        var lid = ev.listing_id || '';
+        var summaryText = ev.summary || ev.note || 'State transition executed';
+        var searchStr = (lid + ' ' + summaryText + ' ' + (ev.raw_payload || '')).toLowerCase();
+        html += '<tr class="event-row" data-severity="' + escapeHtml(sev) + '" data-search="' + escapeHtml(searchStr) + '">';
+        html += '<td class="time-cell" title="' + escapeHtml(ev.timestamp || '') + '"><span class="rel-time">' + escapeHtml(ev.relative_time || '?') + '</span></td>';
+        html += '<td><span class="sev-badge sev-' + escapeHtml(sev) + '">' + escapeHtml(sev) + '</span></td>';
+        if (lid && lid !== '' && lid !== '00000000-0000-0000-0000-000000000000') {
+          html += '<td><span class="listing-id-pill" onclick="openAppModal(\'' + escapeJsString(lid) + '\')" title="View Listing Details">' + escapeHtml(lid) + '</span></td>';
+        } else {
+          html += '<td><span class="muted-dash">—</span></td>';
+        }
+        html += '<td><span class="transition-pill transition-' + escapeHtml(sev) + '">' + escapeHtml(ev.from_state || 'start') + ' <span class="arrow-glyph">→</span> <strong>' + escapeHtml(ev.to_state || '') + '</strong></span></td>';
+        html += '<td class="note-cell"><div class="event-note-wrapper">';
+        html += '<div class="event-summary-line sev-text-' + escapeHtml(sev) + '">';
+        if (sev === 'error') {
+          html += '<span class="event-icon sev-error-icon">✕</span>';
+        } else if (sev === 'warn') {
+          html += '<span class="event-icon sev-warn-icon">!</span>';
+        } else {
+          html += '<span class="event-icon sev-info-icon">●</span>';
+        }
+        html += '<span class="event-summary-text">' + escapeHtml(summaryText) + '</span></div>';
+        if (ev.raw_payload) {
+          html += '<details class="event-payload-details"><summary class="event-payload-summary"><span class="payload-toggle-icon">▸</span><span class="payload-toggle-text">Execution Log Details</span><button type="button" class="btn-copy-payload" onclick="event.stopPropagation(); copyPayloadText(this)" title="Copy log to clipboard">📋 Copy</button></summary><pre class="event-raw-log"><code>' + escapeHtml(ev.raw_payload) + '</code></pre></details>';
+        }
+        html += '</div></td></tr>';
+      });
+      tbody.innerHTML = html;
+      filterEvents();
+    })
+    .catch(function(err) {
+      tbody.style.opacity = '1';
+      console.error('Failed to refresh events:', err);
+    });
+}
+
 function filterEvents() {
   var q = (document.getElementById('event-search').value || '').toLowerCase().trim();
   document.querySelectorAll('.event-row').forEach(function(row) {
@@ -1807,7 +2321,7 @@ function openAppModal(id) {
       document.getElementById('modal-score').innerText = data.score ? Math.floor(data.score * 100) + '%' : '—';
       document.getElementById('modal-cover-letter').innerText = data.cover_letter_text || 'No tailored cover letter generated yet.';
       document.getElementById('modal-description').innerText = data.description || 'No description body recorded.';
-      document.getElementById('modal-external-link').href = data.url || '#';
+      document.getElementById('modal-external-link').href = safePostingUrl(data.url);
 
       var artifactsUl = document.getElementById('modal-artifacts');
       artifactsUl.innerHTML = '';
@@ -1837,10 +2351,22 @@ function openAppModal(id) {
       if (data.timeline && data.timeline.length > 0) {
         data.timeline.forEach(function(ev) {
           var li = document.createElement('li');
-          li.className = 'artifact-item';
-          li.innerText = '[' + (ev.relative_time || '?') + '] ' +
-            (ev.from_state || '∅') + ' → ' + ev.to_state +
-            (ev.note ? ' — ' + ev.note : '');
+          var sev = ev.severity || 'info';
+          li.className = 'artifact-item timeline-event-card sev-border-' + sev;
+          var summaryText = ev.summary || ev.note || 'State transition executed';
+          var timeStr = ev.relative_time || '?';
+          var transitionStr = (ev.from_state || 'start') + ' → <strong>' + ev.to_state + '</strong>';
+          var html = '<div style="display:flex; flex-direction:column; gap:4px; width:100%;">' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; font-size:11px;">' +
+            '<span class="transition-pill transition-' + escapeHtml(sev) + '">' + transitionStr + '</span>' +
+            '<span class="rel-time">' + escapeHtml(timeStr) + '</span>' +
+            '</div>' +
+            '<div class="timeline-summary-text sev-text-' + escapeHtml(sev) + '">' + escapeHtml(summaryText) + '</div>';
+          if (ev.raw_payload) {
+            html += '<details class="event-payload-details" style="margin-top:4px;"><summary class="event-payload-summary"><span class="payload-toggle-icon">▸</span><span class="payload-toggle-text">View Log</span></summary><pre class="event-raw-log" style="max-height:160px;"><code>' + escapeHtml(ev.raw_payload) + '</code></pre></details>';
+          }
+          html += '</div>';
+          li.innerHTML = html;
           timelineUl.appendChild(li);
         });
       } else {
@@ -1902,6 +2428,7 @@ function saveThreshold() {
     return;
   }
   if (msg) msg.textContent = 'Saving…';
+  var notif = createNotificationToast('Saving Threshold', 'Updating match threshold to ' + val.toFixed(3) + '...', '🎯');
   fetch('/api/config/threshold', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1911,21 +2438,29 @@ function saveThreshold() {
   .then(d => {
     if (msg) msg.textContent = d.message || 'Threshold updated.';
     if (pill) pill.textContent = val.toFixed(3);
+    notif.success('Match threshold updated to ' + val.toFixed(3));
   })
-  .catch(e => { if (msg) msg.textContent = 'Error: ' + e; });
+  .catch(e => {
+    if (msg) msg.textContent = 'Error: ' + e;
+    notif.error('Failed to update threshold: ' + e);
+  });
 }
 
 function rematchShortlisted() {
   const msg = document.getElementById('threshold-msg');
   if (msg) msg.textContent = 'Running rematch on shortlisted jobs…';
+  var notif = createNotificationToast('Rematching Listings', 'Re-scoring shortlisted jobs against threshold...', '🎯');
   fetch('/api/match/rematch-shortlisted', { method: 'POST' })
   .then(r => r.json())
   .then(d => {
     if (msg) msg.textContent = d.message || 'Rematch complete.';
-    // Refresh page after a short delay so the funnel reflects changes.
+    notif.success('Rematch complete! Refreshing...');
     setTimeout(() => location.reload(), 1500);
   })
-  .catch(e => { if (msg) msg.textContent = 'Error: ' + e; });
+  .catch(e => {
+    if (msg) msg.textContent = 'Error: ' + e;
+    notif.error('Rematch error: ' + e);
+  });
 }
 
 function calculateCostEstimate() {
@@ -1980,13 +2515,10 @@ function calculateCostEstimate() {
   }
 }
 
-// The "Generate Config from Profile" button calls this endpoint, which
-// derives discovery keywords/skills from profile/profile.yaml and writes
-// config/local.yaml. This function was referenced by the template but
-// never defined, so the button silently did nothing.
 function generateConfig() {
   var msgEl = configGenStatus();
   if (msgEl) msgEl.innerText = 'Generating config preview...';
+  var notif = createNotificationToast('Generating Config', 'Deriving discovery keywords from profile...', '⚙️');
   fetch('/api/v1/config/generate', { method: 'POST' })
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -1995,31 +2527,40 @@ function generateConfig() {
         document.getElementById('config-before').innerText = d.before || '(no existing config/local.yaml)';
         document.getElementById('config-after').innerText = d.after || '';
         document.getElementById('config-diff-panel').style.display = 'block';
+        notif.success('Config preview generated! Review diff below.');
       } else {
-        if (msgEl) msgEl.innerText = '❌ ' + (d.error || 'Generation failed');
+        var err = d.error || 'Generation failed';
+        if (msgEl) msgEl.innerText = '❌ ' + err;
+        notif.error(err);
       }
     })
     .catch(function(err) {
       if (msgEl) msgEl.innerText = '❌ ' + err;
+      notif.error(String(err));
     });
 }
 
 function applyGeneratedConfig() {
   var msgEl = configGenStatus();
   if (msgEl) msgEl.innerText = 'Applying merged config...';
+  var notif = createNotificationToast('Applying Config', 'Writing config/local.yaml...', '⚙️');
   fetch('/api/v1/config/apply', { method: 'POST' })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.status === 'success') {
         if (msgEl) msgEl.innerText = '✅ ' + (d.message || 'Config applied.');
         document.getElementById('config-diff-panel').style.display = 'none';
+        notif.success('Config applied successfully! Reloading...');
         setTimeout(function() { location.reload(); }, 1200);
       } else {
-        if (msgEl) msgEl.innerText = '❌ ' + (d.error || 'Apply failed');
+        var err = d.error || 'Apply failed';
+        if (msgEl) msgEl.innerText = '❌ ' + err;
+        notif.error(err);
       }
     })
     .catch(function(err) {
       if (msgEl) msgEl.innerText = '❌ ' + err;
+      notif.error(String(err));
     });
 }
 
@@ -2192,6 +2733,11 @@ function filterExplorerTable() {
 
     row.style.display = '';
   });
+  var visible = Array.from(rows).filter(function(row) { return row.style.display !== 'none'; }).length;
+  var status = document.getElementById('explorer-result-status');
+  if (status) status.textContent = visible + ' matching · ' + rows.length + ' loaded' + (_allExplorerItems.length > rows.length ? ' · loading more…' : '');
+  var empty = document.getElementById('explorer-no-results');
+  if (empty) empty.hidden = visible > 0 || rows.length === 0 || _allExplorerItems.length > rows.length;
 }
 
 function resetExplorerFilters() {
@@ -2314,6 +2860,7 @@ function toggleSelectAllColumn(stage, masterCb) {
 function tailorListing(id, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring...'; }
+  var notif = createNotificationToast('Tailoring Listing', 'Tailoring resume & generating cover letter...', '✨');
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2323,14 +2870,18 @@ function tailorListing(id, btn) {
   .then(function(d) {
     if (d.status === 'success') {
       if (btn) btn.innerHTML = '✅ Tailored!';
+      notif.success('Resume tailored successfully!');
       setTimeout(function() { location.reload(); }, 1000);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
@@ -2345,6 +2896,7 @@ function batchTailorSelected(btn) {
 function batchTailorAllShortlisted(btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring All...'; }
+  var notif = createNotificationToast('Batch Tailoring', 'Tailoring all shortlisted listings...', '✨');
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2354,14 +2906,18 @@ function batchTailorAllShortlisted(btn) {
   .then(function(d) {
     if (d.status === 'success') {
       if (btn) btn.innerHTML = '✅ All Tailored!';
+      notif.success('All shortlisted listings tailored!');
       setTimeout(function() { location.reload(); }, 1200);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
@@ -2369,6 +2925,7 @@ function batchTailorAllShortlisted(btn) {
 function batchTailorTop(limit, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring Top ' + limit + '...'; }
+  var notif = createNotificationToast('Batch Tailoring', 'Tailoring top ' + limit + ' shortlisted listings...', '✨');
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2378,14 +2935,18 @@ function batchTailorTop(limit, btn) {
   .then(function(d) {
     if (d.status === 'success') {
       if (btn) btn.innerHTML = '✅ Top ' + limit + ' Tailored!';
+      notif.success('Top ' + limit + ' listings tailored!');
       setTimeout(function() { location.reload(); }, 1200);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
@@ -2393,21 +2954,24 @@ function batchTailorTop(limit, btn) {
 function runBatchTailorSequence(ids, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Tailoring ' + ids.length + '...'; }
+  var notif = createNotificationToast('Batch Tailoring', 'Tailoring ' + ids.length + ' selected listings...', '✨');
   var nextIndex = 0;
   var failed = [];
   function processNext() {
     if (nextIndex >= ids.length) {
       if (failed.length === 0) {
         if (btn) btn.innerHTML = '✅ All ' + ids.length + ' Tailored!';
+        notif.success('All ' + ids.length + ' listings tailored successfully!');
       } else {
         if (btn) btn.innerHTML = '⚠️ ' + failed.length + '/' + ids.length + ' failed';
-        console.warn('Batch tailor failures:', failed);
+        notif.error(failed.length + ' of ' + ids.length + ' listings failed');
       }
       setTimeout(function() { location.reload(); }, 1500);
       return;
     }
     var id = ids[nextIndex];
     if (btn) btn.innerHTML = '⏳ Tailoring (' + (nextIndex + 1) + '/' + ids.length + ')...';
+    notif.update('Tailoring listing ' + (nextIndex + 1) + ' of ' + ids.length + '...');
     fetch('/api/v1/cli/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2417,7 +2981,6 @@ function runBatchTailorSequence(ids, btn) {
     .then(function(d) {
       if (d.status !== 'success') {
         failed.push({ id: id, error: d.error || d.message || 'unknown' });
-        console.error('Tailor failed for', id, ':', d.error || d.message);
       }
       nextIndex++;
       processNext();
@@ -2434,6 +2997,7 @@ function runBatchTailorSequence(ids, btn) {
 function renderApplication(id, btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rendering...'; }
+  var notif = createNotificationToast('Rendering Artifacts', 'Compiling DOCX & PDF files...', '📄');
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2443,14 +3007,18 @@ function renderApplication(id, btn) {
   .then(function(d) {
     if (d.status === 'success') {
       if (btn) btn.innerHTML = '✅ Rendered!';
+      notif.success('DOCX and PDF rendered successfully!');
       setTimeout(function() { location.reload(); }, 1000);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
@@ -2465,6 +3033,7 @@ function batchRenderSelected(btn) {
 function batchRenderAllTailored(btn) {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Rendering All...'; }
+  var notif = createNotificationToast('Rendering Artifacts', 'Rendering DOCX and PDF files for all tailored jobs...', '📄');
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2474,14 +3043,18 @@ function batchRenderAllTailored(btn) {
   .then(function(d) {
     if (d.status === 'success') {
       if (btn) btn.innerHTML = '✅ All Rendered!';
+      notif.success('All tailored applications rendered!');
       setTimeout(function() { location.reload(); }, 1200);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
@@ -2565,49 +3138,69 @@ function runBatchRenderSequence(ids, btn) {
 }
 
 function applyApplication(id, btn) {
+  var live = confirm("🚀 Submit this application LIVE to the company job board?\n\n• Click OK for LIVE Submission (submits and moves to Applied column)\n• Click Cancel for DRY-RUN Preview (tests payload safely without submitting)");
   var orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = live ? '⏳ Submitting Live...' : '⏳ Running Dry-Run...'; }
+  var notif = createNotificationToast(
+    live ? 'Live Submitting Application' : 'Dry-Run Submitting Application',
+    live ? 'Dispatching live submission to job board...' : 'Testing submission payload...',
+    '🚀'
+  );
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: 'apply', args: { application_id: id } })
+    body: JSON.stringify({ command: 'apply', args: { application_id: id, auto_submit: live } })
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.status === 'success') {
       if (btn) btn.innerHTML = '✅ Applied!';
+      notif.success(live ? 'Application submitted live!' : 'Dry-run validated successfully!');
       setTimeout(function() { location.reload(); }, 1000);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
 
 function batchApplyAllRendered(btn) {
+  var live = confirm("🚀 Submit all rendered applications LIVE to company job boards?\n\n• Click OK for LIVE Submission (submits and moves to Applied column)\n• Click Cancel for DRY-RUN Preview (validates payloads safely without submitting)");
   var orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying All...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = live ? '⏳ Submitting Live...' : '⏳ Running Dry-Run...'; }
+  var notif = createNotificationToast(
+    live ? 'Live Submitting Applications' : 'Dry-Run Submitting Applications',
+    live ? 'Submitting all rendered applications live...' : 'Validating all rendered application payloads...',
+    '🚀'
+  );
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: 'apply', args: { all: true } })
+    body: JSON.stringify({ command: 'apply', args: { all: true, auto_submit: live } })
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
     if (d.status === 'success') {
-      if (btn) btn.innerHTML = '✅ All Applied!';
+      if (btn) btn.innerHTML = '✅ Done!';
+      notif.success(live ? 'All applications submitted live!' : 'Dry-run completed successfully!');
       setTimeout(function() { location.reload(); }, 1200);
     } else {
-      if (btn) btn.innerHTML = '❌ ' + (d.error || d.message || 'Failed');
+      var msg = d.error || d.message || 'Failed';
+      if (btn) btn.innerHTML = '❌ ' + msg;
+      notif.error(msg);
       setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
     }
   })
   .catch(function(err) {
     if (btn) btn.innerHTML = '❌ Error';
+    notif.error(err.message || 'Network error');
     setTimeout(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } }, 3000);
   });
 }
@@ -2620,21 +3213,29 @@ function batchApplySelected(btn) {
 }
 
 function runBatchApplySequence(ids, btn) {
+  var live = confirm("🚀 Submit " + ids.length + " selected applications LIVE to company job boards?\n\n• Click OK for LIVE Submission (submits and moves to Applied column)\n• Click Cancel for DRY-RUN Preview");
   var orig = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying ' + ids.length + '...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = live ? '⏳ Submitting Live (' + ids.length + ')...' : '⏳ Dry-Run (' + ids.length + ')...'; }
+  var notif = createNotificationToast(
+    live ? 'Live Submitting Applications' : 'Dry-Run Submitting Applications',
+    'Processing ' + ids.length + ' selected applications...',
+    '🚀'
+  );
   var nextIndex = 0;
   function processNext() {
     if (nextIndex >= ids.length) {
-      if (btn) btn.innerHTML = '✅ All Applied!';
+      if (btn) btn.innerHTML = '✅ Done!';
+      notif.success(live ? 'All ' + ids.length + ' applications submitted live!' : 'All ' + ids.length + ' applications validated!');
       setTimeout(function() { location.reload(); }, 1200);
       return;
     }
     var id = ids[nextIndex];
-    if (btn) btn.innerHTML = '⏳ Applying (' + (nextIndex + 1) + '/' + ids.length + ')...';
+    if (btn) btn.innerHTML = '⏳ (' + (nextIndex + 1) + '/' + ids.length + ')...';
+    notif.update('Processing application ' + (nextIndex + 1) + ' of ' + ids.length + '...');
     fetch('/api/v1/cli/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: 'apply', args: { application_id: id } })
+      body: JSON.stringify({ command: 'apply', args: { application_id: id, auto_submit: live } })
     })
     .then(function() {
       nextIndex++;
@@ -2749,6 +3350,12 @@ function filterExplorerBySource(srcName) {
 function runCliCommand(command, args, btn) {
   var originalText = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Running...'; }
+
+  var meta = getCommandMeta(command, args);
+  var notif = createNotificationToast(meta.title, meta.desc, meta.icon);
+
+  var contentCommands = ['interview', 'email', 'negotiate', 'upskill', 'review', 'patterns'];
+
   fetch('/api/v1/cli/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2758,14 +3365,21 @@ function runCliCommand(command, args, btn) {
     .then(function(d) {
       if (d.status === 'success') {
         if (btn) btn.innerHTML = '✅ Done!';
+        notif.success('Execution completed successfully!');
+
+        if (contentCommands.indexOf(command) !== -1 && d.message) {
+          showCommandOutput(meta.title, d.message, meta.icon);
+        }
+
         setTimeout(function() {
           if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
           refreshExplorerListings();
-          if (command !== 'discover') location.reload();
+          if (contentCommands.indexOf(command) === -1 && command !== 'discover') location.reload();
         }, 1500);
       } else {
         var message = d.status === 'busy' ? 'Busy — another run is in progress' : (d.error || d.message || 'Failed');
         if (btn) btn.innerHTML = '❌ ' + message;
+        notif.error(message);
         setTimeout(function() {
           if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
         }, 3000);
@@ -2773,10 +3387,41 @@ function runCliCommand(command, args, btn) {
     })
     .catch(function(err) {
       if (btn) btn.innerHTML = '❌ Error';
+      notif.error(err.message || 'Network error executing command');
       setTimeout(function() {
         if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
       }, 3000);
     });
+}
+
+function showCommandOutput(title, output, icon) {
+  var overlay = document.createElement('div');
+  overlay.className = 'cmd-output-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+
+  var modal = document.createElement('div');
+  modal.className = 'cmd-output-modal';
+  modal.style.cssText = 'background:var(--bg-card);border:1px solid var(--border);border-radius:12px;max-width:760px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.4);';
+
+  var header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);';
+  header.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:18px;">' + icon + '</span><strong style="font-size:14px;">' + escapeHtml(title) + '</strong></div>';
+
+  var closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);font-size:18px;cursor:pointer;padding:4px 8px;';
+  closeBtn.onclick = function() { overlay.remove(); };
+  header.appendChild(closeBtn);
+
+  var body = document.createElement('pre');
+  body.style.cssText = 'padding:20px;overflow:auto;font-family:var(--mono);font-size:13px;line-height:1.5;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;';
+  body.textContent = output;
+
+  modal.appendChild(header);
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 
 // Commands-tab runner for cards that need an id argument. `tailor`
@@ -2963,15 +3608,6 @@ function sendChatMessage(event) {
   });
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 // Escape for a single-quoted JS string embedded in an HTML attribute.
 // Backslashes and quotes must be escaped for the JS parser; `&`, `<`,
 // `>`, and `"` become entities so the surrounding `onclick="..."` HTML
@@ -2999,19 +3635,21 @@ function formatMarkdownResponse(md) {
     .replace(/\n/g, '<br>');
 }
 
+function restoreWorkspaceTab() {
+  var savedTab;
+  try { savedTab = localStorage.getItem('careerai-active-tab'); } catch(e) {}
+  var requestedTab = new URLSearchParams(window.location.search).get('tab');
+  var validTabs = ['funnel', 'events', 'config', 'actions', 'explorer', 'commands', 'analytics', 'bounties', 'chat'];
+  if (requestedTab && validTabs.indexOf(requestedTab) !== -1) {
+    switchTab(requestedTab);
+  } else if (savedTab && validTabs.indexOf(savedTab) !== -1) {
+    switchTab(savedTab);
+  }
+}
+
 // State Restoration & Event Handlers on Page Load
 document.addEventListener('DOMContentLoaded', function() {
-  // Restore Active Tab
-  try {
-    var savedTab = localStorage.getItem('careerai-active-tab');
-    var requestedTab = new URLSearchParams(window.location.search).get('tab');
-    var validTabs = ['funnel', 'events', 'config', 'actions', 'explorer', 'commands', 'canvas', 'chat'];
-    if (requestedTab && validTabs.indexOf(requestedTab) !== -1) {
-      switchTab(requestedTab);
-    } else if (savedTab && validTabs.indexOf(savedTab) !== -1) {
-      switchTab(savedTab);
-    }
-  } catch(e) {}
+  restoreWorkspaceTab();
 
   // Restore LLM Form Settings (Backend, Model, Base URL, API Key, Timeout)
   try {
@@ -3092,75 +3730,379 @@ document.addEventListener('DOMContentLoaded', function() {
     try { sessionStorage.setItem('careerai-exp-search', e.target.value); } catch(err) {}
     filterExplorerTable();
   });
+
+  // Lazy-load explorer rows after page paint. If explorer tab is not
+  // currently active, defer the fetch to idle time to prioritize the critical
+  // view.
+  {% if view.explorer_lazy %}
+  if (document.getElementById('tab-explorer').classList.contains('active')) {
+    lazyLoadExplorer();
+  } else if ('requestIdleCallback' in window) {
+    requestIdleCallback(function() { lazyLoadExplorer(); }, { timeout: 2000 });
+  } else {
+    setTimeout(lazyLoadExplorer, 800);
+  }
+  {% endif %}
 });
 
-function refreshExplorerListings() {
-  fetch('/api/v1/explorer')
+var _explorerLoaded = false;
+var _allExplorerItems = [];
+
+// ---- Analytics tab lazy loader ----
+var _analyticsLoaded = false;
+function lazyLoadAnalytics() {
+  if (_analyticsLoaded) return;
+  _analyticsLoaded = true;
+  fetch('/api/v1/analytics')
     .then(function(r) { return r.json(); })
-    .then(function(items) {
-      if (!Array.isArray(items)) return;
-      var tbody = document.getElementById('explorer-tbody');
-      if (!tbody) return;
+    .then(function(data) {
+      document.getElementById('analytics-loading').style.display = 'none';
+      document.getElementById('analytics-content').style.display = 'block';
 
-      var existingIds = new Set();
-      tbody.querySelectorAll('.explorer-row').forEach(function(row) {
-        var btn = row.querySelector('.detail-link-btn');
-        if (btn) {
-          var onclick = btn.getAttribute('onclick') || '';
-          var m = onclick.match(/openAppModal\('([^']+)'\)/);
-          if (m) existingIds.add(m[1]);
-        }
-      });
-
-      var newItems = items.filter(function(it) { return !existingIds.has(it.id); });
-      if (newItems.length === 0) return;
-
-      var fragment = document.createDocumentFragment();
-      newItems.forEach(function(item) {
-        var tr = document.createElement('tr');
-        tr.className = 'explorer-row';
-        var titleLower = (item.title || '').toLowerCase();
-        var compLower = (item.company || '').toLowerCase();
-        var locLower = (item.location || '').toLowerCase();
-        tr.setAttribute('data-search', titleLower + ' ' + compLower + ' ' + locLower);
-        tr.setAttribute('data-remote', item.is_remote ? 'true' : 'false');
-        tr.setAttribute('data-state', item.state || '');
-
-        var titleStr = item.title || ('Listing ' + item.id);
-        var companyStr = item.company ? ('🏢 ' + item.company) : '🏢 Unspecified';
-        var locStr = item.location ? ('📍 ' + item.location) : '📍 Remote / Unspecified';
-        var scoreStr = item.score ? Math.floor(item.score * 100) + '%' : '—';
-        var sevClass = item.state === 'discovered' ? 'sev-info' : 'sev-warn';
-
-        tr.innerHTML = '<td><a href="' + escapeHtml(item.url || '#') + '" target="_blank" class="title-link">' + escapeHtml(titleStr) + '</a></td>' +
-          '<td><code class="listing-id-cell" title="Click to copy" onclick="copyCliCommand(\'' + escapeJsString(item.id) + '\', this)">' + escapeHtml(item.id) + '</code></td>' +
-          '<td>' + escapeHtml(companyStr) + '</td>' +
-          '<td>' + escapeHtml(locStr) + '</td>' +
-          '<td><span class="pill pill-info">' + escapeHtml(item.source || 'unknown') + '</span></td>' +
-          '<td><span class="sev-badge ' + sevClass + '">' + escapeHtml(item.state || '') + '</span></td>' +
-          '<td>' + scoreStr + '</td>' +
-          '<td><button class="detail-link-btn" onclick="openAppModal(\'' + escapeJsString(item.id) + '\')">Inspect →</button><button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist(\'' + escapeJsString(item.id) + '\')">⚡ Shortlist</button></td>';
-
-        fragment.appendChild(tr);
-      });
-
-      if (tbody.firstChild) {
-        tbody.insertBefore(fragment, tbody.firstChild);
+      // Reposts
+      var reposts = data.reposts || [];
+      var rc = document.getElementById('reposts-count');
+      if (rc) rc.textContent = '(' + reposts.length + ' detected)';
+      var rd = document.getElementById('analytics-reposts');
+      if (reposts.length === 0) {
+        rd.innerHTML = '<p style="color:var(--text-secondary); padding:8px 0;">No reposts detected.</p>';
       } else {
-        tbody.appendChild(fragment);
+        var html = '<table class="data-table"><thead><tr><th>Company</th><th>Title</th><th>Source</th><th>Occurrences</th><th>First Seen</th><th>Last Seen</th></tr></thead><tbody>';
+        reposts.forEach(function(r) {
+          html += '<tr><td>' + escapeHtml(r.company) + '</td><td>' + escapeHtml(r.title) + '</td><td>' + escapeHtml(r.source) + '</td><td>' + r.occurrences + '</td><td>' + r.first_seen + '</td><td>' + r.last_seen + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        rd.innerHTML = html;
       }
 
-      filterExplorerTable();
+      // Funnel velocity
+      var funnel = data.funnel_velocity || [];
+      var fd = document.getElementById('analytics-funnel');
+      if (funnel.length === 0) {
+        fd.innerHTML = '<p style="color:var(--text-secondary); padding:8px 0;">No funnel data yet.</p>';
+      } else {
+        var html = '<table class="data-table"><thead><tr><th>Source</th><th>Discovered</th><th>Shortlisted</th><th>Submitted</th><th>Responded</th><th>Rejected</th></tr></thead><tbody>';
+        funnel.forEach(function(f) {
+          html += '<tr><td>' + escapeHtml(f.source) + '</td><td>' + f.discovered + '</td><td>' + f.shortlisted + '</td><td>' + f.submitted + '</td><td>' + f.responded + '</td><td>' + f.rejected + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        fd.innerHTML = html;
+      }
+
+      // Advance rates
+      var advances = data.advance_rates || [];
+      var ad = document.getElementById('analytics-advance');
+      if (advances.length === 0) {
+        ad.innerHTML = '<p style="color:var(--text-secondary); padding:8px 0;">No submission data yet.</p>';
+      } else {
+        var html = '<table class="data-table"><thead><tr><th>Source</th><th>Submitted</th><th>Responded</th><th>Advance Rate</th></tr></thead><tbody>';
+        advances.forEach(function(a) {
+          var pct = (a.rate * 100).toFixed(1) + '%';
+          html += '<tr><td>' + escapeHtml(a.source) + '</td><td>' + a.submitted + '</td><td>' + a.responded + '</td><td>' + pct + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        ad.innerHTML = html;
+      }
+
+      // Rejection latencies
+      var rejections = data.rejection_latencies || [];
+      var jd = document.getElementById('analytics-rejections');
+      if (rejections.length === 0) {
+        jd.innerHTML = '<p style="color:var(--text-secondary); padding:8px 0;">No rejection data yet.</p>';
+      } else {
+        var html = '<table class="data-table"><thead><tr><th>Company</th><th>Title</th><th>Source</th><th>Days to Reject</th></tr></thead><tbody>';
+        rejections.forEach(function(r) {
+          html += '<tr><td>' + escapeHtml(r.company) + '</td><td>' + escapeHtml(r.title) + '</td><td>' + escapeHtml(r.source) + '</td><td>' + r.days_to_reject.toFixed(1) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        jd.innerHTML = html;
+      }
     })
     .catch(function(err) {
-      console.warn('Failed to refresh explorer listings:', err);
+      var el = document.getElementById('analytics-loading');
+      if (el) el.innerHTML = '<p style="color:#f87171;">Failed to load analytics: ' + err + '</p>';
     });
+
+  // Load source attribution
+  fetch('/api/v1/source-attribution').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-source-attribution');
+    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No source data yet.</p>'; return; }
+    var html = '<table class="data-table"><thead><tr><th>Source</th><th>Discovered</th><th>Submitted</th><th>Responded</th><th>Response Rate</th></tr></thead><tbody>';
+    data.forEach(function(s) {
+      var pct = (s.response_rate * 100).toFixed(1) + '%';
+      html += '<tr><td>' + escapeHtml(s.source) + '</td><td>' + s.discovered + '</td><td>' + s.submitted + '</td><td>' + s.responded + '</td><td>' + pct + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // Load timing stats
+  fetch('/api/v1/timing').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-timing');
+    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No timing data yet.</p>'; return; }
+    var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var html = '<table class="data-table"><thead><tr><th>Day</th><th>Submitted</th><th>Responded</th><th>Response Rate</th></tr></thead><tbody>';
+    data.forEach(function(t) {
+      var pct = (t.response_rate * 100).toFixed(1) + '%';
+      var day = days[t.day_of_week] || t.day_of_week;
+      html += '<tr><td>' + day + '</td><td>' + t.submitted + '</td><td>' + t.responded + '</td><td>' + pct + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // Load A/B variants
+  fetch('/api/v1/variants').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-variants');
+    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No variant data yet. Submit applications with different resume variants to start tracking.</p>'; return; }
+    var html = '<table class="data-table"><thead><tr><th>Variant</th><th>Company</th><th>Title</th><th>Status</th></tr></thead><tbody>';
+    data.forEach(function(v) {
+      html += '<tr><td>' + escapeHtml(v.variant_label) + '</td><td>' + escapeHtml(v.company || '') + '</td><td>' + escapeHtml(v.title || '') + '</td><td>' + escapeHtml(v.response_status) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // Load salary ranges
+  fetch('/api/v1/salary-ranges').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-salary');
+    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No salary data extracted yet. Salaries are auto-extracted from job descriptions during discovery.</p>'; return; }
+    var html = '<table class="data-table"><thead><tr><th>Company</th><th>Title</th><th>Min</th><th>Max</th><th>Currency</th><th>Period</th></tr></thead><tbody>';
+    data.forEach(function(s) {
+      html += '<tr><td>' + escapeHtml(s.company) + '</td><td>' + escapeHtml(s.title) + '</td><td>' + (s.min_salary || '—') + '</td><td>' + (s.max_salary || '—') + '</td><td>' + escapeHtml(s.currency) + '</td><td>' + escapeHtml(s.period) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // Load market pulse
+  fetch('/api/v1/market-pulse').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-market-pulse');
+    if (!el || data.error) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">Market pulse data unavailable.</p>'; return; }
+    var html = '<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:10px;">';
+    html += '<div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;"><small style="color:var(--text-secondary);">New (7d)</small><br><b>' + data.new_listings_7d + '</b></div>';
+    html += '<div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;"><small style="color:var(--text-secondary);">New Companies</small><br><b>' + data.new_companies_7d + '</b></div>';
+    html += '<div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;"><small style="color:var(--text-secondary);">Submitted (7d)</small><br><b>' + data.submitted_7d + '</b></div>';
+    html += '<div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;"><small style="color:var(--text-secondary);">Responded (7d)</small><br><b>' + data.responded_7d + '</b></div>';
+    html += '<div style="background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px;"><small style="color:var(--text-secondary);">Avg Score</small><br><b>' + (data.avg_score_shortlisted || 0).toFixed(2) + '</b></div>';
+    html += '</div>';
+    if (data.top_hiring_companies && data.top_hiring_companies.length > 0) {
+      html += '<div style="margin-top:8px;"><small style="color:var(--text-secondary);">Top hiring:</small> ';
+      data.top_hiring_companies.slice(0,5).forEach(function(c) { html += '<span style="display:inline-block; margin:2px 4px; padding:2px 8px; background:rgba(129,140,248,0.1); border-radius:4px; font-size:11px;">' + escapeHtml(c.company || c[0]) + ' (' + (c.count || c[1]) + ')</span>'; });
+      html += '</div>';
+    }
+    if (data.top_skills_in_jds && data.top_skills_in_jds.length > 0) {
+      html += '<div style="margin-top:8px;"><small style="color:var(--text-secondary);">Trending skills:</small> ';
+      data.top_skills_in_jds.slice(0,10).forEach(function(s) { html += '<span style="display:inline-block; margin:2px 4px; padding:2px 8px; background:rgba(34,211,238,0.1); border-radius:4px; font-size:11px;">' + escapeHtml(s.skill || s[0]) + '</span>'; });
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // Load follow-ups
+  fetch('/api/v1/follow-ups').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-follow-ups');
+    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No pending follow-ups. Click "Check Now" to scan for stale applications.</p>'; return; }
+    var html = '<table class="data-table"><thead><tr><th>Company</th><th>Title</th><th>Status</th><th>Scheduled</th><th>Step</th><th>Draft</th></tr></thead><tbody>';
+    data.forEach(function(f) {
+      var bodyPreview = escapeHtml((f.body || '').substring(0,100));
+      if ((f.body || '').length > 100) bodyPreview += '…';
+      html += '<tr><td>' + escapeHtml(f.company) + '</td><td>' + escapeHtml(f.title) + '</td><td>' + escapeHtml(f.status) + '</td><td>' + escapeHtml((f.scheduled_at || '').substring(0,10)) + '</td><td>' + (f.cadence_step || 1) + '</td><td style="max-width:300px; overflow:hidden; text-overflow:ellipsis;">' + bodyPreview + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // Load interview feedback
+  fetch('/api/v1/interview-feedback').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('analytics-interview-feedback');
+    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No interview feedback logged yet. Use the form below to add your first entry.</p>'; return; }
+    var html = '<table class="data-table"><thead><tr><th>Company</th><th>Title</th><th>Rating</th><th>Questions</th><th>Date</th></tr></thead><tbody>';
+    data.forEach(function(f) {
+      var stars = '★'.repeat(f.rating) + '☆'.repeat(5 - f.rating);
+      var q = (f.questions_text || '').split('\n').filter(function(l){return l.trim();}).length + ' questions';
+      html += '<tr><td>' + escapeHtml(f.company) + '</td><td>' + escapeHtml(f.title) + '</td><td>' + stars + '</td><td>' + q + '</td><td>' + escapeHtml(f.created_at.substring(0,10)) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+}
+
+function checkFollowUps(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Checking...'; }
+  fetch('/api/v1/follow-ups/check', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Check Now'; }
+      if (d.status === 'success') {
+        alert('Created ' + d.created + ' follow-up drafts.');
+        if (typeof lazyLoadAnalytics === 'function') { _analyticsLoaded = false; lazyLoadAnalytics(); }
+      } else {
+        alert('Error: ' + (d.error || 'Unknown'));
+      }
+    })
+    .catch(function(err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Check Now'; }
+      alert('Error: ' + err);
+    });
+}
+
+function saveInterviewFeedback(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Saving...'; }
+  var payload = {
+    application_id: document.getElementById('fb-app-id').value,
+    listing_id: document.getElementById('fb-listing-id').value,
+    company: document.getElementById('fb-company').value,
+    title: document.getElementById('fb-title').value,
+    questions_text: document.getElementById('fb-questions').value,
+    rating: parseInt(document.getElementById('fb-rating').value),
+    went_well: document.getElementById('fb-went-well').value,
+    could_improve: document.getElementById('fb-improve').value,
+  };
+  fetch('/api/v1/interview-feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Save Feedback'; }
+      if (d.status === 'success') {
+        alert('Feedback saved!');
+        _analyticsLoaded = false;
+        if (typeof lazyLoadAnalytics === 'function') lazyLoadAnalytics();
+      } else {
+        alert('Error: ' + (d.error || 'Unknown'));
+      }
+    })
+    .catch(function(err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Save Feedback'; }
+      alert('Error: ' + err);
+    });
+}
+
+// Progressive chunked lazy-load: fetches /api/v1/explorer, immediately renders
+// the first viewport batch (100 items), then streams remaining rows into the DOM
+// during browser idle frames without locking the main thread.
+var _explorerGeneration = 0;
+var _explorerRequest = null;
+function lazyLoadExplorer() {
+  if (_explorerLoaded) return;
+  return loadExplorerListings();
+}
+function loadExplorerListings() {
+  if (_explorerRequest) return _explorerRequest;
+  _explorerLoaded = true;
+  var error = document.getElementById('explorer-load-error');
+  if (error) error.hidden = true;
+  _explorerRequest = fetch('/api/v1/explorer')
+    .then(function(response) { if (!response.ok) throw new Error('Listings unavailable'); return response.json(); })
+    .then(function(items) {
+      if (!Array.isArray(items)) throw new Error('Invalid listings response');
+      _allExplorerItems = items;
+      var tbody = document.getElementById('explorer-tbody');
+      if (!tbody) return;
+      var generation = ++_explorerGeneration;
+      tbody.replaceChildren();
+      var count = document.getElementById('explorer-count');
+      if (count) count.textContent = items.length;
+      var badge = document.getElementById('explorer-badge');
+      if (badge) badge.textContent = items.length;
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">Your search starts here. Use Run Discover to find your first opportunities.</td></tr>';
+        filterExplorerTable(); return;
+      }
+      var index = 0;
+      function appendNextChunk() {
+        if (generation !== _explorerGeneration) return;
+        renderExplorerRowsChunk(tbody, items.slice(index, index + 100));
+        index += 100;
+        filterExplorerTable();
+        if (index < items.length) {
+          if ('requestIdleCallback' in window) requestIdleCallback(appendNextChunk, { timeout: 500 });
+          else setTimeout(appendNextChunk, 16);
+        }
+      }
+      appendNextChunk();
+    })
+    .catch(function() {
+      _explorerLoaded = false;
+      if (error) {
+        error.hidden = false;
+        error.textContent = 'Could not load opportunities. Existing results may be out of date. ';
+        var retry = document.createElement('button'); retry.type = 'button'; retry.className = 'text-button'; retry.textContent = 'Retry';
+        retry.onclick = lazyLoadExplorer; error.appendChild(retry);
+      }
+      var loading = document.getElementById('explorer-loading-row');
+      if (loading) loading.remove();
+    })
+    .finally(function() { _explorerRequest = null; });
+  return _explorerRequest;
+}
+
+function renderExplorerRowsChunk(tbody, items) {
+  var fragment = document.createDocumentFragment();
+  items.forEach(function(item) {
+    var tr = document.createElement('tr');
+    tr.className = 'explorer-row';
+    var titleLower = (item.title || '').toLowerCase();
+    var compLower = (item.company || '').toLowerCase();
+    var locLower = (item.location || '').toLowerCase();
+    tr.setAttribute('data-search', titleLower + ' ' + compLower + ' ' + locLower + ' ' + (item.source || '').toLowerCase());
+    tr.setAttribute('data-remote', item.is_remote ? 'true' : 'false');
+    tr.setAttribute('data-state', item.state || '');
+
+    var titleStr = item.title || ('Listing ' + item.id);
+    var legitEmoji = item.legitimacy === 'suspicious' ? ' 🔴' : (item.legitimacy === 'caution' ? ' 🟡' : ' 🟢');
+    var legitTitle = item.legitimacy === 'suspicious' ? 'Suspicious — possible scam or ghost job' : (item.legitimacy === 'caution' ? 'Caution — minor red flags' : 'No red flags');
+    var companyStr = item.company ? ('🏢 ' + item.company) : '🏢 Unspecified';
+    var legitimacyBadge = '<span class="legit-badge" title="' + legitTitle + '">' + legitEmoji + '</span>';
+    var locStr = item.location ? ('📍 ' + item.location) : '📍 Remote / Unspecified';
+    var scoreStr = typeof item.score === 'number' ? Math.floor(item.score * 100) + '%' : '—';
+    var sevClass = item.state === 'discovered' ? 'sev-info' : 'sev-warn';
+
+    var actionHtml = '<button class="detail-link-btn" onclick="openAppModal(\'' + escapeJsString(item.id) + '\')">Inspect →</button>';
+    var st = item.state || '';
+    if (st === 'discovered' || st === 'filtered_out') {
+      actionHtml += '<button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist(\'' + escapeJsString(item.id) + '\')">⚡ Shortlist</button>';
+    } else if (st === 'shortlisted') {
+      actionHtml += '<button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand(\'tailor\', {listing_id: \'' + escapeJsString(item.id) + '\'}, this)">✂️ Tailor</button>';
+    } else if (st === 'tailored' && item.application_id) {
+      actionHtml += '<button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand(\'render\', {application_id: \'' + escapeJsString(item.application_id) + '\'}, this)">📄 Render</button>';
+    } else if ((st === 'rendered' || st === 'prepared') && item.application_id) {
+      actionHtml += '<button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand(\'apply\', {application_id: \'' + escapeJsString(item.application_id) + '\'}, this)">📨 Apply</button>';
+    } else if (st === 'drafted') {
+      actionHtml += '<button class="btn-primary btn-sm" style="margin-left:4px;" onclick="openAppModal(\'' + escapeJsString(item.id) + '\')">👀 Review Draft</button>';
+    } else if (st === 'failed' && item.application_id) {
+      actionHtml += '<button class="btn-primary btn-sm" style="margin-left:4px;" onclick="runCliCommand(\'retry\', {application_id: \'' + escapeJsString(item.application_id) + '\'}, this)">🔄 Retry</button>';
+    }
+
+    tr.innerHTML = '<td><a href="' + escapeHtml(safePostingUrl(item.url)) + '" target="_blank" rel="noopener noreferrer" class="title-link">' + escapeHtml(titleStr) + '</a></td>' +
+      '<td><code class="listing-id-cell" title="Click to copy — use with `careerai tailor <id>`" onclick="copyCliCommand(\'' + escapeJsString(item.id) + '\', this)">' + escapeHtml(item.id) + '</code></td>' +
+      '<td>' + escapeHtml(companyStr) + legitimacyBadge + '</td>' +
+      '<td>' + escapeHtml(locStr) + '</td>' +
+      '<td><span class="pill pill-info">' + escapeHtml(item.source || 'unknown') + '</span></td>' +
+      '<td><span class="sev-badge ' + sevClass + '">' + escapeHtml(st) + '</span></td>' +
+      '<td>' + scoreStr + '</td>' +
+      '<td>' + actionHtml + '</td>';
+
+    fragment.appendChild(tr);
+  });
+
+  tbody.appendChild(fragment);
+}
+
+function refreshExplorerListings() {
+  if (document.getElementById('tab-explorer').classList.contains('active')) {
+    return (_explorerRequest || Promise.resolve()).then(loadExplorerListings);
+  }
 }
 
 // Smart Countdown Timer Script (Auto-pauses when user is typing or AI is thinking)
 (function() {
-  var sec = parseInt("{{ refresh_seconds }}", 10) || 60;
-  if (sec <= 0) return;
+  var sec = parseInt("{{ refresh_seconds }}", 10);
+  if (!Number.isFinite(sec)) sec = 60;
+  if (sec <= 0) { var disabledTimer = document.getElementById('countdown-text'); if (disabledTimer) disabledTimer.textContent = 'Manual'; return; }
   var count = sec;
   var el = document.getElementById('countdown-text');
   setInterval(function() {
@@ -3170,7 +4112,9 @@ function refreshExplorerListings() {
                    (cfgInput && (document.activeElement === cfgInput || (cfgInput.value || '').length > 0));
     var isThinking = document.querySelector('.msg-loading');
     
-    if (isTyping || isThinking) {
+    var active = document.activeElement;
+    var isEditing = active && (active.matches('input, textarea, select') || active.isContentEditable);
+    if (document.hidden || isEditing || isTyping || isThinking || document.querySelector('dialog[open]')) {
       if (el) el.innerText = 'Paused';
       return; // Defer countdown refresh while active
     }
@@ -3186,30 +4130,25 @@ function refreshExplorerListings() {
 </script>
 
 <!-- ================================================================ MAKEOVER JS
-     Loading screen, scroll progress, scroll-reveal, animated counters,
+     Top load indicator, scroll progress, scroll-reveal, animated counters,
      3D card tilt, stepper progress fill, footer reveal.
      ========================================================================= -->
 <script>
 (function() {
   'use strict';
 
-  // ---- Loading screen ----
-  var overlay = document.getElementById('loader-overlay');
-  var barFill = document.getElementById('loader-bar-fill');
-  var pctEl = document.getElementById('loader-pct');
-  var progress = 0;
-  var loadTimer = setInterval(function() {
-    progress += Math.random() * 20 + 25;
-    if (progress >= 100) { progress = 100; clearInterval(loadTimer); }
-    if (barFill) barFill.style.width = progress + '%';
-    if (pctEl) pctEl.textContent = Math.floor(progress) + '%';
-    if (progress >= 100) {
+  // ---- Instant Top Loading indicator ----
+  var topBar = document.getElementById('top-load-bar');
+  var topFill = document.getElementById('top-load-fill');
+  if (topFill) {
+    topFill.style.width = '70%';
+    setTimeout(function() {
+      topFill.style.width = '100%';
       setTimeout(function() {
-        if (overlay) overlay.classList.add('hidden');
-        setTimeout(scanReveal, 150);
-      }, 80);
-    }
-  }, 50);
+        if (topBar) topBar.classList.add('finished');
+      }, 150);
+    }, 40);
+  }
 
   // ---- Scroll progress bar ----
   var scrollBar = document.getElementById('scroll-progress');
@@ -3222,11 +4161,18 @@ function refreshExplorerListings() {
   }
   window.addEventListener('scroll', updateScrollProgress, { passive: true });
 
-  // ---- Scroll-reveal via IntersectionObserver ----
-  var revealSelector = '.mission-hero, .career-story, .operations-divider, .kpi, .guided-path, .pipeline-stepper, .filter-bar, .funnel, .next-steps, .config-card, .command-chapter, .cmd-card, .spatial-shell, .action-card, .filter-panel-card, .table-container, .chat-wrapper, .sources-list, footer';
-  // Add reveal class to target elements
+  // ---- Critical View First & Scroll-reveal ----
+  var revealSelector = '.mission-hero, .career-story, .operations-divider, .kpi, .guided-path, .pipeline-stepper, .filter-bar, .funnel, .next-steps, .config-card, .command-chapter, .cmd-card, .action-card, .filter-panel-card, .table-container, .chat-wrapper, .sources-list, .bounty-grid, footer';
+  
+  // Immediately reveal critical above-the-fold elements in the active view
+  document.querySelectorAll('.mission-hero, .kpi, .guided-path, .filter-bar, .funnel, #tab-events .table-container, header').forEach(function(el) {
+    el.classList.add('revealed');
+  });
+
   document.querySelectorAll(revealSelector).forEach(function(el) {
-    el.classList.add('reveal');
+    if (!el.classList.contains('revealed')) {
+      el.classList.add('reveal');
+    }
   });
 
   var revealObserver = null;
@@ -3243,11 +4189,12 @@ function refreshExplorerListings() {
           revealObserver.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+    }, { threshold: 0.05, rootMargin: '0px 0px -20px 0px' });
     document.querySelectorAll('.reveal:not(.revealed)').forEach(function(el) {
       revealObserver.observe(el);
     });
   }
+  scanReveal();
 
   // ---- Animated KPI counters ----
   // Numbers are already in the DOM (progressive enhancement). Count-up
@@ -3258,6 +4205,7 @@ function refreshExplorerListings() {
     var target = parseInt(el.getAttribute('data-count'), 10);
     if (isNaN(target)) return;
     var suffix = el.getAttribute('data-suffix') || '';
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = target + suffix; return; }
     var duration = 900;
     var start = performance.now();
     function tick(now) {
@@ -3362,9 +4310,6 @@ function refreshExplorerListings() {
       el.classList.add('revealed');
     });
     document.querySelectorAll('.kpi-num[data-count]:not(.counted)').forEach(animateCounter);
-    if (overlay && !overlay.classList.contains('hidden')) {
-      overlay.classList.add('hidden');
-    }
   }, 1800);
 
   // Re-scan after tab switch (new content may need reveal)
@@ -3384,8 +4329,9 @@ function refreshExplorerListings() {
   var origRefresh = window.refreshExplorerListings;
   if (origRefresh) {
     window.refreshExplorerListings = function() {
-      origRefresh();
+      var refreshed = origRefresh();
       setTimeout(scanReveal, 300);
+      return refreshed;
     };
   }
 })();
@@ -3639,161 +4585,134 @@ function refreshExplorerListings() {
     runCliCommand(command, {}, button);
   };
 
-  // ------------------------------------------------------- spatial world UI
-  function initializePortalSwarm() {
-    var swarm = document.getElementById('portal-swarm');
-    if (!swarm || swarm.children.length) return;
-    var fragment = document.createDocumentFragment();
-    var goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    for (var index = 0; index < 100; index++) {
-      var portal = document.createElement('i');
-      portal.className = 'portal-window';
-      var angle = index * goldenAngle;
-      var radius = 44 + Math.sqrt(index / 99) * 138;
-      portal.style.setProperty('--portal-x', (Math.cos(angle) * radius * 1.18).toFixed(1) + 'px');
-      portal.style.setProperty('--portal-y', (Math.sin(angle) * radius * 0.66).toFixed(1) + 'px');
-      portal.style.setProperty('--portal-r', ((index * 17) % 20 - 10) + 'deg');
-      portal.style.setProperty('--portal-speed', (2.8 + (index % 7) * 0.37) + 's');
-      portal.style.setProperty('--portal-delay', (-index * 0.08) + 's');
-      portal.style.opacity = String(0.24 + (index % 5) * 0.12);
-      fragment.appendChild(portal);
-    }
-    swarm.appendChild(fragment);
-  }
-
-  var spatialState = { scale: 0.65, x: 0, y: 0, dragging: false, moved: false, pointerX: 0, pointerY: 0 };
-  function spatialElements() {
-    return { viewport: document.getElementById('spatial-viewport'), canvas: document.getElementById('spatial-canvas') };
-  }
-  function applySpatialTransform() {
-    var elements = spatialElements();
-    if (!elements.canvas) return;
-    elements.canvas.style.transform = 'translate3d(' + spatialState.x + 'px,' + spatialState.y + 'px,0) scale(' + spatialState.scale + ')';
-    var label = document.getElementById('spatial-zoom-label');
-    if (label) label.textContent = Math.round(spatialState.scale * 100) + '%';
-    var mini = document.getElementById('spatial-minimap-window');
-    if (mini && elements.viewport) {
-      var mx = Math.max(0, Math.min(58, -spatialState.x / Math.max(1, 1900 * spatialState.scale) * 130));
-      var my = Math.max(0, Math.min(28, -spatialState.y / Math.max(1, 1080 * spatialState.scale) * 72));
-      mini.style.transform = 'translate(' + mx + 'px,' + my + 'px)';
-    }
-  }
-  window.resetSpatialCanvas = function() {
-    var elements = spatialElements();
-    if (!elements.viewport || elements.viewport.clientWidth < 20) return;
-    var viewportWidth = elements.viewport.clientWidth;
-    var viewportHeight = elements.viewport.clientHeight;
-    if (viewportWidth < 700) {
-      spatialState.scale = 0.56;
-      spatialState.x = 18 - 70 * spatialState.scale;
-      spatialState.y = 24 - 110 * spatialState.scale;
-    } else {
-      spatialState.scale = Math.min(0.76, (viewportWidth - 54) / 1900, (viewportHeight - 58) / 1080);
-      spatialState.x = (viewportWidth - 1900 * spatialState.scale) / 2;
-      spatialState.y = (viewportHeight - 1080 * spatialState.scale) / 2;
-    }
-    applySpatialTransform();
-  };
-  window.zoomSpatialCanvas = function(delta, anchorX, anchorY) {
-    var elements = spatialElements();
-    if (!elements.viewport) return;
-    var previousScale = spatialState.scale;
-    var nextScale = Math.max(0.28, Math.min(1.35, previousScale + delta));
-    var x = anchorX == null ? elements.viewport.clientWidth / 2 : anchorX;
-    var y = anchorY == null ? elements.viewport.clientHeight / 2 : anchorY;
-    var worldX = (x - spatialState.x) / previousScale;
-    var worldY = (y - spatialState.y) / previousScale;
-    spatialState.scale = nextScale;
-    spatialState.x = x - worldX * nextScale;
-    spatialState.y = y - worldY * nextScale;
-    applySpatialTransform();
-  };
-  window.focusSpatialZone = function(name, button) {
-    var elements = spatialElements();
-    var zone = document.querySelector('[data-spatial-zone="' + name + '"]');
-    if (!elements.viewport || !zone) return;
-    document.querySelectorAll('.spatial-zone-nav button').forEach(function(item) { item.classList.toggle('active', item === button); });
-    var targetScale = elements.viewport.clientWidth < 700 ? 0.68 : 0.88;
-    spatialState.scale = targetScale;
-    spatialState.x = elements.viewport.clientWidth / 2 - (zone.offsetLeft + zone.offsetWidth / 2) * targetScale;
-    spatialState.y = elements.viewport.clientHeight / 2 - (zone.offsetTop + zone.offsetHeight / 2) * targetScale;
-    applySpatialTransform();
-  };
-  window.activateSpatialMoment = function(button) {
-    var timeline = button && button.closest('.spatial-timeline');
-    if (!timeline) return;
-    timeline.querySelectorAll('.spatial-moment').forEach(function(item) { item.classList.toggle('active', item === button); });
-    var zone = button.closest('.spatial-zone');
-    if (zone) {
-      zone.classList.remove('zone-signal-fired');
-      void zone.offsetWidth;
-      zone.classList.add('zone-signal-fired');
-    }
-  };
-
-  function initializeSpatialCanvas() {
-    var elements = spatialElements();
-    if (!elements.viewport || !elements.canvas || elements.viewport.dataset.initialized === 'true') return;
-    elements.viewport.dataset.initialized = 'true';
-    initializePortalSwarm();
-    elements.viewport.addEventListener('pointerdown', function(event) {
-      if (event.target.closest('button')) return;
-      spatialState.dragging = true;
-      spatialState.moved = false;
-      spatialState.pointerX = event.clientX;
-      spatialState.pointerY = event.clientY;
-      elements.viewport.setPointerCapture(event.pointerId);
-    });
-    elements.viewport.addEventListener('pointermove', function(event) {
-      if (!spatialState.dragging) return;
-      var dx = event.clientX - spatialState.pointerX;
-      var dy = event.clientY - spatialState.pointerY;
-      if (Math.abs(dx) + Math.abs(dy) > 2) spatialState.moved = true;
-      spatialState.x += dx;
-      spatialState.y += dy;
-      spatialState.pointerX = event.clientX;
-      spatialState.pointerY = event.clientY;
-      applySpatialTransform();
-    });
-    var stopDrag = function(event) {
-      spatialState.dragging = false;
-      if (event.pointerId != null && elements.viewport.hasPointerCapture(event.pointerId)) elements.viewport.releasePointerCapture(event.pointerId);
-    };
-    elements.viewport.addEventListener('pointerup', stopDrag);
-    elements.viewport.addEventListener('pointercancel', stopDrag);
-    elements.viewport.addEventListener('wheel', function(event) {
-      event.preventDefault();
-      var rect = elements.viewport.getBoundingClientRect();
-      window.zoomSpatialCanvas(event.deltaY > 0 ? -0.08 : 0.08, event.clientX - rect.left, event.clientY - rect.top);
-    }, { passive: false });
-    elements.viewport.addEventListener('keydown', function(event) {
-      if (event.key === '1' || event.key === '2' || event.key === '3') {
-        var names = { '1': 'experience', '2': 'nightmare', '3': 'horizon' };
-        window.focusSpatialZone(names[event.key], document.querySelector('.spatial-zone-nav button:nth-child(' + event.key + ')'));
-        event.preventDefault();
-      } else if (event.key === '+' || event.key === '=') {
-        window.zoomSpatialCanvas(0.12); event.preventDefault();
-      } else if (event.key === '-' || event.key === '_') {
-        window.zoomSpatialCanvas(-0.12); event.preventDefault();
-      } else if (event.key === '0') {
-        window.resetSpatialCanvas(); event.preventDefault();
-      }
-    });
-    if ('ResizeObserver' in window) new ResizeObserver(function() { if (!spatialState.moved) window.resetSpatialCanvas(); }).observe(elements.viewport);
-    var canvasButton = document.getElementById('tab-btn-canvas');
-    if (canvasButton) canvasButton.addEventListener('click', function() { window.setTimeout(window.resetSpatialCanvas, 110); });
-    window.setTimeout(window.resetSpatialCanvas, 220);
-  }
-
   function initializeExperienceSystem() {
-    initializeActs();
-    initializeCommandJourney();
-    initializeDiscoveryWorld();
-    initializeSpatialCanvas();
+    var run = function() {
+      initializeActs();
+      initializeCommandJourney();
+      initializeDiscoveryWorld();
+    };
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(run, { timeout: 1500 });
+    } else {
+      setTimeout(run, 100);
+    }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeExperienceSystem);
   else initializeExperienceSystem();
 })();
+
+// Bounty Board — curated platform data + filtering
+var BOUNTY_PLATFORMS = [
+  { name: 'HackerOne', url: 'https://hackerone.com', category: 'bug-bounty', reward: 'Cash ($100–$250k+)', desc: 'Premium bug bounty platform. Top companies run private and public programs.', api: true },
+  { name: 'Bugcrowd', url: 'https://www.bugcrowd.com', category: 'bug-bounty', reward: 'Cash + swag', desc: 'Crowdsourced security testing with public & private programs.', api: false },
+  { name: 'Intigriti', url: 'https://app.intigriti.com', category: 'bug-bounty', reward: 'Cash (EUR)', desc: 'European bug bounty & pentest platform with continuous testing.', api: false },
+  { name: 'YesWeHack', url: 'https://yeswehack.com', category: 'bug-bounty', reward: 'Cash (EUR)', desc: 'European-origin bounty platform with PoC management.', api: true },
+  { name: 'Open Bug Bounty', url: 'https://www.openbugbounty.org', category: 'bug-bounty', reward: 'Reputation', desc: 'Open-source bug bounty for web vulnerabilities. No coordination fees.', api: false },
+  { name: 'GitHub Security Lab', url: 'https://securitylab.github.com', category: 'bug-bounty', reward: 'Cash + CVE credit', desc: 'GitHub-run CVE research and bounty program for open source.', api: false },
+
+  { name: 'Devpost', url: 'https://devpost.com', category: 'hackathon', reward: 'Cash + prizes + jobs', desc: 'Largest hackathon platform. Company-sponsored challenges with cash prizes.', api: true },
+  { name: 'Major League Hacking (MLH)', url: 'https://mlh.io', category: 'hackathon', reward: 'Prizes + reputation', desc: 'Student hackathon league with in-person & online events worldwide.', api: false },
+  { name: 'Unstop', url: 'https://unstop.com', category: 'hackathon', reward: 'Cash + internships', desc: 'India-based competition platform: hackathons, case studies, coding challenges.', api: false },
+  { name: 'HackerEarth', url: 'https://www.hackerearth.com', category: 'hackathon', reward: 'Cash + hiring', desc: 'Hackathons, coding challenges, and hiring assessments for developers.', api: true },
+  { name: 'Hashnode x Hackathons', url: 'https://hashnode.com/hackathons', category: 'hackathon', reward: 'Cash + swag', desc: 'Developer blogging community hosting writing + coding hackathons.', api: false },
+  { name: 'Lablab.ai', url: 'https://lablab.ai', category: 'hackathon', reward: 'Cash + API credits', desc: 'AI hackathons with LLM APIs, GPU credits, and cash prizes.', api: true },
+  { name: 'AI Hackathons (lablab)', url: 'https://lablab.ai/event/types/hackathon', category: 'hackathon', reward: 'Cash + credits', desc: 'Ongoing AI/ML hackathons with Mistral, OpenAI, and Anthropic APIs.', api: false },
+
+  { name: 'Topcoder', url: 'https://www.topcoder.com', category: 'coding', reward: 'Cash ($500–$5k)', desc: 'Competitive programming, design, and development challenges with payouts.', api: true },
+  { name: 'CodeSignal', url: 'https://codesignal.com', category: 'coding', reward: 'Cash + hiring', desc: 'Coding assessments and tournaments used by companies for hiring.', api: false },
+  { name: 'HackerRank', url: 'https://www.hackerrank.com', category: 'coding', reward: 'Cash + hiring', desc: 'Practice challenges, certifications, and sponsored contests.', api: false },
+  { name: 'CodeChef', url: 'https://www.codechef.com', category: 'coding', reward: 'Cash + rating', desc: 'Competitive programming contests with monthly cook-offs and lunchtimes.', api: true },
+  { name: 'LeetCode Contests', url: 'https://leetcode.com/contest', category: 'coding', reward: 'Cash + leetcode coins', desc: 'Weekly and biweekly contests with cash prizes for top performers.', api: false },
+  { name: 'BinarySearch', url: 'https://binarysearch.com', category: 'coding', reward: 'Reputation + prizes', desc: 'Community-driven coding challenges with rooms and daily problems.', api: false },
+
+  { name: 'Algora', url: 'https://algora.io', category: 'opensource', reward: 'Cash bounties', desc: 'Open-source bounty board for Rust, TypeScript, and Python issues.', api: true },
+  { name: 'Gitcoin', url: 'https://gitcoin.co', category: 'opensource', reward: 'Crypto (ETH) + grants', desc: 'Web3 open-source funding with quadratic grants and bounties.', api: true },
+  { name: 'IssueHunt', url: 'https://issuehunt.io', category: 'opensource', reward: 'Cash bounties', desc: 'Bounty platform for GitHub issues. Anyone can fund an issue.', api: false },
+  { name: 'Bount.ing', url: 'https://bount.ing', category: 'opensource', reward: 'Cash bounties', desc: 'Open-source bounty platform integrated with GitHub issues.', api: false },
+  { name: 'Pull Request Rewards', url: 'https://pullrewards.xyz', category: 'opensource', reward: 'Cash + NFTs', desc: 'Rewards for merged pull requests in open source projects.', api: false },
+  { name: 'OnlyDust', url: 'https://www.onlydust.com', category: 'opensource', reward: 'Reputation + rewards', desc: 'Platform for contributing to open-source Web3 projects with gamified rewards.', api: false },
+
+  { name: 'Kaggle', url: 'https://www.kaggle.com/competitions', category: 'ai-ml', reward: 'Cash ($10k–$100k+)', desc: 'Google-backed ML competitions. Real datasets, real prizes, global ranking.', api: true },
+  { name: 'DrivenData', url: 'https://www.drivendata.org', category: 'ai-ml', reward: 'Cash prizes', desc: 'Data science competitions for social impact. Healthcare, climate, conservation.', api: true },
+  { name: 'Numerai', url: 'https://numer.ai', category: 'ai-ml', reward: 'Crypto (NMR) + cash', desc: 'Hedge fund that crowdsources predictions. Stake NMR on your models.', api: true },
+  { name: 'Signate', url: 'https://signate.ai', category: 'ai-ml', reward: 'Cash + ranking', desc: 'Japanese AI competition platform with data science challenges.', api: false },
+  { name: 'Bitgrit', url: 'https://bg.bitgrit.net', category: 'ai-ml', reward: 'Cash + crypto', desc: 'AI competitions and model marketplace with community tournaments.', api: false },
+  { name: 'Robomission (RoboRAISE)', url: 'https://www.kaggle.com/competitions?category=ai', category: 'ai-ml', reward: 'Cash + GPU credits', desc: 'Robotics + AI competitions with simulation environments.', api: false },
+
+  { name: 'Immunefi', url: 'https://immunefi.com', category: 'web3', reward: 'Crypto ($10k–$10M+)', desc: 'Smart contract bug bounties. Largest Web3 bounty platform by payout volume.', api: true },
+  { name: 'Code4rena', url: 'https://code4rena.com', category: 'web3', reward: 'Crypto (USDC)', desc: 'Competitive smart contract audits with prize pools. Top auditors earn six figures.', api: true },
+  { name: 'Sherlock', url: 'https://www.sherlock.xyz', category: 'web3', reward: 'Crypto (USDC) + audit fees', desc: 'Web3 audit contests with guaranteed payout for valid findings.', api: true },
+  { name: 'Cantina', url: 'https://cantina.xyz', category: 'web3', reward: 'Crypto + cash', desc: 'Competitive smart contract security audits by the Spearbit team.', api: false },
+  { name: 'Trust Security', url: 'https://trust-security.xyz', category: 'web3', reward: 'Crypto bounties', desc: 'Web3 security reviews and bug bounty dispatch for DeFi protocols.', api: false },
+  { name: 'Spearbit', url: 'https://spearbit.com', category: 'web3', reward: 'Crypto + retainer', desc: 'Decentralized security researcher collective with audit contests.', api: false }
+];
+
+function renderBountyCards(platforms) {
+  var grid = document.getElementById('bounty-grid');
+  if (!grid) return;
+  var countEl = document.getElementById('bounty-platform-count');
+  var totalEl = document.getElementById('bounty-total-count');
+  if (countEl) countEl.textContent = BOUNTY_PLATFORMS.length;
+  if (totalEl) totalEl.textContent = BOUNTY_PLATFORMS.length;
+
+  if (!platforms || platforms.length === 0) {
+    grid.innerHTML = '<div class="bounty-empty">No platforms match your filter. Try a different category or search term.</div>';
+    return;
+  }
+
+  var categoryIcons = {
+    'bug-bounty': '🐛', 'hackathon': '🏆', 'coding': '💻',
+    'opensource': '📦', 'ai-ml': '🧠', 'web3': '⛓️'
+  };
+  var categoryLabels = {
+    'bug-bounty': 'Bug Bounty', 'hackathon': 'Hackathon', 'coding': 'Coding',
+    'opensource': 'Open Source', 'ai-ml': 'AI / ML', 'web3': 'Web3'
+  };
+
+  grid.innerHTML = platforms.map(function(p) {
+    var icon = categoryIcons[p.category] || '⭐';
+    var label = categoryLabels[p.category] || p.category;
+    var apiBadge = p.api ? '<span class="bounty-api-badge">API</span>' : '';
+    return '<a href="' + p.url + '" target="_blank" rel="noopener noreferrer" class="bounty-card bounty-cat-' + p.category + '" data-category="' + p.category + '" data-name="' + p.name.toLowerCase() + '">'
+      + '<div class="bounty-card-header">'
+        + '<span class="bounty-card-icon">' + icon + '</span>'
+        + '<span class="bounty-card-cat">' + label + '</span>'
+        + apiBadge
+      + '</div>'
+      + '<h3 class="bounty-card-name">' + escapeHtml(p.name) + '</h3>'
+      + '<p class="bounty-card-desc">' + escapeHtml(p.desc) + '</p>'
+      + '<div class="bounty-card-footer">'
+        + '<span class="bounty-card-reward">' + escapeHtml(p.reward) + '</span>'
+        + '<span class="bounty-card-cta">Visit ↗</span>'
+      + '</div>'
+    + '</a>';
+  }).join('');
+}
+
+function filterBountyCategory(category, el) {
+  document.querySelectorAll('#tab-bounties .filter-pill').forEach(function(p) { p.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  var filtered = category === 'all' ? BOUNTY_PLATFORMS : BOUNTY_PLATFORMS.filter(function(p) { return p.category === category; });
+  renderBountyCards(filtered);
+}
+
+function filterBountyCards(query) {
+  var q = (query || '').trim().toLowerCase();
+  if (!q) { renderBountyCards(BOUNTY_PLATFORMS); return; }
+  var filtered = BOUNTY_PLATFORMS.filter(function(p) {
+    return p.name.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q) || p.reward.toLowerCase().includes(q) || p.category.includes(q);
+  });
+  renderBountyCards(filtered);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  renderBountyCards(BOUNTY_PLATFORMS);
+});
+
+// PWA service worker registration
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(function() {});
+}
 </script>
 </body>
 </html>

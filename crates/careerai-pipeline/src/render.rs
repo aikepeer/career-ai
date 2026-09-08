@@ -9,10 +9,8 @@ use anyhow::{Context, Result};
 
 use careerai_core::config::CoreConfig;
 use careerai_core::state::ListingState;
-use careerai_db::models::NewArtifact;
 use careerai_db::queries;
-use careerai_db::SqlitePool;
-use careerai_render::{render_application, RenderedArtifacts};
+use careerai_render::render_application;
 use careerai_tailor::model::{CoverLetter, ResumeView};
 
 use crate::{load_profile, open_pool};
@@ -93,22 +91,81 @@ pub async fn render_one(
     )
     .await
     .context("render_application")?;
+    // R07: attach artifact rows, transition the listing to rendered, and
+    // set the application state to rendered in a single transaction. A
+    // crash between these operations would otherwise leave the listing
+    // in `rendered` while the application is still `tailored` (or vice
+    // versa), confusing the daemon's eligibility scan.
+    let mut tx = pool.begin().await.context("begin render commit transaction")?;
 
-    // Attach artifact rows for each rendered file that exists on disk.
-    attach_artifacts(&pool, &application.id, &artifacts).await?;
+    // Attach artifact rows — inlined so we share the caller's transaction.
+    for (kind, path) in [
+        ("resume_md", &artifacts.resume_md),
+        ("resume_docx", &artifacts.resume_docx),
+        ("resume_pdf", &artifacts.resume_pdf),
+        ("cover_md", &artifacts.cover_md),
+        ("cover_docx", &artifacts.cover_docx),
+    ] {
+        if let Some(&size) = artifacts.bytes.get(path) {
+            if size > 0 {
+                sqlx::query("DELETE FROM artifacts WHERE application_id = ? AND kind = ?")
+                    .bind(&application.id)
+                    .bind(kind)
+                    .execute(&mut *tx)
+                    .await
+                    .with_context(|| format!("delete old {kind} artifact"))?;
+                sqlx::query(
+                    "INSERT INTO artifacts (application_id, kind, path, bytes)
+                     VALUES (?, ?, ?, ?)",
+                )
+                .bind(&application.id)
+                .bind(kind)
+                .bind(&path.to_string_lossy())
+                .bind(i64::try_from(size).unwrap_or(i64::MAX))
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("insert {kind} artifact"))?;
+            }
+        }
+    }
 
-    queries::transition(
-        &pool,
-        &application.listing_id,
-        ListingState::Rendered,
-        Some(&format!("app={}", application.id)),
-    )
-    .await
-    .context("transition listing to rendered")?;
-    queries::set_application_state(&pool, &application.id, "rendered")
+    // Transition listing state + insert event row.
+    let now = chrono::Utc::now();
+    let prev_listing_state: Option<(String,)> =
+        sqlx::query_as("SELECT state FROM listings WHERE id = ?")
+            .bind(&application.listing_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("fetch listing state for render commit")?;
+    let from_state = prev_listing_state
+        .ok_or_else(|| anyhow::anyhow!("listing not found: {}", application.listing_id))?
+        .0;
+    sqlx::query("UPDATE listings SET state = ?, updated_at = ? WHERE id = ?")
+        .bind(ListingState::Rendered.as_str())
+        .bind(now)
+        .bind(&application.listing_id)
+        .execute(&mut *tx)
+        .await
+        .context("update listing state to rendered")?;
+    sqlx::query("INSERT INTO events (listing_id, from_state, to_state, note) VALUES (?, ?, ?, ?)")
+        .bind(&application.listing_id)
+        .bind(&from_state)
+        .bind(ListingState::Rendered.as_str())
+        .bind(format!("app={}", application.id))
+        .execute(&mut *tx)
+        .await
+        .context("insert rendered event")?;
+
+    // Set application state to rendered.
+    sqlx::query("UPDATE applications SET state = ?, updated_at = ? WHERE id = ?")
+        .bind("rendered")
+        .bind(now)
+        .bind(&application.id)
+        .execute(&mut *tx)
         .await
         .context("set application state=rendered")?;
 
+    tx.commit().await.context("commit render transaction")?;
     ats_verify(
         &artifacts.resume_pdf,
         &listing.title,
@@ -130,37 +187,6 @@ pub async fn render_one(
     })
 }
 
-/// Insert `artifacts` rows for every rendered file that exists on disk.
-async fn attach_artifacts(
-    pool: &SqlitePool,
-    application_id: &str,
-    artifacts: &RenderedArtifacts,
-) -> Result<()> {
-    for (kind, path) in [
-        ("resume_md", &artifacts.resume_md),
-        ("resume_docx", &artifacts.resume_docx),
-        ("resume_pdf", &artifacts.resume_pdf),
-        ("cover_md", &artifacts.cover_md),
-        ("cover_docx", &artifacts.cover_docx),
-    ] {
-        if let Some(&size) = artifacts.bytes.get(path) {
-            if size > 0 {
-                queries::attach_artifact(
-                    pool,
-                    application_id,
-                    &NewArtifact {
-                        kind: kind.to_string(),
-                        path: path.to_string_lossy().into_owned(),
-                        bytes: i64::try_from(size).unwrap_or(i64::MAX),
-                    },
-                )
-                .await
-                .with_context(|| format!("attach_artifact {kind}"))?;
-            }
-        }
-    }
-    Ok(())
-}
 
 /// ATS text-layer verification (ported from ai-job-search `/apply` 5d):
 /// an ATS reads the PDF's embedded text, not the rendered page. Check

@@ -8,16 +8,23 @@
 
 #![forbid(unsafe_code)]
 
+pub mod content_reuse;
 pub mod cover_letter;
 pub mod cover_skeleton;
 pub mod diff;
+pub mod email_draft;
 pub mod error;
 pub mod guardrails;
+pub mod interview;
 pub mod local;
 pub mod model;
+pub mod negotiation;
 pub mod prompt;
+pub mod quality;
 pub mod reduce;
+pub mod reviewer;
 pub mod schema;
+pub mod tone;
 pub mod variants;
 
 use std::path::{Path, PathBuf};
@@ -25,20 +32,134 @@ use std::path::{Path, PathBuf};
 use careerai_core::config::LlmConfig;
 use careerai_db::models::NewApplication;
 use careerai_db::queries;
-use careerai_llm::cache::Cache;
+use careerai_llm::cache::{Cache, CacheKey};
 use careerai_llm::hashing::{canonical_profile_hash, compose_key, jd_hash};
 use careerai_llm::trait_def::Llm;
 use careerai_profile::schema::Profile;
 use sqlx::SqlitePool;
-use tracing::info;
+use tracing::{info, warn};
 
 pub use crate::cover_skeleton::{CoverSkeleton, CoverSlots};
+pub use crate::email_draft::{draft_email, email_prompt, EmailDraft};
 pub use crate::error::{Result, TailorError};
+pub use crate::interview::{
+    extract_star_stories, generate_interview_prep, InterviewPrep, InterviewQuestion, StarStory,
+};
 pub use crate::local::{tailor_for_listing_local, tailor_local, tailor_local_with_variants};
 pub use crate::model::{CoverLetter, ExperienceView, ProjectView, ResumeView, TailorOutcome};
+pub use crate::negotiation::{
+    generate_negotiation_script, negotiation_prompt, NegotiationScript, TalkingPoint,
+};
+pub use crate::quality::{score_application_quality, QualityScore};
+pub use crate::reviewer::{review_tailored, BulletSuggestion, ReviewCritique};
+pub use crate::tone::{detect_tone, tone_label, CoverLetterTone, ToneAnalysis};
 pub use crate::variants::{
     compile_profile_variants, BulletVariant, EntryVariants, ProfileVariants,
 };
+
+/// Resolve the LLM response cache directory, anchoring relative paths to `base_dir`.
+fn resolve_cache_root(cfg: &LlmConfig, base_dir: &Path) -> PathBuf {
+    if cfg.cache_dir.is_empty() {
+        base_dir.join("data").join("cache").join("llm")
+    } else {
+        let p = PathBuf::from(&cfg.cache_dir);
+        if p.is_absolute() {
+            p
+        } else {
+            base_dir.join(p)
+        }
+    }
+}
+
+/// Fetch the tailor LLM response via the priority chain:
+/// (1) similarity-index reuse, (2) on-disk cache, (3) fresh LLM call.
+/// Returns `(response, from_cache)`.
+async fn fetch_tailor_response(
+    pool: &SqlitePool,
+    llm: &(dyn Llm + Send + Sync),
+    req: &careerai_llm::types::LlmRequest,
+    listing: &careerai_db::models::Listing,
+    cache: &Cache,
+    key: &CacheKey,
+    profile_hash: &str,
+) -> Result<(careerai_llm::types::LlmResponse, bool)> {
+    if let Some(sim) = queries::find_similar_tailored(
+        pool,
+        &listing.company,
+        &listing.title,
+        profile_hash,
+        &listing.id,
+    )
+    .await?
+    {
+        info!(
+            target: "tailor",
+            reuse = "similar",
+            listing_id = %listing.id,
+            source_listing_id = %sim.source_listing_id,
+            jaccard = %sim.title_jaccard,
+            "tailor similarity reuse hit — skipping LLM call"
+        );
+        return Ok((
+            careerai_llm::types::LlmResponse {
+                text: sim.payload.diff_json,
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                cache_hit: true,
+                cached_prompt_tokens: 0,
+            },
+            true,
+        ));
+    }
+
+    if let Some(hit) = cache.get(key).await? {
+        info!(target: "tailor", cache = "hit", listing_id = %listing.id, "tailor cache hit");
+        return Ok((hit, true));
+    }
+
+    info!(target: "tailor", cache = "miss", listing_id = %listing.id, "tailor calling llm");
+    let fresh = llm.complete(req).await?;
+    Ok((fresh, false))
+}
+
+/// Draft a cover letter using the priority chain:
+/// (a) unified diff body >= 40 chars, (b) content library reuse, (c) LLM draft.
+#[allow(clippy::too_many_arguments)]
+async fn draft_cover_letter_smart(
+    pool: &SqlitePool,
+    llm: &(dyn Llm + Send + Sync),
+    cover_letter_body: &str,
+    listing: &careerai_db::models::Listing,
+    profile: &Profile,
+    cfg: &LlmConfig,
+    cache: &Cache,
+    profile_hash: &str,
+) -> Result<CoverLetter> {
+    if cover_letter_body.trim().len() >= 40 {
+        return Ok(CoverLetter {
+            body: cover_letter_body.to_string(),
+        });
+    }
+
+    let (domain, role) = content_reuse::classify_domain(&listing.title);
+    match content_reuse::try_reuse_cover_letter(pool, &domain, &role, profile_hash).await {
+        Ok(Some(library_letter)) => {
+            info!(target: "tailor", reuse = "library", domain = %domain, role = %role, "cover letter library hit");
+            return Ok(CoverLetter {
+                body: library_letter,
+            });
+        }
+        Ok(None) => {}
+        Err(e) => {
+            // R02: don't swallow DB errors — log and fall through to the
+            // LLM draft rather than silently degrading. The LLM call is
+            // the authoritative path; the library is an optimization.
+            warn!(target: "tailor", error = %e, "cover letter library fetch failed; falling through to LLM draft");
+        }
+    }
+
+    cover_letter::draft(llm, profile, listing, cfg, cache, profile_hash).await
+}
 
 /// Tailor a shortlisted listing end-to-end: fetch the listing, call the
 /// LLM (cache-wrapped) for a constrained diff, validate + apply it,
@@ -53,6 +174,7 @@ pub use crate::variants::{
 /// `base_dir` is the resolved project root: relative `cache_dir` values
 /// (e.g. `default.yaml`'s `"data/cache/llm"`) are anchored to it so the
 /// response cache is CWD-independent.
+#[allow(clippy::too_many_lines)] // quality score + tone detection add ~15 lines
 pub async fn tailor_for_listing(
     pool: &SqlitePool,
     llm: &(dyn Llm + Send + Sync),
@@ -61,50 +183,17 @@ pub async fn tailor_for_listing(
     cfg: &LlmConfig,
     base_dir: &Path,
 ) -> Result<TailorOutcome> {
-    // 1) Fetch the listing.
     let listing = queries::find_by_id(pool, listing_id).await?;
-
-    // 2) Build tailor prompt.
     let req = prompt::tailor_prompt(profile, &listing, cfg)?;
 
-    // 3) Cache-wrapped LLM call.
-    let cache_root = if cfg.cache_dir.is_empty() {
-        base_dir.join("data").join("cache").join("llm")
-    } else {
-        let p = PathBuf::from(&cfg.cache_dir);
-        if p.is_absolute() {
-            p
-        } else {
-            base_dir.join(p)
-        }
-    };
-    let cache = Cache::new(cache_root);
+    let cache = Cache::new(resolve_cache_root(cfg, base_dir));
     let profile_hash = canonical_profile_hash(profile);
     let jd = jd_hash(&listing.title, &listing.company, &listing.description);
     let key = compose_key(&req.prompt_version, &profile_hash, &jd, &req.model);
 
-    let (resp, from_cache) = if let Some(hit) = cache.get(&key).await? {
-        info!(
-            target: "tailor",
-            cache = "hit",
-            prompt_version = %req.prompt_version,
-            listing_id = %listing.id,
-            "tailor cache hit"
-        );
-        (hit, true)
-    } else {
-        info!(
-            target: "tailor",
-            cache = "miss",
-            prompt_version = %req.prompt_version,
-            listing_id = %listing.id,
-            "tailor calling llm"
-        );
-        let fresh = llm.complete(&req).await?;
-        (fresh, false)
-    };
+    let (resp, from_cache) =
+        fetch_tailor_response(pool, llm, &req, &listing, &cache, &key, &profile_hash).await?;
 
-    // 4) Parse + validate the diff; apply it to produce the ResumeView.
     let jd_text = format!(
         "{} {} {}",
         listing.title, listing.company, listing.description
@@ -114,50 +203,46 @@ pub async fn tailor_for_listing(
     let diff_raw_json = resp.text.clone();
     let resume_view = diff::apply(doc, profile.clone(), &jd_text)?;
 
-    // Deterministic relevance-weighted reduction (ported from
-    // ai-job-search's "Relevance-weighted CV cutting"): if the LLM
-    // overflowed the bullet budget, cut the lowest-scoring bullets
-    // (JD relevance first, uniqueness + cover-letter dependency as
-    // tiebreakers). Only removes bullets — never invents content, so
-    // the constrained-diff safety invariant is preserved.
-    let reduce_cfg = reduce::ReduceConfig::default();
-    let (resume_view, reduce_report) =
-        reduce::reduce_view(resume_view, &jd_text, &cover_letter_body, &reduce_cfg);
+    let (resume_view, reduce_report) = reduce::reduce_view(
+        resume_view,
+        &jd_text,
+        &cover_letter_body,
+        &reduce::ReduceConfig::default(),
+    );
     if !reduce_report.cut.is_empty() {
-        info!(
-            target: "tailor",
-            listing_id = %listing.id,
-            cut = reduce_report.cut.len(),
-            "deterministic reduction trimmed over-budget bullets"
-        );
+        info!(target: "tailor", listing_id = %listing.id, cut = reduce_report.cut.len(), "deterministic reduction trimmed over-budget bullets");
     }
 
-    // Cache the response only after it survives validation: caching a
-    // validator-rejected diff would replay the same failure on every
-    // later run (same key → same invalid body).
     if !from_cache {
         cache.put(&key, &resp).await?;
     }
 
-    // 5) Draft the cover letter:
-    // If the unified single-pass diff already generated a valid cover letter (>= 40 chars),
-    // reuse it directly, saving a second LLM roundtrip and 50% token cost.
-    let letter = if cover_letter_body.trim().len() >= 40 {
-        CoverLetter {
-            body: cover_letter_body,
-        }
-    } else {
-        cover_letter::draft(llm, profile, &listing, cfg, &cache, &profile_hash).await?
-    };
+    let letter = draft_cover_letter_smart(
+        pool,
+        llm,
+        &cover_letter_body,
+        &listing,
+        profile,
+        cfg,
+        &cache,
+        &profile_hash,
+    )
+    .await?;
 
-    // 6) Persist application row + payload.
-    let new_app = NewApplication {
-        listing_id: listing.id.clone(),
-        profile_hash: profile_hash.clone(),
-        prompt_version: req.prompt_version.clone(),
-        llm_model: req.model.clone(),
-    };
-    let app = queries::create_application(pool, &new_app).await?;
+    // Detect tone from company + description for observability.
+    let tone_analysis = detect_tone(&listing.company, &listing.description);
+    let tone_label_str = tone_label(tone_analysis.tone).to_string();
+
+    let app = queries::create_application(
+        pool,
+        &NewApplication {
+            listing_id: listing.id.clone(),
+            profile_hash: profile_hash.clone(),
+            prompt_version: req.prompt_version.clone(),
+            llm_model: req.model.clone(),
+        },
+    )
+    .await?;
 
     let resume_view_json = serde_json::to_string(&resume_view)?;
     queries::write_payload(
@@ -169,7 +254,36 @@ pub async fn tailor_for_listing(
     )
     .await?;
 
-    // 7) Transition the listing to Tailored.
+    let _ = queries::record_similarity_index(
+        pool,
+        &listing.id,
+        &profile_hash,
+        &listing.company,
+        &listing.title,
+        &jd,
+        &app.id,
+    )
+    .await;
+    let (domain, role) = content_reuse::classify_domain(&listing.title);
+    let _ = queries::store_cover_letter(pool, &domain, &role, &letter.body, &app.id, &profile_hash).await;
+
+    // Compute application quality score from the tailored view, JD text,
+    // and cover letter body.
+    let quality_score = score_application_quality(&resume_view, &jd_text, &letter.body);
+    let recommendations_json =
+        serde_json::to_string(&quality_score.recommendations).unwrap_or_else(|_| "[]".to_string());
+    let _ = queries::store_quality_score(
+        pool,
+        &app.id,
+        quality_score.overall,
+        quality_score.jd_relevance,
+        quality_score.skill_coverage,
+        quality_score.cover_letter_depth,
+        quality_score.bullet_density,
+        &recommendations_json,
+    )
+    .await;
+
     queries::transition(
         pool,
         &listing.id,
@@ -183,5 +297,7 @@ pub async fn tailor_for_listing(
         resume_view,
         cover_letter: letter,
         diff_raw_json,
+        quality_score: Some(quality_score),
+        tone_label: Some(tone_label_str),
     })
 }
