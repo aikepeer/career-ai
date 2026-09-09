@@ -179,6 +179,8 @@ mod tests {
             llm_strategy: "local".into(),
             llm_api_base: None,
             llm_timeout_seconds: 300,
+            llm_max_daily_cost_usd: None,
+            llm_max_daily_calls: None,
         }
     }
 

@@ -75,6 +75,9 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
 
     let llm_timeout_seconds = core_cfg.as_ref().map_or(300, |c| c.llm.timeout_seconds);
 
+    let llm_max_daily_cost_usd = core_cfg.as_ref().and_then(|c| c.llm.max_daily_cost_usd);
+    let llm_max_daily_calls = core_cfg.as_ref().and_then(|c| c.llm.max_daily_calls);
+
     let profile = crate::profile_handler::load_profile_view();
     let keywords = crate::profile_handler::load_keywords_from_config(core_cfg.as_ref());
     let score_threshold = resolve_score_threshold(core_cfg.as_ref());
@@ -99,6 +102,8 @@ pub async fn fetch_config_view(pool: &SqlitePool) -> Result<ConfigView> {
         llm_strategy,
         llm_api_base,
         llm_timeout_seconds,
+        llm_max_daily_cost_usd,
+        llm_max_daily_calls,
     })
 }
 

@@ -558,6 +558,7 @@ async fn workspace_saved_searches_palette_and_refresh_in_real_browser() {
     test_mobile_view(port).await;
     server.abort();
 }
+#[allow(clippy::too_many_lines)]
 async fn test_desktop_explorer(page: &chromiumoxide::Page, pool: &sqlx::SqlitePool) {
     page.find_element("#command-trigger")
         .await
@@ -568,46 +569,115 @@ async fn test_desktop_explorer(page: &chromiumoxide::Page, pool: &sqlx::SqlitePo
     let focused: bool = page.evaluate("document.querySelector('#command-palette').open && document.activeElement.id === 'command-search'").await.expect("focus check").into_value().expect("bool");
     assert!(focused, "palette must focus its search field");
     page.evaluate("document.querySelector('#command-search').value = 'opportunities'; document.querySelector('#command-search').dispatchEvent(new Event('input')); document.querySelector('#command-search').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));").await.expect("keyboard navigation");
-    wait_for_visible(page, "#explorer-search-input", Instant::now() + Duration::from_secs(5)).await;
+    wait_for_visible(
+        page,
+        "#explorer-search-input",
+        Instant::now() + Duration::from_secs(5),
+    )
+    .await;
     let destination_focused: bool = page
         .evaluate("document.activeElement.id === 'tab-btn-explorer'")
-        .await.expect("palette destination focus")
-        .into_value().expect("bool");
-    assert!(destination_focused, "palette navigation must focus the destination");
+        .await
+        .expect("palette destination focus")
+        .into_value()
+        .expect("bool");
+    assert!(
+        destination_focused,
+        "palette navigation must focus the destination"
+    );
 
-    page.evaluate("document.querySelector('#flt-remote').checked = true; filterExplorerTable();").await.expect("filter remote");
+    page.evaluate("document.querySelector('#flt-remote').checked = true; filterExplorerTable();")
+        .await
+        .expect("filter remote");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let loaded: bool = page.evaluate("document.querySelectorAll('.explorer-row').length === 135").await.expect("rows").into_value().expect("bool");
-        if loaded { break; }
+        let loaded: bool = page
+            .evaluate("document.querySelectorAll('.explorer-row').length === 135")
+            .await
+            .expect("rows")
+            .into_value()
+            .expect("bool");
+        if loaded {
+            break;
+        }
         assert!(Instant::now() < deadline, "idle chunks never completed");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let visible_remote: bool = page.evaluate("[...document.querySelectorAll('.explorer-row')].filter(r => r.style.display !== 'none').every(r => r.dataset.remote === 'true')").await.expect("chunk filter").into_value().expect("bool");
-    assert!(visible_remote, "every idle chunk must respect current filters");
+    assert!(
+        visible_remote,
+        "every idle chunk must respect current filters"
+    );
 
-    page.find_element("#save-search-toggle").await.expect("save search").click().await.expect("open save form");
+    page.find_element("#save-search-toggle")
+        .await
+        .expect("save search")
+        .click()
+        .await
+        .expect("open save form");
     page.evaluate("document.querySelector('#saved-search-name').value = 'Remote roles'; document.querySelector('#save-search-form').requestSubmit();").await.expect("save filters");
     page.reload().await.expect("reload");
-    wait_for_selector(page, ".saved-search button", Instant::now() + Duration::from_secs(10)).await;
-    page.find_element(".saved-search button").await.expect("saved view").click().await.expect("restore filters");
-    let restored: bool = page.evaluate("document.querySelector('#flt-remote').checked").await.expect("restored filter").into_value().expect("bool");
+    wait_for_selector(
+        page,
+        ".saved-search button",
+        Instant::now() + Duration::from_secs(10),
+    )
+    .await;
+    page.find_element(".saved-search button")
+        .await
+        .expect("saved view")
+        .click()
+        .await
+        .expect("restore filters");
+    let restored: bool = page
+        .evaluate("document.querySelector('#flt-remote').checked")
+        .await
+        .expect("restored filter")
+        .into_value()
+        .expect("bool");
     assert!(restored, "saved searches must persist across reloads");
 
     page.evaluate("window.originalFetch = window.fetch; window.fetch = function(url, options) { return url === '/api/v1/explorer' ? Promise.resolve({ok:false}) : window.originalFetch(url, options); }; refreshExplorerListings();").await.expect("simulate refresh failure");
-    wait_for_visible(page, "#explorer-load-error", Instant::now() + Duration::from_secs(5)).await;
-    page.evaluate("filterExplorerTable();").await.expect("filter after failure");
-    let retry_visible: bool = page.evaluate("document.querySelector('#explorer-load-error button').getClientRects().length > 0").await.expect("retry remains available").into_value().expect("bool");
-    assert!(retry_visible, "filtering must preserve the refresh failure and retry");
+    wait_for_visible(
+        page,
+        "#explorer-load-error",
+        Instant::now() + Duration::from_secs(5),
+    )
+    .await;
+    page.evaluate("filterExplorerTable();")
+        .await
+        .expect("filter after failure");
+    let retry_visible: bool = page
+        .evaluate(
+            "document.querySelector('#explorer-load-error button').getClientRects().length > 0",
+        )
+        .await
+        .expect("retry remains available")
+        .into_value()
+        .expect("bool");
+    assert!(
+        retry_visible,
+        "filtering must preserve the refresh failure and retry"
+    );
 
     page.evaluate("window.fetch = window.originalFetch; document.querySelector('#explorer-load-error button').click();").await.expect("retry with working network");
-    sqlx::query("UPDATE listings SET state = 'filtered_out', score = 0 WHERE id = 'workspace-0'").execute(pool).await.expect("change existing listing");
-    page.evaluate("refreshExplorerListings()").await.expect("refresh");
+    sqlx::query("UPDATE listings SET state = 'filtered_out', score = 0 WHERE id = 'workspace-0'")
+        .execute(pool)
+        .await
+        .expect("change existing listing");
+    page.evaluate("refreshExplorerListings()")
+        .await
+        .expect("refresh");
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let refreshed: bool = page.evaluate("[...document.querySelectorAll('.explorer-row')].some(r => r.textContent.includes('workspace-0') && r.dataset.state === 'filtered_out' && r.textContent.includes('0%'))").await.expect("refreshed state").into_value().expect("bool");
-        if refreshed { break; }
-        assert!(Instant::now() < deadline, "refresh must update existing rows and display zero scores");
+        if refreshed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "refresh must update existing rows and display zero scores"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

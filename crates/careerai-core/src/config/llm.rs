@@ -138,6 +138,16 @@ pub struct LlmConfig {
     /// Custom API Key for API backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// Optional daily spend cap (USD). When cumulative LLM cost for the
+    /// current UTC day exceeds this, the tailor falls back to local-only
+    /// mode for the rest of the day. `None` = unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_daily_cost_usd: Option<f64>,
+    /// Optional daily call cap. When cumulative LLM call count for the
+    /// current UTC day reaches this, the tailor falls back to local-only
+    /// mode. `None` = unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_daily_calls: Option<u64>,
 }
 
 fn default_tailor_strategy() -> String {

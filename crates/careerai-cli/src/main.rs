@@ -327,6 +327,48 @@ async fn main() -> Result<()> {
             ServiceCommand::Status => service::run_status()?,
             ServiceCommand::Uninstall => service::run_uninstall()?,
         },
+        Command::Export { output } => {
+            let db_path = cwd.join("data").join("careerai.sqlite");
+            let pool = careerai_db::pool::pool_from_path(&db_path)
+                .await
+                .with_context(|| format!("open db at {}", db_path.display()))?;
+            let export = careerai_db::queries::workspace_io::export_workspace(&pool)
+                .await
+                .context("export workspace")?;
+            let path = output
+                .as_deref()
+                .unwrap_or("careerai-workspace-export.json");
+            let json = serde_json::to_string_pretty(&export).context("serialize export")?;
+            std::fs::write(path, json).context("write export file")?;
+            println!(
+                "exported {} listings, {} applications, {} events → {path}",
+                export.tables.listings.len(),
+                export.tables.applications.len(),
+                export.tables.events.len(),
+            );
+        }
+        Command::Restore { input, yes } => {
+            if !yes {
+                anyhow::bail!("restore overwrites the database — pass --yes to confirm");
+            }
+            let json = std::fs::read_to_string(&input)
+                .with_context(|| format!("read export file {input}"))?;
+            let export: careerai_db::queries::workspace_io::WorkspaceExport =
+                serde_json::from_str(&json).context("parse export file")?;
+            let db_path = cwd.join("data").join("careerai.sqlite");
+            let pool = careerai_db::pool::pool_from_path(&db_path)
+                .await
+                .with_context(|| format!("open db at {}", db_path.display()))?;
+            careerai_db::queries::workspace_io::restore_workspace(&pool, &export)
+                .await
+                .context("restore workspace")?;
+            println!(
+                "restored {} listings, {} applications, {} events from {input}",
+                export.tables.listings.len(),
+                export.tables.applications.len(),
+                export.tables.events.len(),
+            );
+        }
     }
     Ok(())
 }

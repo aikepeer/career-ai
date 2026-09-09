@@ -1653,6 +1653,15 @@ careerai service uninstall                 disable + remove the systemd unit</pr
         <div class="kpi-label">Tokens Used</div>
         <div class="kpi-sub">{{ view.llm_cost.total_cache_read_tokens }} cache-read · {{ view.content_library.cover_letter_count }} letters in library</div>
       </div>
+      <div class="kpi">
+        <div class="kpi-num accent-amber">${{ view.llm_cost.today_cost_usd | round(precision=4) }}</div>
+        <div class="kpi-label">Today's Spend</div>
+        {% if view.config.llm_max_daily_cost_usd %}
+        <div class="kpi-sub">cap: ${{ view.config.llm_max_daily_cost_usd }} · {{ view.llm_cost.today_call_count }} calls today</div>
+        {% else %}
+        <div class="kpi-sub">{{ view.llm_cost.today_call_count }} calls today · no cap set</div>
+        {% endif %}
+      </div>
 </div>
     <div class="panel-header" style="margin-bottom:16px;">
       <h2>📊 Pattern Analytics</h2>
@@ -1680,6 +1689,26 @@ careerai service uninstall                 disable + remove the systemd unit</pr
           <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;">Model</div>
           <div style="font-size:16px; font-weight:700; color:var(--text-primary); margin-top:4px;">{{ view.llm_cost.model | default(value="No calls yet") }}</div>
           <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">Strategy: {{ view.config.llm_strategy }} · Backend: {{ view.config.llm_backend }}</div>
+        </div>
+      </div>
+      <!-- F09: Search Insights — source performance + best submission windows -->
+      <div id="search-insights-section" style="margin-bottom:20px;">
+        <h3 style="font-size:14px; margin-bottom:8px;">Search Insights</h3>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div>
+            <h4 style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">Source Performance</h4>
+            <table class="data-table" id="insights-source-table">
+              <thead><tr><th>Source</th><th>Discovered</th><th>Submitted</th></tr></thead>
+              <tbody><tr><td colspan="3" style="color:var(--text-secondary);">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div>
+            <h4 style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">Best Submission Windows (by hour)</h4>
+            <table class="data-table" id="insights-timing-table">
+              <thead><tr><th>Hour</th><th>Submitted</th><th>Response Rate</th></tr></thead>
+              <tbody><tr><td colspan="3" style="color:var(--text-secondary);">Loading…</td></tr></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -4247,10 +4276,11 @@ function lazyLoadAnalytics() {
   // Load timing stats
   fetch('/api/v1/timing').then(function(r){return r.json();}).then(function(data) {
     var el = document.getElementById('analytics-timing');
-    if (!el || !Array.isArray(data) || data.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No timing data yet.</p>'; return; }
+    var dayData = data.by_day_of_week || data;
+    if (!el || !Array.isArray(dayData) || dayData.length === 0) { if(el) el.innerHTML = '<p style="color:var(--text-secondary);">No timing data yet.</p>'; return; }
     var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     var html = '<table class="data-table"><thead><tr><th>Day</th><th>Submitted</th><th>Responded</th><th>Response Rate</th></tr></thead><tbody>';
-    data.forEach(function(t) {
+    dayData.forEach(function(t) {
       var pct = (t.response_rate * 100).toFixed(1) + '%';
       var day = days[t.day_of_week] || t.day_of_week;
       html += '<tr><td>' + day + '</td><td>' + t.submitted + '</td><td>' + t.responded + '</td><td>' + pct + '</td></tr>';
@@ -4258,6 +4288,33 @@ function lazyLoadAnalytics() {
     html += '</tbody></table>';
     el.innerHTML = html;
   }).catch(function(err) { console.warn('Analytics fetch failed:', err); });
+
+  // F09: Populate best submission windows (hour-of-day) table
+  fetch('/api/v1/timing').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('insights-timing-table');
+    if (!el) return;
+    var wins = data.best_windows || [];
+    if (!Array.isArray(wins) || wins.length === 0) { el.querySelector('tbody').innerHTML = '<tr><td colspan="3" style="color:var(--text-secondary);">No data yet.</td></tr>'; return; }
+    var html = '';
+    wins.forEach(function(w) {
+      var pct = (w.response_rate * 100).toFixed(1) + '%';
+      html += '<tr><td>' + w.hour + ':00</td><td>' + w.submitted + '</td><td>' + pct + '</td></tr>';
+    });
+    el.querySelector('tbody').innerHTML = html;
+  }).catch(function(err) { console.warn('Timing fetch failed:', err); });
+
+  // F09: Populate source performance table from insights endpoint
+  fetch('/api/v1/insights').then(function(r){return r.json();}).then(function(data) {
+    var el = document.getElementById('insights-source-table');
+    if (!el) return;
+    var perf = data.source_performance || [];
+    if (!Array.isArray(perf) || perf.length === 0) { el.querySelector('tbody').innerHTML = '<tr><td colspan="3" style="color:var(--text-secondary);">No data yet.</td></tr>'; return; }
+    var html = '';
+    perf.forEach(function(p) {
+      html += '<tr><td>' + escapeHtml(p.source) + '</td><td>' + p.total_discovered + '</td><td>' + p.total_submitted + '</td></tr>';
+    });
+    el.querySelector('tbody').innerHTML = html;
+  }).catch(function(err) { console.warn('Insights fetch failed:', err); });
 
   // Load A/B variants
   fetch('/api/v1/variants').then(function(r){return r.json();}).then(function(data) {

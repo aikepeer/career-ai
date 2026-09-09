@@ -32,6 +32,8 @@ async fn read_cost_file(path: &std::path::Path) -> LlmCostSummary {
             call_count: 0,
             model: String::new(),
             estimated_savings_usd: 0.0,
+            today_cost_usd: 0.0,
+            today_call_count: 0,
         };
     };
 
@@ -44,6 +46,9 @@ async fn read_cost_file(path: &std::path::Path) -> LlmCostSummary {
     let mut total_cache_read: u64 = 0;
     let mut call_count: u64 = 0;
     let mut last_model = String::new();
+    let today = chrono::Utc::now().date_naive();
+    let mut today_cost = 0.0;
+    let mut today_calls: u64 = 0;
 
     while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() {
@@ -55,7 +60,11 @@ async fn read_cost_file(path: &std::path::Path) -> LlmCostSummary {
             total_output += record.output_tokens;
             total_cache_read += record.cache_read_tokens;
             call_count += 1;
-            last_model = record.model;
+            last_model.clone_from(&record.model);
+            if record.timestamp.date_naive() == today {
+                today_cost += record.cost_usd;
+                today_calls += 1;
+            }
         }
     }
 
@@ -74,6 +83,8 @@ async fn read_cost_file(path: &std::path::Path) -> LlmCostSummary {
         call_count,
         model: last_model,
         estimated_savings_usd: cache_savings,
+        today_cost_usd: today_cost,
+        today_call_count: today_calls,
     }
 }
 

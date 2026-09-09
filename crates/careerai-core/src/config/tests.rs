@@ -128,3 +128,17 @@ action_timeout_seconds: 45
     assert_eq!(cfg.max_per_day, 5);
     assert_eq!(cfg.min_seconds_between, 90);
 }
+#[test]
+fn llm_budget_defaults_to_unlimited() {
+    let cfg = LlmConfig::default();
+    assert!(cfg.max_daily_cost_usd.is_none(), "no spend cap by default");
+    assert!(cfg.max_daily_calls.is_none(), "no call cap by default");
+}
+
+#[test]
+fn llm_budget_round_trips() {
+    let yaml = "max_daily_cost_usd: 1.50\nmax_daily_calls: 200\n";
+    let cfg: LlmConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(cfg.max_daily_cost_usd, Some(1.50));
+    assert_eq!(cfg.max_daily_calls, Some(200));
+}

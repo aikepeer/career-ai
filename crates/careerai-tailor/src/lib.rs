@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod budget;
 pub mod content_reuse;
 pub mod cover_letter;
 pub mod cover_skeleton;
@@ -27,6 +28,7 @@ pub mod schema;
 pub mod tone;
 pub mod variants;
 
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use careerai_core::config::LlmConfig;
@@ -184,12 +186,43 @@ pub async fn tailor_for_listing(
     base_dir: &Path,
 ) -> Result<TailorOutcome> {
     let listing = queries::find_by_id(pool, listing_id).await?;
-    let req = prompt::tailor_prompt(profile, &listing, cfg)?;
+    // F08: Pull prior interview feedback for this listing so the LLM
+    // can adjust talking points and cover letter emphasis based on
+    // what the candidate learned in earlier rounds.
+    let feedback_ctx = build_feedback_context(pool, listing_id).await;
+    let req = prompt::tailor_prompt(profile, &listing, cfg, feedback_ctx.as_deref())?;
 
     let cache = Cache::new(resolve_cache_root(cfg, base_dir));
     let profile_hash = canonical_profile_hash(profile);
     let jd = jd_hash(&listing.title, &listing.company, &listing.description);
     let key = compose_key(&req.prompt_version, &profile_hash, &jd, &req.model);
+    // F07: Budget enforcement gate — check daily spend/call caps before
+    // issuing a (potentially chargeable) LLM call. If the cap is hit,
+    // fall back to deterministic local tailoring for this listing.
+    let cost_path = resolve_cache_root(cfg, base_dir).join("costs.jsonl");
+    let tracker = careerai_llm::cost::CostTracker::new(&cost_path);
+    let daily_cost = tracker.daily_cost_from_disk().await.unwrap_or(0.0);
+    let daily_calls = tracker.daily_call_count_from_disk().await.unwrap_or(0);
+    match budget::decide(cfg, daily_cost, daily_calls) {
+        budget::BudgetDecision::Allow => {}
+        reason => {
+            warn!(
+                target: "tailor",
+                listing_id = %listing.id,
+                reason = ?reason,
+                daily_cost_usd = daily_cost,
+                daily_calls = daily_calls,
+                "budget cap reached — falling back to local tailoring"
+            );
+            return crate::local::tailor_for_listing_local(
+                pool,
+                listing_id,
+                profile,
+                cfg.drop_threshold,
+            )
+            .await;
+        }
+    }
 
     let (resp, from_cache) =
         fetch_tailor_response(pool, llm, &req, &listing, &cache, &key, &profile_hash).await?;
@@ -265,7 +298,8 @@ pub async fn tailor_for_listing(
     )
     .await;
     let (domain, role) = content_reuse::classify_domain(&listing.title);
-    let _ = queries::store_cover_letter(pool, &domain, &role, &letter.body, &app.id, &profile_hash).await;
+    let _ = queries::store_cover_letter(pool, &domain, &role, &letter.body, &app.id, &profile_hash)
+        .await;
 
     // Compute application quality score from the tailored view, JD text,
     // and cover letter body.
@@ -300,4 +334,32 @@ pub async fn tailor_for_listing(
         quality_score: Some(quality_score),
         tone_label: Some(tone_label_str),
     })
+}
+
+/// F08: Build a compact feedback context string from prior interview
+/// feedback rows for the given listing. Returns `None` when there is no
+/// feedback, so the Tera template skips the section entirely.
+///
+/// Each feedback row is rendered as a short block with the rating and
+/// the candidate's self-assessment of what went well and what could
+/// improve. The LLM uses this to adjust emphasis in the cover letter
+/// and to avoid repeating talking points that did not land.
+async fn build_feedback_context(pool: &SqlitePool, listing_id: &str) -> Option<String> {
+    let rows = queries::feedback_for_listing(pool, listing_id)
+        .await
+        .unwrap_or_default();
+    if rows.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for fb in &rows {
+        let _ = write!(
+            out,
+            "\n- Rating: {}/5 | Went well: {} | Could improve: {}",
+            fb.rating,
+            fb.went_well.as_deref().unwrap_or("n/a"),
+            fb.could_improve.as_deref().unwrap_or("n/a"),
+        );
+    }
+    Some(out)
 }

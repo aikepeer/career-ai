@@ -92,10 +92,7 @@ pub fn compute(
         .as_ref()
         .is_some_and(|p| !p.location.is_empty())
         || config.sources.iter().any(|s| {
-            s.kind == "greenhouse"
-                || s.kind == "lever"
-                || s.kind == "ashby"
-                || s.kind == "naukri"
+            s.kind == "greenhouse" || s.kind == "lever" || s.kind == "ashby" || s.kind == "naukri"
         });
     let remote_pref = None; // Resolved from saved preferences, not config view.
 
@@ -105,8 +102,7 @@ pub fn compute(
     let (phase, next_action, next_action_tab) = if !has_profile {
         (
             OnboardingPhase::ImportProfile,
-            "Import your resume PDF/DOCX or LinkedIn export on the Config tab."
-                .to_string(),
+            "Import your resume PDF/DOCX or LinkedIn export on the Config tab.".to_string(),
             "config",
         )
     } else if !has_roles || !has_locations {
@@ -141,10 +137,7 @@ pub fn compute(
         has_roles,
         has_locations,
         remote_pref,
-        preview_matches: preview_matches
-            .into_iter()
-            .take(5)
-            .collect(),
+        preview_matches: preview_matches.into_iter().take(5).collect(),
         next_action,
         next_action_tab,
         time_to_first_match_seconds,
@@ -154,9 +147,7 @@ pub fn compute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::{
-        ConfigView, KpiStrip, PipelineSnapshot, ProfileView, StateCounts,
-    };
+    use crate::view::{ConfigView, KpiStrip, PipelineSnapshot, ProfileView, StateCounts};
 
     fn empty_snap() -> PipelineSnapshot {
         PipelineSnapshot {
@@ -191,6 +182,8 @@ mod tests {
             llm_strategy: "local".into(),
             llm_api_base: None,
             llm_timeout_seconds: 300,
+            llm_max_daily_cost_usd: None,
+            llm_max_daily_calls: None,
         }
     }
 

@@ -1,6 +1,10 @@
 //! Dashboard HTTP handlers.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::similar_names)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::similar_names
+)]
 
 pub mod config_gen;
 pub mod listings;
@@ -26,6 +30,7 @@ use axum::{
     Json,
 };
 use careerai_core::state::ListingState;
+use careerai_db::queries as db_queries;
 
 use crate::data;
 use crate::details;
@@ -95,6 +100,8 @@ async fn render_index(state: &AppState) -> crate::error::Result<String> {
         llm_strategy: "local".into(),
         llm_api_base: None,
         llm_timeout_seconds: 300,
+        llm_max_daily_cost_usd: None,
+        llm_max_daily_calls: None,
     });
     let action_items = actions_res.unwrap_or_default();
     let explorer_total = explorer_count_res.unwrap_or(0);
@@ -393,6 +400,32 @@ pub async fn api_analytics(State(state): State<Arc<AppState>>) -> impl IntoRespo
     )
         .into_response()
 }
+/// F09: `GET /api/v1/insights` — trustworthy search insights.
+/// Exposes source/role response rates and application intelligence
+/// records (paginated). Surfaces the orphaned `query_intelligence_records`
+/// and `query_source_performance` queries from `analytics.rs`.
+pub async fn api_insights(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let (perf, intel) = tokio::join!(
+        careerai_db::queries::query_source_performance(&state.pool),
+        careerai_db::queries::query_intelligence_records(&state.pool, 50, 0),
+    );
+    let perf = match perf {
+        Ok(v) => v,
+        Err(e) => return db_error_response(&e),
+    };
+    let intel = match intel {
+        Ok(v) => v,
+        Err(e) => return db_error_response(&e),
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "source_performance": perf,
+            "intelligence_records": intel,
+        })),
+    )
+        .into_response()
+}
 
 /// R12: render a DB error as a 500 JSON response.
 fn db_error_response(e: &careerai_db::error::DbError) -> axum::response::Response {
@@ -494,11 +527,22 @@ pub async fn api_variants(State(state): State<Arc<AppState>>) -> impl IntoRespon
 
 /// `GET /api/v1/timing` — application timing stats (best days to submit).
 pub async fn api_timing(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match careerai_db::queries::submission_timing_stats(&state.pool).await {
-        Ok(stats) => (StatusCode::OK, Json(stats)).into_response(),
-        Err(err) => (
+    let (days, windows) = tokio::join!(
+        careerai_db::queries::submission_timing_stats(&state.pool),
+        careerai_db::queries::best_submission_windows(&state.pool),
+    );
+    match (days, windows) {
+        (Ok(d), Ok(w)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "by_day_of_week": d,
+                "best_windows": w,
+            })),
+        )
+            .into_response(),
+        (Err(e), _) | (_, Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": err.to_string() })),
+            Json(serde_json::json!({ "error": e.to_string() })),
         )
             .into_response(),
     }
@@ -828,7 +872,11 @@ pub async fn api_review_approve(
 ) -> impl IntoResponse {
     action.content_version.application_id = id;
     match crate::review_queue::approve(&state.pool, &action).await {
-        Ok(outcome) => (StatusCode::OK, Json(serde_json::json!({ "outcome": outcome }))).into_response(),
+        Ok(outcome) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "outcome": outcome })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
@@ -845,7 +893,11 @@ pub async fn api_review_skip(
 ) -> impl IntoResponse {
     action.content_version.application_id = id;
     match crate::review_queue::skip(&state.pool, &action).await {
-        Ok(outcome) => (StatusCode::OK, Json(serde_json::json!({ "outcome": outcome }))).into_response(),
+        Ok(outcome) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "outcome": outcome })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
@@ -862,11 +914,92 @@ pub async fn api_review_retry(
 ) -> impl IntoResponse {
     action.content_version.application_id = id;
     match crate::review_queue::retry(&state.pool, &action).await {
-        Ok(outcome) => (StatusCode::OK, Json(serde_json::json!({ "outcome": outcome }))).into_response(),
+        Ok(outcome) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "outcome": outcome })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
         )
             .into_response(),
     }
+}
+/// F06: `GET /api/v1/saved-views` — list all saved explorer views.
+pub async fn api_list_saved_views(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match db_queries::list_saved_views(&state.pool).await {
+        Ok(views) => (StatusCode::OK, Json(serde_json::json!({ "views": views }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F06: `POST /api/v1/saved-views` — create or update a saved view by name.
+pub async fn api_save_saved_view(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SavedViewInput>,
+) -> impl IntoResponse {
+    let filter_json = serde_json::to_string(&body.filter_json.unwrap_or_default())
+        .unwrap_or_else(|_| "{}".to_string());
+    match db_queries::upsert_saved_view(
+        &state.pool,
+        &body.name,
+        body.query.as_deref(),
+        body.source.as_deref(),
+        body.state.as_deref(),
+        body.remote_only.unwrap_or(false),
+        &filter_json,
+    )
+    .await
+    {
+        Ok(id) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "id": id, "name": body.name })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F06: `DELETE /api/v1/saved-views/:name` — delete a saved view by name.
+pub async fn api_delete_saved_view(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match db_queries::delete_saved_view(&state.pool, &name).await {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "deleted": true, "name": name })),
+        )
+            .into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "deleted": false, "name": name })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F06: request body for creating/updating a saved view.
+#[derive(Debug, serde::Deserialize)]
+pub struct SavedViewInput {
+    pub name: String,
+    pub query: Option<String>,
+    pub source: Option<String>,
+    pub state: Option<String>,
+    pub remote_only: Option<bool>,
+    pub filter_json: Option<serde_json::Value>,
 }

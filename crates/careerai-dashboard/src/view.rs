@@ -167,6 +167,10 @@ pub struct ConfigView {
     pub llm_strategy: String,
     pub llm_api_base: Option<String>,
     pub llm_timeout_seconds: u64,
+    /// F07: Optional daily spend cap (USD). `None` = unlimited.
+    pub llm_max_daily_cost_usd: Option<f64>,
+    /// F07: Optional daily call cap. `None` = unlimited.
+    pub llm_max_daily_calls: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -271,6 +275,11 @@ pub struct LlmCostSummary {
     /// (calls that did NOT go to the provider). Each avoided call is
     /// valued at the average cost per live call.
     pub estimated_savings_usd: f64,
+    /// F07: Cumulative spend for the current UTC day. Used by the
+    /// budget enforcement UI to show spend vs. cap.
+    pub today_cost_usd: f64,
+    /// F07: Cumulative call count for the current UTC day.
+    pub today_call_count: u64,
 }
 
 /// Content library stats for the dashboard: how many cover letters and

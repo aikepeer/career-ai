@@ -225,6 +225,20 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: StatusCommand,
     },
+    /// Export the workspace database to a JSON snapshot file.
+    Export {
+        /// Output file path (default: careerai-workspace-export.json).
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Restore workspace data from a JSON snapshot file.
+    Restore {
+        /// Input file path.
+        input: String,
+        /// Confirm restore — required to avoid accidental overwrites.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Manage the systemd user service.
     Service {
         #[command(subcommand)]

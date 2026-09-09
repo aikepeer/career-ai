@@ -262,6 +262,8 @@ mod tests {
             drop_threshold: 0.01,
             llm_min_score: 0.03,
             effort: "low".into(),
+            max_daily_cost_usd: None,
+            max_daily_calls: None,
         }
     }
 

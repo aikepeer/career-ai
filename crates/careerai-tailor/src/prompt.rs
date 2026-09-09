@@ -29,13 +29,19 @@ const COVER_LETTER_TEMPLATE_NAME: &str = "cover_letter";
 
 /// Build the tailor-resume `LlmRequest` from fresh inputs. Temperature is
 /// held low (0.1) because we want structured JSON, not creative prose.
-pub fn tailor_prompt(profile: &Profile, listing: &Listing, cfg: &LlmConfig) -> Result<LlmRequest> {
+pub fn tailor_prompt(
+    profile: &Profile,
+    listing: &Listing,
+    cfg: &LlmConfig,
+    feedback_context: Option<&str>,
+) -> Result<LlmRequest> {
     let rendered = render(
         TAILOR_TEMPLATE_NAME,
         TAILOR_PROMPT_TEMPLATE,
         profile,
         listing,
         cfg,
+        feedback_context,
     )?;
     let (system, profile_block, user) = split_segments(&rendered)?;
     Ok(LlmRequest {
@@ -45,9 +51,6 @@ pub fn tailor_prompt(profile: &Profile, listing: &Listing, cfg: &LlmConfig) -> R
         prompt_version: cfg.prompt_version.clone(),
         model: cfg.tailor_model.clone(),
         temperature: 0.1,
-        // A full resume diff can exceed 2048 tokens (dozens of `ops` across
-        // experience/projects/skills), but the constrained JSON grammar is
-        // compact — 4096 is sufficient for profiles with 5+ experience entries.
         max_tokens: 4_096,
         cache_profile: cfg.anthropic_prompt_cache,
     })
@@ -67,6 +70,7 @@ pub fn cover_letter_prompt(
         profile,
         listing,
         cfg,
+        None,
     )?;
     let (system, profile_block, user) = split_segments(&rendered)?;
     // Version suffix keeps the cover-letter cache key distinct from the
@@ -95,6 +99,7 @@ fn render(
     profile: &Profile,
     listing: &Listing,
     cfg: &LlmConfig,
+    feedback_context: Option<&str>,
 ) -> Result<String> {
     let cleaned_jd = clean_job_description(&listing.description);
     // Pre-filter the profile to drop zero-relevance entries, reducing
@@ -114,6 +119,7 @@ fn render(
         listing.location.as_deref().unwrap_or(""),
     );
     ctx.insert("listing_description", &cleaned_jd);
+    ctx.insert("feedback_context", &feedback_context);
     let rendered = tera.render(name, &ctx)?;
     Ok(rendered)
 }
@@ -263,7 +269,8 @@ mod tests {
 
     #[test]
     fn tailor_prompt_splits_all_three_segments() {
-        let req = tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg()).unwrap();
+        let req =
+            tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg(), None).unwrap();
         assert!(!req.system.is_empty());
         assert!(!req.profile_block.is_empty());
         assert!(!req.user.is_empty());
@@ -284,13 +291,52 @@ mod tests {
     /// actionable signal.
     #[test]
     fn tailor_prompt_documents_projects_path_shape() {
-        let req = tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg()).unwrap();
+        let req =
+            tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg(), None).unwrap();
         assert!(
             req.system.contains("projects[<i>].bullets[<j>]")
                 || req.system.contains("projects[<i>]"),
             "tailor prompt must teach the LLM the projects path shape; \
              system block was: {sys}",
             sys = req.system
+        );
+    }
+    /// F08: When feedback context is provided, the tailor prompt must
+    /// include it in the user segment so the LLM can adjust emphasis
+    /// based on what the candidate learned in prior interviews.
+    #[test]
+    fn tailor_prompt_includes_feedback_context_when_provided() {
+        let req = tailor_prompt(
+            &fixture_profile(),
+            &fixture_listing(),
+            &fixture_cfg(),
+            Some("\n- Rating: 3/5 | Went well: system design | Could improve: conciseness"),
+        )
+        .unwrap();
+        assert!(
+            req.user
+                .contains("Interview feedback from prior applications"),
+            "feedback section missing from user block: {user}",
+            user = req.user
+        );
+        assert!(
+            req.user.contains("Could improve: conciseness"),
+            "feedback content missing from user block: {user}",
+            user = req.user
+        );
+    }
+
+    /// F08: When no feedback context is provided, the prompt must omit
+    /// the feedback section entirely (Tera `{% if feedback_context %}`).
+    #[test]
+    fn tailor_prompt_omits_feedback_section_when_none() {
+        let req =
+            tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg(), None).unwrap();
+        assert!(
+            !req.user
+                .contains("Interview feedback from prior applications"),
+            "feedback section present without context: {user}",
+            user = req.user
         );
     }
 

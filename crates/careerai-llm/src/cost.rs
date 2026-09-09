@@ -173,6 +173,65 @@ impl CostTracker {
             Err(_) => Ok(0.0),
         }
     }
+
+    /// Sum `cost_usd` for records whose `timestamp` falls on the current
+    /// UTC calendar day. Used by the F07 budget enforcement gate.
+    pub async fn daily_cost_from_disk(&self) -> Result<f64> {
+        let today = chrono::Utc::now().date_naive();
+        self.sum_filtered(|ts| ts.date_naive() == today).await
+    }
+
+    /// Count records whose `timestamp` falls on the current UTC calendar
+    /// day. Used by the F07 call-cap enforcement gate.
+    pub async fn daily_call_count_from_disk(&self) -> Result<u64> {
+        use tokio::io::AsyncBufReadExt;
+        let today = chrono::Utc::now().date_naive();
+        match tokio::fs::File::open(&self.path).await {
+            Ok(file) => {
+                let reader = tokio::io::BufReader::new(file);
+                let mut lines = reader.lines();
+                let mut count = 0u64;
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(record) = serde_json::from_str::<CostRecord>(&line) {
+                        if record.timestamp.date_naive() == today {
+                            count += 1;
+                        }
+                    }
+                }
+                Ok(count)
+            }
+            Err(_) => Ok(0),
+        }
+    }
+
+    async fn sum_filtered<F>(&self, predicate: F) -> Result<f64>
+    where
+        F: Fn(&chrono::DateTime<chrono::Utc>) -> bool,
+    {
+        use tokio::io::AsyncBufReadExt;
+        match tokio::fs::File::open(&self.path).await {
+            Ok(file) => {
+                let reader = tokio::io::BufReader::new(file);
+                let mut lines = reader.lines();
+                let mut total = 0.0;
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(record) = serde_json::from_str::<CostRecord>(&line) {
+                        if predicate(&record.timestamp) {
+                            total += record.cost_usd;
+                        }
+                    }
+                }
+                Ok(total)
+            }
+            Err(_) => Ok(0.0),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -328,6 +387,60 @@ mod tests {
         assert!((total - 0.0).abs() < 1e-9);
     }
 
+    #[tokio::test]
+    async fn tracker_daily_cost_excludes_old_entries() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("costs.jsonl");
+
+        // Yesterday's record — must be excluded from today's total.
+        let old = CostRecord {
+            model: "claude-sonnet".into(),
+            timestamp: chrono::Utc::now() - chrono::Duration::days(1),
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_read_tokens: 0,
+            cost_usd: 100.0,
+        };
+        // Today's record — must be included.
+        let today = CostRecord {
+            model: "claude-sonnet".into(),
+            timestamp: chrono::Utc::now(),
+            input_tokens: 1000,
+            output_tokens: 500,
+            cache_read_tokens: 0,
+            cost_usd: 5.0,
+        };
+
+        let mut tracker = CostTracker::new(path.clone());
+        tracker.record(old).await.unwrap();
+        tracker.record(today).await.unwrap();
+
+        let daily = tracker.daily_cost_from_disk().await.unwrap();
+        assert!(
+            (daily - 5.0).abs() < 1e-9,
+            "daily cost should be 5.0 (today only), got {daily}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tracker_daily_count_excludes_old_entries() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("costs.jsonl");
+
+        let old = sample_record(1.0);
+        let mut tracker = CostTracker::new(path.clone());
+        tracker
+            .record(CostRecord {
+                timestamp: chrono::Utc::now() - chrono::Duration::days(1),
+                ..old
+            })
+            .await
+            .unwrap();
+        tracker.record(sample_record(2.0)).await.unwrap();
+
+        let count = tracker.daily_call_count_from_disk().await.unwrap();
+        assert_eq!(count, 1, "daily call count should be 1 (today only)");
+    }
     // --- CostRecord serialization -------------------------------------
 
     #[test]

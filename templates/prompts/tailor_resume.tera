@@ -37,5 +37,8 @@ Location: {{ listing_location }}
 
 Description:
 {{ listing_description }}
-
+{% if feedback_context %}
+Interview feedback from prior applications to this listing:
+{{ feedback_context }}
+{% endif %}
 Emit the JSON diff now.
