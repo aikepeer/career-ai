@@ -43,6 +43,18 @@ pub async fn run(cwd: &Path, tune: bool, rematch_shortlisted: bool) -> Result<()
             "match: filtered_out {}, shortlisted {}, below-threshold {}",
             report.filtered_out, report.shortlisted, report.also_filtered,
         );
+
+        if let Some(gap) = &report.skill_gap {
+            if !gap.missing_skills.is_empty() {
+                println!("\nskill gaps ({} JDs analyzed):", gap.total_jds_analyzed);
+                for entry in &gap.missing_skills {
+                    println!(
+                        "  {:<25} {:>3} JDs ({:>5.1}%)  [{}]",
+                        entry.skill, entry.frequency, entry.percentage, entry.category
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

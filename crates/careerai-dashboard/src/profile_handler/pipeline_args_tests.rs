@@ -229,3 +229,53 @@ fn rejects_arg_shape_mismatches() {
         Err(CliRunValidationError::MissingArgument(_, _))
     ));
 }
+
+#[test]
+fn new_commands_parse_and_build_args() {
+    // patterns / upskill / analyze-profile take no args.
+    for cmd in ["patterns", "upskill", "analyze-profile"] {
+        let r = req(cmd);
+        let argv = build_command_args(&r).expect("whitelisted");
+        assert_eq!(args_str(&argv)[0], cmd.split_whitespace().next().unwrap());
+    }
+
+    // interview / email require listing_id.
+    for cmd in ["interview", "email"] {
+        let r = req(cmd);
+        assert!(matches!(
+            build_command_args(&r),
+            Err(CliRunValidationError::MissingArgument(_, _))
+        ));
+        let mut r = req(cmd);
+        r.args.listing_id = Some("lst-42".into());
+        let argv = build_command_args(&r).expect("whitelisted");
+        assert_eq!(args_str(&argv), vec![cmd, "lst-42"]);
+    }
+
+    // negotiate requires listing_id, optional --benchmark from `since`.
+    let r = req("negotiate");
+    assert!(matches!(
+        build_command_args(&r),
+        Err(CliRunValidationError::MissingArgument(_, _))
+    ));
+    let mut r = req("negotiate");
+    r.args.listing_id = Some("lst-7".into());
+    r.args.since = Some("180k".into());
+    let argv = build_command_args(&r).expect("whitelisted");
+    assert_eq!(
+        args_str(&argv),
+        vec!["negotiate", "lst-7", "--benchmark", "180k"]
+    );
+}
+
+#[test]
+fn new_commands_reject_shell_metacharacters_in_ids() {
+    for cmd in ["interview", "email", "negotiate"] {
+        let mut r = req(cmd);
+        r.args.listing_id = Some("x$(whoami)".into());
+        assert!(matches!(
+            build_command_args(&r),
+            Err(CliRunValidationError::InvalidId(_))
+        ));
+    }
+}

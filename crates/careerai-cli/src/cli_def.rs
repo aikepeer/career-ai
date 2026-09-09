@@ -146,6 +146,32 @@ pub(crate) enum Command {
         #[arg(long, default_value_t = 10)]
         days: u32,
     },
+    /// Analyze pipeline patterns: reposts/ghost-jobs, funnel velocity,
+    /// advance rates, and rejection latency.
+    Patterns,
+    /// Draft a cold application email for a listing (draft-only, never sends).
+    Email {
+        /// Listing ID to draft an email for.
+        listing_id: String,
+    },
+    /// Generate an interview prep pack (STAR stories + likely questions)
+    /// for a listing.
+    Interview {
+        /// Listing ID to prep for.
+        listing_id: String,
+    },
+    /// Analyse skill gaps between your profile and shortlisted JDs.
+    Upskill,
+    /// Audit your profile for ATS readiness, quantification, and completeness.
+    AnalyzeProfile,
+    /// Generate a salary negotiation script (counter-offer email + talking points).
+    Negotiate {
+        /// Listing ID to negotiate for.
+        listing_id: String,
+        /// Optional market benchmark string (e.g. "$180K base, 15% equity").
+        #[arg(long)]
+        benchmark: Option<String>,
+    },
     /// Verify shortlisted listings are still open on their source board
     /// before spending LLM tokens tailoring them.
     Liveness {

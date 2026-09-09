@@ -90,6 +90,11 @@ async fn launch_browser(width: u32, height: u32) -> (Browser, tokio::task::JoinH
         .no_sandbox()
         .new_headless_mode()
         .window_size(width, height)
+        .viewport(chromiumoxide::handler::viewport::Viewport {
+            width,
+            height,
+            ..Default::default()
+        })
         .arg("--disable-dev-shm-usage")
         .launch_timeout(Duration::from_secs(45))
         .build()
@@ -375,7 +380,15 @@ async fn assert_all_tabs_fit_viewport(browser: &Browser, port: u16, width: u32) 
     let deadline = Instant::now() + Duration::from_secs(20);
     let page = open_index(browser, port, deadline).await;
     let tabs = [
-        "funnel", "events", "config", "actions", "explorer", "commands", "canvas", "chat",
+        "funnel",
+        "events",
+        "config",
+        "actions",
+        "explorer",
+        "commands",
+        "analytics",
+        "bounties",
+        "chat",
     ];
 
     for tab in tabs {
@@ -488,4 +501,190 @@ async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
     }
 
     server.abort();
+}
+
+/// Exercise the workspace with enough rows to cross the idle-render boundary.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn workspace_saved_searches_palette_and_refresh_in_real_browser() {
+    use chromiumoxide::page::ScreenshotParams;
+    if chromium_executable().is_none() {
+        eprintln!("SKIP: set CAREERAI_CHROMIUM for workspace browser coverage");
+        return;
+    }
+    let pool = pool_in_memory().await.expect("database");
+    seed_workspace_listings(&pool).await;
+    let port = pick_free_port().await;
+    let opts = ServeOptions {
+        port,
+        bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        refresh_seconds: 0,
+        pool: pool.clone(),
+    };
+    let server = tokio::spawn(async move {
+        let _ = run(opts).await;
+    });
+    wait_for_server(port).await;
+    let (mut browser, _handler) = launch_browser(1440, 1100).await;
+    let page = open_index(&browser, port, Instant::now() + Duration::from_secs(15)).await;
+    wait_for_selector(
+        &page,
+        "#activity-chart li",
+        Instant::now() + Duration::from_secs(10),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    if let Some(dir) = std::env::var_os("CAREERAI_SCREENSHOT_DIR") {
+        page.save_screenshot(
+            ScreenshotParams::builder().full_page(false).build(),
+            PathBuf::from(dir).join("workspace-desktop.png"),
+        )
+        .await
+        .expect("desktop screenshot");
+    }
+    test_desktop_explorer(&page, &pool).await;
+    page.evaluate("switchTab('funnel'); window._toggleTheme();")
+        .await
+        .expect("dark theme");
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    if let Some(dir) = std::env::var_os("CAREERAI_SCREENSHOT_DIR") {
+        page.save_screenshot(
+            ScreenshotParams::builder().full_page(false).build(),
+            PathBuf::from(dir).join("workspace-dark.png"),
+        )
+        .await
+        .expect("dark screenshot");
+    }
+    browser.close().await.expect("close desktop browser");
+    test_mobile_view(port).await;
+    server.abort();
+}
+async fn test_desktop_explorer(page: &chromiumoxide::Page, pool: &sqlx::SqlitePool) {
+    page.find_element("#command-trigger")
+        .await
+        .expect("palette trigger")
+        .click()
+        .await
+        .expect("open palette");
+    let focused: bool = page.evaluate("document.querySelector('#command-palette').open && document.activeElement.id === 'command-search'").await.expect("focus check").into_value().expect("bool");
+    assert!(focused, "palette must focus its search field");
+    page.evaluate("document.querySelector('#command-search').value = 'opportunities'; document.querySelector('#command-search').dispatchEvent(new Event('input')); document.querySelector('#command-search').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));").await.expect("keyboard navigation");
+    wait_for_visible(page, "#explorer-search-input", Instant::now() + Duration::from_secs(5)).await;
+    let destination_focused: bool = page
+        .evaluate("document.activeElement.id === 'tab-btn-explorer'")
+        .await.expect("palette destination focus")
+        .into_value().expect("bool");
+    assert!(destination_focused, "palette navigation must focus the destination");
+
+    page.evaluate("document.querySelector('#flt-remote').checked = true; filterExplorerTable();").await.expect("filter remote");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let loaded: bool = page.evaluate("document.querySelectorAll('.explorer-row').length === 135").await.expect("rows").into_value().expect("bool");
+        if loaded { break; }
+        assert!(Instant::now() < deadline, "idle chunks never completed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let visible_remote: bool = page.evaluate("[...document.querySelectorAll('.explorer-row')].filter(r => r.style.display !== 'none').every(r => r.dataset.remote === 'true')").await.expect("chunk filter").into_value().expect("bool");
+    assert!(visible_remote, "every idle chunk must respect current filters");
+
+    page.find_element("#save-search-toggle").await.expect("save search").click().await.expect("open save form");
+    page.evaluate("document.querySelector('#saved-search-name').value = 'Remote roles'; document.querySelector('#save-search-form').requestSubmit();").await.expect("save filters");
+    page.reload().await.expect("reload");
+    wait_for_selector(page, ".saved-search button", Instant::now() + Duration::from_secs(10)).await;
+    page.find_element(".saved-search button").await.expect("saved view").click().await.expect("restore filters");
+    let restored: bool = page.evaluate("document.querySelector('#flt-remote').checked").await.expect("restored filter").into_value().expect("bool");
+    assert!(restored, "saved searches must persist across reloads");
+
+    page.evaluate("window.originalFetch = window.fetch; window.fetch = function(url, options) { return url === '/api/v1/explorer' ? Promise.resolve({ok:false}) : window.originalFetch(url, options); }; refreshExplorerListings();").await.expect("simulate refresh failure");
+    wait_for_visible(page, "#explorer-load-error", Instant::now() + Duration::from_secs(5)).await;
+    page.evaluate("filterExplorerTable();").await.expect("filter after failure");
+    let retry_visible: bool = page.evaluate("document.querySelector('#explorer-load-error button').getClientRects().length > 0").await.expect("retry remains available").into_value().expect("bool");
+    assert!(retry_visible, "filtering must preserve the refresh failure and retry");
+
+    page.evaluate("window.fetch = window.originalFetch; document.querySelector('#explorer-load-error button').click();").await.expect("retry with working network");
+    sqlx::query("UPDATE listings SET state = 'filtered_out', score = 0 WHERE id = 'workspace-0'").execute(pool).await.expect("change existing listing");
+    page.evaluate("refreshExplorerListings()").await.expect("refresh");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let refreshed: bool = page.evaluate("[...document.querySelectorAll('.explorer-row')].some(r => r.textContent.includes('workspace-0') && r.dataset.state === 'filtered_out' && r.textContent.includes('0%'))").await.expect("refreshed state").into_value().expect("bool");
+        if refreshed { break; }
+        assert!(Instant::now() < deadline, "refresh must update existing rows and display zero scores");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn test_mobile_view(port: u16) {
+    use chromiumoxide::page::ScreenshotParams;
+    let (mut mobile, _mobile_handler) = launch_browser(390, 844).await;
+    let page = open_index(&mobile, port, Instant::now() + Duration::from_secs(15)).await;
+    wait_for_selector(
+        &page,
+        "#activity-chart li",
+        Instant::now() + Duration::from_secs(10),
+    )
+    .await;
+    let dimensions: serde_json::Value = page
+        .evaluate("({width:innerWidth, scroll:document.documentElement.scrollWidth})")
+        .await
+        .expect("mobile dimensions")
+        .into_value()
+        .expect("dimensions");
+    assert!(
+        dimensions["scroll"].as_u64() <= dimensions["width"].as_u64(),
+        "mobile overflow: {dimensions}"
+    );
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    if let Some(dir) = std::env::var_os("CAREERAI_SCREENSHOT_DIR") {
+        page.save_screenshot(
+            ScreenshotParams::builder().full_page(false).build(),
+            PathBuf::from(dir).join("workspace-mobile.png"),
+        )
+        .await
+        .expect("mobile screenshot");
+    }
+    mobile.close().await.expect("close mobile browser");
+}
+async fn seed_workspace_listings(pool: &sqlx::SqlitePool) {
+    let companies = [
+        "Northstar Robotics",
+        "Linear Labs",
+        "Orbit Systems",
+        "Fieldwork",
+        "Forma",
+        "Atlas Engineering",
+    ];
+    let titles = [
+        "Senior Rust Engineer",
+        "AI Platform Engineer",
+        "Embedded Software Engineer",
+        "Backend Engineer",
+        "Robotics Engineer",
+        "Software Engineer",
+    ];
+    for index in 0..135 {
+        let state = if index < 12 {
+            "shortlisted"
+        } else if index < 18 {
+            "submitted"
+        } else {
+            "discovered"
+        };
+        sqlx::query("INSERT INTO listings (id, source, external_id, title, company, location, url, description, state, score) VALUES (?, 'greenhouse', ?, ?, ?, ?, 'https://example.com/job', 'Build useful software with Rust and Python.', ?, ?)")
+            .bind(format!("workspace-{index}"))
+            .bind(index.to_string())
+            .bind(titles[index % titles.len()])
+            .bind(companies[index % companies.len()])
+            .bind(if index % 2 == 0 { "Remote" } else { "London, UK" })
+            .bind(state).bind(0.95 - f64::from(u32::try_from(index % 10).expect("small index")) * 0.02)
+            .execute(pool).await.expect("seed listing");
+    }
+    for offset in 0..6 {
+        sqlx::query(
+            "INSERT INTO events (listing_id, to_state, created_at) VALUES (?, 'submitted', ?)",
+        )
+        .bind(format!("workspace-{}", 12 + offset))
+        .bind(chrono::Utc::now() - chrono::Duration::days(offset))
+        .execute(pool)
+        .await
+        .expect("seed activity");
+    }
 }

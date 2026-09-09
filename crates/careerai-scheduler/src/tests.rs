@@ -66,6 +66,24 @@ async fn start_then_immediate_shutdown_is_clean() {
     sched.shutdown().await.expect("shutdown should not error");
 }
 
+#[tokio::test]
+async fn from_config_with_follow_up_cadence_succeeds() {
+    let (tmp, mut cfg) = embedded_cfg();
+    cfg.scheduler.cadence.clear();
+    cfg.scheduler.follow_up_cadence = Some("0 0 9 * * *".into());
+    let sched = Scheduler::from_config(tmp.path(), &cfg).await;
+    assert!(sched.is_ok(), "follow_up_cadence must register cleanly");
+}
+
+#[tokio::test]
+async fn from_config_without_follow_up_cadence_succeeds() {
+    let (tmp, mut cfg) = embedded_cfg();
+    cfg.scheduler.cadence.clear();
+    cfg.scheduler.follow_up_cadence = None;
+    let sched = Scheduler::from_config(tmp.path(), &cfg).await;
+    assert!(sched.is_ok(), "missing follow_up_cadence must not error");
+}
+
 /// Helper: minimal enabled MCP source with the given name + cron.
 fn mcp_source_with_cron(name: &str, cron: Option<&str>) -> McpSourceConfig {
     McpSourceConfig {

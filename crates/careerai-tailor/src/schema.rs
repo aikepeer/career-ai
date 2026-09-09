@@ -18,9 +18,9 @@ use crate::error::{Result, TailorError};
 /// used to extend the guardrail allowlist with JD-derived vocabulary.
 pub fn parse_and_validate(raw: &str, profile: &Profile, jd_text: &str) -> Result<DiffDoc> {
     let stripped = strip_json_fences(raw.trim());
-    let doc: DiffDoc = serde_json::from_str(stripped)
+    let mut doc: DiffDoc = serde_json::from_str(stripped)
         .map_err(|e| TailorError::Schema(format!("json parse: {e}; raw_len={}", raw.len())))?;
-    diff::validate(&doc, profile, jd_text)?;
+    diff::validate_and_sanitize(&mut doc, profile, jd_text)?;
     Ok(doc)
 }
 

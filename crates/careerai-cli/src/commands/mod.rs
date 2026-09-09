@@ -9,16 +9,21 @@
 //! defined here and re-exported so `main.rs` can reference them in the
 //! top-level `Command` enum without ballooning its line count.
 
+pub mod analyze_profile;
 pub mod apply;
 pub mod config_cmd;
 pub mod discover;
+pub mod email;
 pub mod followups;
 pub mod inspect;
+pub mod interview;
 pub mod liveness;
 pub mod llm;
 pub mod match_;
 pub mod mcp;
+pub mod negotiate;
 pub mod notify;
+pub mod patterns;
 pub mod profile;
 pub mod profile_llm;
 pub mod render;
@@ -26,6 +31,7 @@ pub mod retry;
 pub mod run;
 pub mod shortlist;
 pub mod tailor;
+pub mod upskill;
 
 use clap::Subcommand;
 

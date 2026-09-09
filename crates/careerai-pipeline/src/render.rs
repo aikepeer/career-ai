@@ -91,14 +91,37 @@ pub async fn render_one(
     )
     .await
     .context("render_application")?;
-    // R07: attach artifact rows, transition the listing to rendered, and
-    // set the application state to rendered in a single transaction. A
-    // crash between these operations would otherwise leave the listing
-    // in `rendered` while the application is still `tailored` (or vice
-    // versa), confusing the daemon's eligibility scan.
+    commit_render_transaction(&pool, &application, &artifacts).await?;
+    ats_verify(
+        &artifacts.resume_pdf,
+        &listing.title,
+        &listing.company,
+        &listing.description,
+        &profile.personal.email,
+        &profile.personal.phone,
+        &application.id,
+    );
+
+    Ok(RenderedOutcome {
+        application_id: application.id,
+        resume_md: artifacts.resume_md,
+        resume_docx: artifacts.resume_docx,
+        resume_pdf: artifacts.resume_pdf,
+        cover_md: artifacts.cover_md,
+        cover_docx: artifacts.cover_docx,
+        bytes: artifacts.bytes,
+    })
+}
+
+/// R07: attach artifact rows, transition the listing to rendered, and
+/// set the application state to rendered in a single transaction.
+async fn commit_render_transaction(
+    pool: &sqlx::SqlitePool,
+    application: &careerai_db::Application,
+    artifacts: &careerai_render::RenderedArtifacts,
+) -> Result<()> {
     let mut tx = pool.begin().await.context("begin render commit transaction")?;
 
-    // Attach artifact rows — inlined so we share the caller's transaction.
     for (kind, path) in [
         ("resume_md", &artifacts.resume_md),
         ("resume_docx", &artifacts.resume_docx),
@@ -120,7 +143,7 @@ pub async fn render_one(
                 )
                 .bind(&application.id)
                 .bind(kind)
-                .bind(&path.to_string_lossy())
+                .bind(path.to_string_lossy())
                 .bind(i64::try_from(size).unwrap_or(i64::MAX))
                 .execute(&mut *tx)
                 .await
@@ -129,7 +152,6 @@ pub async fn render_one(
         }
     }
 
-    // Transition listing state + insert event row.
     let now = chrono::Utc::now();
     let prev_listing_state: Option<(String,)> =
         sqlx::query_as("SELECT state FROM listings WHERE id = ?")
@@ -156,7 +178,6 @@ pub async fn render_one(
         .await
         .context("insert rendered event")?;
 
-    // Set application state to rendered.
     sqlx::query("UPDATE applications SET state = ?, updated_at = ? WHERE id = ?")
         .bind("rendered")
         .bind(now)
@@ -166,25 +187,7 @@ pub async fn render_one(
         .context("set application state=rendered")?;
 
     tx.commit().await.context("commit render transaction")?;
-    ats_verify(
-        &artifacts.resume_pdf,
-        &listing.title,
-        &listing.company,
-        &listing.description,
-        &profile.personal.email,
-        &profile.personal.phone,
-        &application.id,
-    );
-
-    Ok(RenderedOutcome {
-        application_id: application.id,
-        resume_md: artifacts.resume_md,
-        resume_docx: artifacts.resume_docx,
-        resume_pdf: artifacts.resume_pdf,
-        cover_md: artifacts.cover_md,
-        cover_docx: artifacts.cover_docx,
-        bytes: artifacts.bytes,
-    })
+    Ok(())
 }
 
 

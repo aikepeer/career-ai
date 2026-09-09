@@ -11,6 +11,7 @@ description = "Hard filters + keyword-similarity ranking of listings against a p
 careerai-core = { path = "../careerai-core" }
 careerai-profile = { path = "../careerai-profile" }
 careerai-sources = { path = "../careerai-sources" }
+regex = "1"
 thiserror.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true

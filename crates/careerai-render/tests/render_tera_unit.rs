@@ -141,3 +141,32 @@ fn resume_html_contains_core_structure() {
     assert!(html.contains("Technical Skills"));
     assert!(html.contains("Education"));
 }
+
+#[test]
+fn resume_html_uses_experience_title_when_headline_is_none() {
+    let view = fixture_view();
+    let html = render_resume_html(&view, &view.personal.name, None).unwrap();
+    assert!(html.contains("Jane Doe"));
+    assert!(html.contains(r#"<div class="candidate-title">Senior Engineer</div>"#));
+    assert!(html.contains(
+        r#"<div class="summary-text">Backend engineer focused on distributed systems.</div>"#
+    ));
+}
+
+#[test]
+fn resume_renders_honors_and_achievements() {
+    let mut view = fixture_view();
+    view.education[0].achievements = vec![
+        "Secured All India 33rd rank in HackerEarth Deep Learning Challenge".into(),
+        "Capgemini Best Performance Award".into(),
+    ];
+    let md = render_resume(&view, &view.personal.name).unwrap();
+    assert!(md.contains("## Honors & Achievements"));
+    assert!(md.contains("Secured All India 33rd rank in HackerEarth Deep Learning Challenge"));
+    assert!(md.contains("Capgemini Best Performance Award"));
+
+    let html = render_resume_html(&view, &view.personal.name, None).unwrap();
+    assert!(html.contains("Honors & Achievements"));
+    assert!(html.contains("Secured All India 33rd rank in HackerEarth Deep Learning Challenge"));
+    assert!(html.contains("Capgemini Best Performance Award"));
+}

@@ -103,60 +103,66 @@ pub async fn fetch_explorer_filtered(
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let id: String = row.try_get("id").unwrap_or_default();
-        if id.is_empty() {
-            continue;
+        if let Some(item) = map_explorer_row(&row) {
+            out.push(item);
         }
-        let title: String = row.try_get("title").unwrap_or_default();
-        let company: String = row.try_get("company").unwrap_or_default();
-        let location: Option<String> = row.try_get("location").ok();
-        let source: String = row
-            .try_get("source")
-            .unwrap_or_else(|_| "unknown".to_string());
-        let state: String = row.try_get("state").unwrap_or_default();
-        let score_f64: Option<f64> = row.try_get("score").ok();
-        let score = score_f64.map(|s| s as f32);
-        let is_remote = location.as_deref().is_some_and(is_remote_location);
-        let url: String = row.try_get("url").unwrap_or_default();
-        let application_id: Option<String> = row.try_get("application_id").ok().flatten();
-        let created_at: Option<DateTime<Utc>> = row.try_get("created_at").ok();
-        let description: String = row.try_get("description").unwrap_or_default();
-
-        // Legitimacy + eligibility badges (cheap heuristics, no LLM).
-        let raw = careerai_sources::base::RawListing {
-            source: source.clone(),
-            external_id: id.clone(),
-            title: title.clone(),
-            company: company.clone(),
-            location: location.clone(),
-            url: url.clone(),
-            description,
-            raw_json: None,
-        };
-        let legitimacy = match careerai_match::assess_legitimacy(&raw) {
-            careerai_match::LegitimacyScore::HighConfidence => "high_confidence",
-            careerai_match::LegitimacyScore::ProceedWithCaution => "caution",
-            careerai_match::LegitimacyScore::Suspicious => "suspicious",
-        };
-        let eligibility = "unknown"; // Work authorization has not been evaluated here.
-
-        out.push(crate::view::DiscoveredExplorerItem {
-            id,
-            title,
-            company,
-            location,
-            source,
-            state,
-            score,
-            is_remote,
-            url,
-            application_id,
-            created_at,
-            legitimacy: legitimacy.to_string(),
-            eligibility: eligibility.to_string(),
-        });
     }
     Ok(out)
+}
+
+fn map_explorer_row(row: &sqlx::sqlite::SqliteRow) -> Option<crate::view::DiscoveredExplorerItem> {
+    let id: String = row.try_get("id").unwrap_or_default();
+    if id.is_empty() {
+        return None;
+    }
+    let title: String = row.try_get("title").unwrap_or_default();
+    let company: String = row.try_get("company").unwrap_or_default();
+    let location: Option<String> = row.try_get("location").ok();
+    let source: String = row
+        .try_get("source")
+        .unwrap_or_else(|_| "unknown".to_string());
+    let state: String = row.try_get("state").unwrap_or_default();
+    let score_f64: Option<f64> = row.try_get("score").ok();
+    let score = score_f64.map(|s| s as f32);
+    let is_remote = location.as_deref().is_some_and(is_remote_location);
+    let url: String = row.try_get("url").unwrap_or_default();
+    let application_id: Option<String> = row.try_get("application_id").ok().flatten();
+    let created_at: Option<DateTime<Utc>> = row.try_get("created_at").ok();
+    let description: String = row.try_get("description").unwrap_or_default();
+
+    // Legitimacy + eligibility badges (cheap heuristics, no LLM).
+    let raw = careerai_sources::base::RawListing {
+        source: source.clone(),
+        external_id: id.clone(),
+        title: title.clone(),
+        company: company.clone(),
+        location: location.clone(),
+        url: url.clone(),
+        description,
+        raw_json: None,
+    };
+    let legitimacy = match careerai_match::assess_legitimacy(&raw) {
+        careerai_match::LegitimacyScore::HighConfidence => "high_confidence",
+        careerai_match::LegitimacyScore::ProceedWithCaution => "caution",
+        careerai_match::LegitimacyScore::Suspicious => "suspicious",
+    };
+    let eligibility = "unknown"; // Work authorization has not been evaluated here.
+
+    Some(crate::view::DiscoveredExplorerItem {
+        id,
+        title,
+        company,
+        location,
+        source,
+        state,
+        score,
+        is_remote,
+        url,
+        application_id,
+        created_at,
+        legitimacy: legitimacy.to_string(),
+        eligibility: eligibility.to_string(),
+    })
 }
 
 /// R17: count of listings matching the given filter, for pagination total.

@@ -1,6 +1,5 @@
 ---
 source: crates/careerai-render/tests/render_tera_unit.rs
-assertion_line: 85
 expression: md
 ---
 # Jane Doe
@@ -32,6 +31,7 @@ Backend engineer focused on distributed systems.
 
 - **BSc Computer Science**, State University (2015–2019)
 - **Advanced Algorithms Cert**, MOOC Academy (2020–2020)
+
 
 ## Projects
 

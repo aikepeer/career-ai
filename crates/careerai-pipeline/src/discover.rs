@@ -100,6 +100,14 @@ pub fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
             cfg.sources.indeed_rss.clone(),
         )));
     }
+    if cfg.sources.github_jobs.enabled {
+        let mut s = careerai_sources::GithubJobsSource::new()
+            .with_orgs(cfg.sources.github_jobs.orgs.clone());
+        if let Some(token) = cfg.sources.github_jobs.token.clone() {
+            s = s.with_token(token);
+        }
+        out.push(Arc::new(s));
+    }
     for mcp_cfg in &cfg.sources.mcp {
         if !mcp_cfg.enabled {
             continue;
@@ -129,6 +137,7 @@ pub fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
 /// Build all source adapters configured for a specific source name.
 /// Multi-company ATS sources (Greenhouse, Lever, Ashby, Teamtailor) produce
 /// one adapter per configured company.
+#[allow(clippy::too_many_lines)]
 pub fn build_sources_for_name(cfg: &CoreConfig, name: &str) -> Vec<Arc<dyn Source>> {
     let mut out = Vec::new();
     match name {
@@ -202,6 +211,14 @@ pub fn build_sources_for_name(cfg: &CoreConfig, name: &str) -> Vec<Arc<dyn Sourc
                 cfg.sources.indeed_rss.clone(),
             )));
         }
+        "github_jobs" | "github-jobs" if cfg.sources.github_jobs.enabled => {
+            let mut s = careerai_sources::GithubJobsSource::new()
+                .with_orgs(cfg.sources.github_jobs.orgs.clone());
+            if let Some(token) = cfg.sources.github_jobs.token.clone() {
+                s = s.with_token(token);
+            }
+            out.push(Arc::new(s));
+        }
         #[cfg(feature = "browser")]
         "linkedin-browser" if cfg.sources.linkedin_browser.enabled => {
             out.push(Arc::new(careerai_sources::LinkedinBrowserSource::new(
@@ -255,11 +272,35 @@ async fn discover_with_sources(
                         Ok((id, true)) => {
                             report.new_rows += 1;
                             report.new.push(NewListingRow {
-                                id,
-                                title,
-                                company,
-                                source,
+                                id: id.clone(),
+                                title: title.clone(),
+                                company: company.clone(),
+                                source: source.clone(),
                             });
+
+                            // Extract salary from JD text and persist if found.
+                            // Salary values are small u64s (typically < 1M) that
+                            // fit in i64; the cast is provably safe.
+                            #[allow(clippy::cast_possible_wrap)]
+                            if let Some(range) =
+                                careerai_match::extract_salary_range(&new.description)
+                            {
+                                if let Err(e) = queries::store_salary_range(
+                                    pool,
+                                    &id,
+                                    &company,
+                                    &title,
+                                    range.min.map(|v| v as i64),
+                                    range.max.map(|v| v as i64),
+                                    &range.currency,
+                                    &range.period,
+                                    Some(&range.raw_text),
+                                )
+                                .await
+                                {
+                                    warn!(listing_id = %id, error = %e, "salary extraction persist failed");
+                                }
+                            }
                         }
                         Ok((_, false)) => report.duplicates += 1,
                         Err(e) => {

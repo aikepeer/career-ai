@@ -1,0 +1,21 @@
+services:
+  careerai:
+    build: .
+    container_name: careerai
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # LLM provider key (Anthropic API path). Read from the host env or
+      # a sibling .env file; empty by default.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Bearer token required on every dashboard request when set. Strongly
+      # recommended: the dashboard is bound to 0.0.0.0 inside the container.
+      - CAREERAI_DASHBOARD_TOKEN=${CAREERAI_DASHBOARD_TOKEN:-}
+    volumes:
+      # App root: SQLite DB, LLM cache, logs, render artifacts.
+      - ./data:/data
+      # Config (default.yaml + local.yaml overrides) — editable on the host.
+      - ./config:/data/config
+      # Profile (profile.yaml) — editable on the host.
+      - ./profile:/data/profile

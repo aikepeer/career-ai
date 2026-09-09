@@ -11,8 +11,11 @@ description = "Read-only HTTP dashboard for the career-ai pipeline (KPI strip, k
 careerai-core = { path = "../careerai-core" }
 careerai-db = { path = "../careerai-db" }
 careerai-llm = { path = "../careerai-llm" }
+careerai-match = { path = "../careerai-match" }
 careerai-pipeline = { path = "../careerai-pipeline" }
 careerai-profile = { path = "../careerai-profile" }
+careerai-scheduler = { path = "../careerai-scheduler" }
+careerai-sources = { path = "../careerai-sources" }
 serde_yaml.workspace = true
 async-trait.workspace = true
 serde.workspace = true

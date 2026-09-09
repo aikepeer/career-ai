@@ -13,6 +13,7 @@ pub mod linkedin;
 pub mod llm_extract;
 pub mod merge;
 pub mod pdf;
+pub mod referrals;
 pub mod schema;
 
 use std::path::Path;
@@ -23,6 +24,9 @@ pub use crate::config_gen::generate_config_yaml;
 pub use crate::error::{ProfileError, Result};
 pub use crate::llm_extract::{
     extract_profile_from_text, ExtractError, ExtractOptions, ExtractRequest, LlmCaller,
+};
+pub use crate::referrals::{
+    extract_past_companies, find_referral_opportunities, ListingRef, ReferralMatch,
 };
 pub use crate::schema::Profile;
 

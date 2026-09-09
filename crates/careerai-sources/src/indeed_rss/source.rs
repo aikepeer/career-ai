@@ -29,7 +29,8 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// UA-less requests; Indeed's behavior is undocumented but its CDN is
 /// known to throttle anonymous traffic. Pinning the same UA the rest
 /// of the workspace uses keeps logs greppable and traffic identifiable.
-const USER_AGENT: &str = "careerai/0.1 (+https://github.com/justdoGIT/career-ai)";
+const USER_AGENT: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 (careerai/0.1)";
 
 /// Indeed's `fromage` parameter accepts an integer "posted within N
 /// days" window. Empirically the upstream accepts 1..=30; values above
@@ -145,6 +146,10 @@ impl Source for IndeedRssSource {
         let mut req = self
             .http
             .get(&url)
+            .header(
+                reqwest::header::ACCEPT,
+                "application/rss+xml, application/xml, text/xml, */*",
+            )
             .query(&[("q", self.cfg.keywords.as_str())]);
         if let Some(loc) = self.cfg.location.as_deref().filter(|s| !s.is_empty()) {
             req = req.query(&[("l", loc)]);

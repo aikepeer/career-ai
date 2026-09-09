@@ -36,7 +36,9 @@ mod followups;
 mod inspect;
 mod linkedin;
 mod liveness;
+pub mod llm_backend;
 mod match_;
+pub mod patterns;
 mod rematch;
 mod render;
 mod rollback;
@@ -53,7 +55,9 @@ pub use followups::{list_followups, FollowupItem};
 pub use inspect::{inspect_show, InspectReport};
 pub use linkedin::{confirm_linkedin_submit, list_drafted_linkedin};
 pub use liveness::{check_liveness, Liveness, LivenessRow};
+pub use llm_backend::{build_live_llm, build_llm};
 pub use match_::{match_all, match_one, MatchReport};
+pub use patterns::{analyze_patterns, PatternReport};
 pub use rematch::{rematch_shortlisted, RematchReport};
 pub use render::{render_all, render_one, RenderedOutcome};
 pub use rollback::{rollback_all, rollback_one, RollbackOutcome};
@@ -133,7 +137,7 @@ pub async fn shortlist_show(root: &Path, limit: i64) -> Result<Vec<careerai_db::
     Ok(rows)
 }
 
-pub(crate) fn load_profile(root: &Path) -> Result<Profile> {
+pub fn load_profile(root: &Path) -> Result<Profile> {
     let path = careerai_core::paths::profile_path(root);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;

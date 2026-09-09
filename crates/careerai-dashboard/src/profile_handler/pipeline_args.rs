@@ -220,6 +220,52 @@ fn notify_test_args() -> Vec<OsString> {
     vec![os("notify"), os("test")]
 }
 
+fn patterns_args() -> Vec<OsString> {
+    vec![os("patterns")]
+}
+
+fn upskill_args() -> Vec<OsString> {
+    vec![os("upskill")]
+}
+
+fn analyze_profile_args() -> Vec<OsString> {
+    vec![os("analyze-profile")]
+}
+
+fn interview_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
+    Ok(vec![
+        os("interview"),
+        os(require_id(
+            args.listing_id.as_ref(),
+            "listing_id",
+            "interview",
+        )?),
+    ])
+}
+
+fn email_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
+    Ok(vec![
+        os("email"),
+        os(require_id(args.listing_id.as_ref(), "listing_id", "email")?),
+    ])
+}
+
+fn negotiate_args(args: &CliRunArgs) -> Result<Vec<OsString>, CliRunValidationError> {
+    let mut out = vec![
+        os("negotiate"),
+        os(require_id(
+            args.listing_id.as_ref(),
+            "listing_id",
+            "negotiate",
+        )?),
+    ];
+    if let Some(benchmark) = &args.since {
+        out.push(os("--benchmark"));
+        out.push(os(benchmark));
+    }
+    Ok(out)
+}
+
 /// Build the validated argv (excluding the executable) for a whitelisted
 /// command. Pure function: no subprocess, no shell, no string interpolation
 /// into a command line — every user value is a separate `OsString` argument.
@@ -248,6 +294,12 @@ pub fn build_command_args(req: &CliRunRequest) -> Result<Vec<OsString>, CliRunVa
         WhitelistedCommand::NotifyTest => Ok(notify_test_args()),
         WhitelistedCommand::ProfileShow => Ok(vec![os("profile"), os("show")]),
         WhitelistedCommand::ProfileValidate => Ok(vec![os("profile"), os("validate")]),
+        WhitelistedCommand::Patterns => Ok(patterns_args()),
+        WhitelistedCommand::Upskill => Ok(upskill_args()),
+        WhitelistedCommand::AnalyzeProfile => Ok(analyze_profile_args()),
+        WhitelistedCommand::Interview => interview_args(args),
+        WhitelistedCommand::Email => email_args(args),
+        WhitelistedCommand::Negotiate => negotiate_args(args),
     }
 }
 

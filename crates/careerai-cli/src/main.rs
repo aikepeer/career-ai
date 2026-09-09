@@ -87,6 +87,10 @@ async fn main() -> Result<()> {
             }
             if all || limit.is_some() {
                 let outcomes = pipeline::tailor_all(&cwd, &cfg, limit).await?;
+                if outcomes.is_empty() {
+                    tracing::error!("tailor_all: 0 shortlisted listings tailored");
+                    std::process::exit(1);
+                }
                 println!("tailored: {} shortlisted listings", outcomes.len());
                 println!("run `careerai render --all` to emit DOCX/PDF artifacts");
             } else if let Some(id) = listing_id {
@@ -173,6 +177,27 @@ async fn main() -> Result<()> {
         }
         Command::Liveness { source } => {
             commands::liveness::run(&cwd, source.as_deref()).await?;
+        }
+        Command::Patterns => {
+            commands::patterns::run_patterns(&cwd).await?;
+        }
+        Command::Email { listing_id } => {
+            commands::email::run_email(&cwd, &listing_id).await?;
+        }
+        Command::Interview { listing_id } => {
+            commands::interview::run_interview(&cwd, &listing_id).await?;
+        }
+        Command::Upskill => {
+            commands::upskill::run_upskill(&cwd).await?;
+        }
+        Command::AnalyzeProfile => {
+            commands::analyze_profile::run_analyze_profile(&cwd)?;
+        }
+        Command::Negotiate {
+            listing_id,
+            benchmark,
+        } => {
+            commands::negotiate::run_negotiate(&cwd, &listing_id, benchmark.as_deref()).await?;
         }
         Command::Mcp { command } => match command {
             McpCommand::Probe => {

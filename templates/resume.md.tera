@@ -19,6 +19,12 @@
 {% for ed in education %}
 - **{{ ed.degree }}**, {{ ed.institution }} ({{ ed.start }}–{{ ed.end }})
 {%- endfor %}
+{% for ed in education %}{% if ed.achievements and ed.achievements | length > 0 %}
+## Honors & Achievements
+{% for ach in ed.achievements %}
+- {{ ach | escape_md }}
+{%- endfor %}
+{% endif %}{% endfor %}
 {% if projects %}
 ## Projects
 {% for p in projects %}

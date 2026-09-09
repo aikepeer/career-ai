@@ -10,8 +10,20 @@ mod common;
 mod tests {
     use super::common::{fixture_profile, VALID_DIFF_JSON};
     use careerai_profile::schema::Profile;
+    use careerai_tailor::diff::{validate, DiffDoc};
     use careerai_tailor::error::TailorError;
-    use careerai_tailor::schema::parse_and_validate;
+
+    /// Parse JSON to DiffDoc and run strict validation (not sanitize).
+    fn parse_and_validate_strict(
+        raw: &str,
+        profile: &Profile,
+        jd: &str,
+    ) -> Result<DiffDoc, TailorError> {
+        let doc: DiffDoc = serde_json::from_str(raw.trim())
+            .map_err(|e| TailorError::Schema(format!("json parse: {e}")))?;
+        validate(&doc, profile, jd)?;
+        Ok(doc)
+    }
 
     enum Expect {
         Ok,
@@ -219,7 +231,7 @@ mod tests {
     #[test]
     fn adversarial_table() {
         for row in rows() {
-            let result = parse_and_validate(&row.raw, &row.profile, "");
+            let result = parse_and_validate_strict(&row.raw, &row.profile, "");
             match (&row.expect, result) {
                 (Expect::Ok, Ok(_)) => {}
                 (Expect::Ok, Err(e)) => {

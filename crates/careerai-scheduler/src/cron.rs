@@ -129,6 +129,40 @@ pub(crate) fn build_submit_job(
     })
 }
 
+/// Build the follow-up cron job. Periodically calls
+/// `check_and_create_follow_ups` to create draft follow-up emails for
+/// submitted applications that haven't received a response. Mirrors the
+/// `build_submit_job` pattern — opens its own pool inside the closure.
+pub(crate) fn build_follow_up_job(
+    cron_expr: &str,
+    root: Arc<PathBuf>,
+    #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<std::sync::atomic::AtomicUsize>>,
+) -> Result<Job, JobSchedulerError> {
+    Job::new_async(cron_expr, move |_uuid, _scheduler| {
+        let root = Arc::clone(&root);
+        #[cfg(feature = "test-hooks")]
+        let tick_counter = tick_counter.clone();
+        Box::pin(async move {
+            let pool = match careerai_pipeline::open_pool(root.as_path()).await {
+                Ok(p) => p,
+                Err(e) => {
+                    error!(error = %e, "follow-up tick: failed to open pool");
+                    return;
+                }
+            };
+            match crate::follow_ups::check_and_create_follow_ups(&pool).await {
+                Ok(created) => info!(created, "follow-up tick ok"),
+                Err(e) => error!(error = %e, "follow-up tick failed"),
+            }
+
+            #[cfg(feature = "test-hooks")]
+            if let Some(counter) = &tick_counter {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        })
+    })
+}
+
 /// Compose the effective per-source cron map from `cfg.scheduler.cadence`
 /// plus per-source overrides on enabled `sources.mcp[*]` entries.
 ///

@@ -128,3 +128,74 @@ async fn match_one_on_empty_discovered_table_returns_zero_counts() {
     assert_eq!(report_a.filtered_out, report_b.filtered_out);
     assert_eq!(report_a.shortlisted, report_b.shortlisted);
 }
+
+/// Scaffold a project whose profile lists Rust + Python but NOT Kubernetes,
+/// then seed a listing whose JD mentions all three. After `match_all`
+/// (non-tune, threshold 0.0), the skill-gap report must list Kubernetes
+/// as a missing skill.
+#[tokio::test]
+async fn match_all_populates_skill_gap_with_missing_kubernetes() {
+    use careerai_db::models::NewListing;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Same scaffold as the other tests.
+    scaffold_project(root);
+
+    // Overwrite profile with one that has Rust + Python but not Kubernetes.
+    std::fs::write(
+        root.join("profile").join("profile.yaml"),
+        "personal:\n  name: \"Gap Tester\"\n  email: \"gap@test.com\"\n  phone: \"\"\nsummary: \"Engineer who knows Rust and Python\"\nskills:\n  languages:\n    - \"Rust\"\n    - \"Python\"\n",
+    )
+    .unwrap();
+
+    let mut cfg = CoreConfig::load(root).unwrap();
+    disable_all_sources(&mut cfg);
+    cfg.matching.score_threshold = 0.0; // shortlist everything
+
+    // Open the DB and seed a discovered listing whose JD mentions Kubernetes.
+    let pool = pipeline::open_pool(root).await.unwrap();
+    let new = NewListing {
+        source: "greenhouse".into(),
+        external_id: "gap-1".into(),
+        title: "Platform Engineer".into(),
+        company: "K8s Corp".into(),
+        location: Some("Remote".into()),
+        url: "https://example.com/gap-1".into(),
+        description: "We need a Platform Engineer with experience in Kubernetes, \
+                      Rust, and Python. You will manage K8s clusters and write \
+                      Rust services for our LLM platform."
+            .into(),
+        raw_json: None,
+    };
+    let (_listing_id, _) = careerai_db::queries::insert_or_ignore(&pool, &new)
+        .await
+        .unwrap();
+    drop(pool);
+
+    let report = pipeline::match_all(root, &cfg, false)
+        .await
+        .expect("match_all should succeed");
+
+    assert_eq!(report.shortlisted, 1, "one listing should be shortlisted");
+
+    let gap = report
+        .skill_gap
+        .as_ref()
+        .expect("skill_gap must be populated in non-tune mode");
+    assert_eq!(gap.total_jds_analyzed, 1);
+
+    let k8s_entry = gap
+        .missing_skills
+        .iter()
+        .find(|e| e.skill == "kubernetes" || e.skill == "Kubernetes");
+    assert!(
+        k8s_entry.is_some(),
+        "Kubernetes must appear in missing skills: {:?}",
+        gap.missing_skills
+    );
+    let entry = k8s_entry.unwrap();
+    assert!(entry.frequency > 0, "frequency must be > 0");
+    assert_eq!(entry.category, "tool");
+}

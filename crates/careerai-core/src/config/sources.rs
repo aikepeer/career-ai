@@ -11,7 +11,8 @@ mod web;
 pub use linkedin::{LinkedinBrowserFilters, LinkedinBrowserSourceConfig};
 pub use mcp::{McpQueryConfig, McpSourceConfig, McpTransportConfig};
 pub use web::{
-    FreehireSourceConfig, IndeedRssSourceConfig, NaukriSourceConfig, RemotiveSourceConfig,
+    FreehireSourceConfig, GithubJobsSourceConfig, IndeedRssSourceConfig, NaukriSourceConfig,
+    RemotiveSourceConfig,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -53,6 +54,12 @@ pub struct SourcesConfig {
     /// default so a fresh install never makes outbound requests unprompted.
     #[serde(default)]
     pub indeed_rss: IndeedRssSourceConfig,
+    /// GitHub org-based job collection. Many companies post openings in a
+    /// `jobs.md` / `careers.md` file inside their `.github` repo. This
+    /// source fetches those files via the GitHub REST API. One entry per
+    /// GitHub org name. Optional `token` for higher rate limits.
+    #[serde(default, alias = "github-jobs")]
+    pub github_jobs: GithubJobsSourceConfig,
     /// Native LinkedIn browser-driven discovery source. Drives a stealth
     /// Chromium session against `linkedin.com/jobs/search/` using the
     /// same `li_at` cookie + stealth-v2.js infrastructure as the M5

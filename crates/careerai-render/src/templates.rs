@@ -170,11 +170,75 @@ pub fn render_cover_letter(
 ) -> Result<String> {
     let tera = engine()?;
     let mut ctx = Context::new();
-    ctx.insert("body", &letter.body);
+    let clean_body = sanitize_cover_letter_body(&letter.body);
+    ctx.insert("body", &clean_body);
     ctx.insert("personal_name", personal_name);
     ctx.insert("listing_company", listing_company);
     ctx.insert("date", date);
     Ok(tera.render(COVER_LETTER_NAME, &ctx)?)
+}
+
+fn sanitize_cover_letter_body(body: &str) -> String {
+    let mut lines: Vec<&str> = body.lines().collect();
+    while let Some(first) = lines.first() {
+        let trimmed = first.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("Dear ")
+            || trimmed.starts_with("To the ")
+            || trimmed.starts_with("Hi ")
+            || trimmed.starts_with("Hello ")
+        {
+            lines.remove(0);
+        } else {
+            break;
+        }
+    }
+    // Strip signature block from the back: closing word + optional name.
+    loop {
+        // Remove trailing blanks.
+        while let Some(last) = lines.last() {
+            if last.trim().is_empty() {
+                lines.pop();
+            } else {
+                break;
+            }
+        }
+        if lines.is_empty() {
+            break;
+        }
+        let Some(last_ref) = lines.last() else { break };
+        let last = last_ref.trim().to_string();
+        let is_closing = last.eq_ignore_ascii_case("sincerely,")
+            || last.eq_ignore_ascii_case("sincerely")
+            || last.eq_ignore_ascii_case("best regards,")
+            || last.eq_ignore_ascii_case("best,")
+            || last.eq_ignore_ascii_case("regards,")
+            || last.starts_with("Warm regards")
+            || last.starts_with("Thank you");
+        if is_closing {
+            lines.pop();
+            continue;
+        }
+        // Check if the *second*-to-last line is a closing — if so,
+        // the last line is the signer's name and both should be stripped.
+        if lines.len() >= 2 {
+            let second = lines[lines.len() - 2].trim().to_string();
+            let second_is_closing = second.eq_ignore_ascii_case("sincerely,")
+                || second.eq_ignore_ascii_case("sincerely")
+                || second.eq_ignore_ascii_case("best regards,")
+                || second.eq_ignore_ascii_case("best,")
+                || second.eq_ignore_ascii_case("regards,")
+                || second.starts_with("Warm regards")
+                || second.starts_with("Thank you");
+            if second_is_closing {
+                lines.pop(); // name
+                lines.pop(); // closing
+                continue;
+            }
+        }
+        break;
+    }
+    lines.join("\n").trim().to_string()
 }
 
 #[cfg(test)]
@@ -286,5 +350,13 @@ mod tests {
         let v = tera::to_value(vec!["a", "b", "c"]).unwrap();
         let got = joinlines_filter(&v, &args).unwrap();
         assert_eq!(got.as_str().unwrap(), "a\nb\nc");
+    }
+
+    #[test]
+    fn sanitize_cover_letter_body_strips_duplicate_headers_and_footers() {
+        let raw =
+            "Dear Hiring Team,\n\nI am writing to express my interest.\n\nSincerely,\nJane Doe";
+        let cleaned = sanitize_cover_letter_body(raw);
+        assert_eq!(cleaned, "I am writing to express my interest.");
     }
 }

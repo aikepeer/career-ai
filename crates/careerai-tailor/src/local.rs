@@ -226,6 +226,10 @@ pub async fn tailor_for_listing_local(
         body: cover_letter_body,
     };
 
+    // Detect tone from company + description.
+    let tone_analysis = crate::tone::detect_tone(&listing.company, &listing.description);
+    let tone_label_str = crate::tone::tone_label(tone_analysis.tone).to_string();
+
     let new_app = NewApplication {
         listing_id: listing.id.clone(),
         profile_hash,
@@ -244,6 +248,23 @@ pub async fn tailor_for_listing_local(
     )
     .await?;
 
+    // Compute application quality score.
+    let quality_score =
+        crate::quality::score_application_quality(&resume_view, &jd_text, &cover_letter.body);
+    let recommendations_json =
+        serde_json::to_string(&quality_score.recommendations).unwrap_or_else(|_| "[]".to_string());
+    let _ = queries::store_quality_score(
+        pool,
+        &app.id,
+        quality_score.overall,
+        quality_score.jd_relevance,
+        quality_score.skill_coverage,
+        quality_score.cover_letter_depth,
+        quality_score.bullet_density,
+        &recommendations_json,
+    )
+    .await;
+
     queries::transition(
         pool,
         &listing.id,
@@ -257,6 +278,8 @@ pub async fn tailor_for_listing_local(
         resume_view,
         cover_letter,
         diff_raw_json,
+        quality_score: Some(quality_score),
+        tone_label: Some(tone_label_str),
     })
 }
 

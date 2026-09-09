@@ -1,0 +1,17 @@
+# Build cache — never needed in the image.
+target/
+
+# Generated render artifacts + runtime state — not source.
+artifacts/
+data/
+
+# Version control + editor noise.
+.git/
+node_modules/
+
+# Markdown docs are not needed to build the binary.
+**/*.md
+!CLAUDE.md
+
+# Never bake secrets into an image.
+.env

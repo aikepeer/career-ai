@@ -145,6 +145,10 @@ scheduler:
   # by default so a fresh install never spins up apply ticks unprompted;
   # uncomment to enable a 15-minute sweep.
   # submit_cadence: "0 */15 * * * *"
+  # Periodic follow-up check for submitted applications that haven't
+  # received a response. Creates draft follow-up emails. Left unset by
+  # default; uncomment to enable a daily 9 AM check.
+  # follow_up_cadence: "0 0 9 * * *"
 
 # Job-board instances to poll on `careerai discover`.
 # Greenhouse + Lever need one entry per company slug; Remotive and RemoteOK

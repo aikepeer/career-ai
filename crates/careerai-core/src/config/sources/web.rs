@@ -107,3 +107,19 @@ pub struct FreehireSourceConfig {
 fn default_freehire_limit() -> usize {
     25
 }
+
+/// GitHub org-based job collection. Fetches `jobs.md` / `careers.md` from
+/// each configured org's `.github` repo. Optional `token` raises the
+/// GitHub API rate limit from 60 to 5,000 req/hour.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GithubJobsSourceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// GitHub org names to scan for job-posting files.
+    #[serde(default)]
+    pub orgs: Vec<String>,
+    /// Optional GitHub personal access token (read-only `public_repo`
+    /// scope is sufficient). Falls back to unauthenticated requests.
+    #[serde(default)]
+    pub token: Option<String>,
+}

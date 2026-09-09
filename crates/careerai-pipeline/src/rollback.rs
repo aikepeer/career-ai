@@ -56,7 +56,7 @@ pub async fn rollback_one_with_pool(
             let from_parsed: ListingState = from_state
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid current state '{from_state}': {e}"))?;
-            if !is_backward_transition(&from_parsed, &parsed) {
+            if !is_backward_transition(from_parsed, parsed) {
                 anyhow::bail!(
                     "rollback target '{t}' is not backward from state '{from_state}'"
                 );
@@ -76,66 +76,7 @@ pub async fn rollback_one_with_pool(
 
     if let Ok(Some(app)) = queries::find_latest_application_for_listing(pool, &listing.id).await {
         if to_state == "shortlisted" || to_state == "discovered" {
-            // Wrap deletes + transition in a single transaction so a failed
-            // DELETE cannot leave orphaned rows while the state advances.
-            let mut tx = pool.begin().await.context("begin rollback transaction")?;
-
-            // R08: delete dependent rows before the application row to
-            // satisfy FK constraints. The submission_attempts table has
-            // ON DELETE CASCADE, but follow_ups, application_variants, and
-            // interview_feedback do not — deleting the application first
-            // would raise an FK violation.
-            sqlx::query("DELETE FROM follow_ups WHERE application_id = ?")
-                .bind(&app.id)
-                .execute(&mut *tx)
-                .await
-                .context("delete follow_ups on rollback")?;
-            sqlx::query("DELETE FROM application_variants WHERE application_id = ?")
-                .bind(&app.id)
-                .execute(&mut *tx)
-                .await
-                .context("delete application_variants on rollback")?;
-            sqlx::query("DELETE FROM interview_feedback WHERE application_id = ?")
-                .bind(&app.id)
-                .execute(&mut *tx)
-                .await
-                .context("delete interview_feedback on rollback")?;
-
-            sqlx::query("DELETE FROM artifacts WHERE application_id = ?")
-                .bind(&app.id)
-                .execute(&mut *tx)
-                .await
-                .context("delete artifacts on rollback")?;
-            sqlx::query("DELETE FROM application_payloads WHERE application_id = ?")
-                .bind(&app.id)
-                .execute(&mut *tx)
-                .await
-                .context("delete application_payloads on rollback")?;
-            sqlx::query("DELETE FROM applications WHERE id = ?")
-                .bind(&app.id)
-                .execute(&mut *tx)
-                .await
-                .context("delete application on rollback")?;
-
-            let now = chrono::Utc::now();
-            sqlx::query("UPDATE listings SET state = ?, updated_at = ? WHERE id = ?")
-                .bind(target_listing_state.as_str())
-                .bind(now)
-                .bind(&listing.id)
-                .execute(&mut *tx)
-                .await
-                .context("update listing state on rollback")?;
-            sqlx::query(
-                "INSERT INTO events (listing_id, from_state, to_state, note) VALUES (?, ?, ?, ?)",
-            )
-            .bind(&listing.id)
-            .bind(&from_state)
-            .bind(target_listing_state.as_str())
-            .bind("rollback")
-            .execute(&mut *tx)
-            .await
-            .context("insert rollback event")?;
-            tx.commit().await.context("commit rollback transaction")?;
+            rollback_with_application_delete(pool, &app.id, &listing.id, &from_state, target_listing_state).await?;
         } else {
             queries::transition_application_and_listing(
                 pool,
@@ -159,6 +100,69 @@ pub async fn rollback_one_with_pool(
         from_state,
         to_state,
     })
+}
+/// R08: delete dependent rows and the application, then transition the
+/// listing, all in one transaction. Dependent rows are deleted before
+/// the application to satisfy FK constraints (follow_ups, variants,
+/// feedback lack ON DELETE CASCADE).
+async fn rollback_with_application_delete(
+    pool: &SqlitePool,
+    app_id: &str,
+    listing_id: &str,
+    from_state: &str,
+    target_listing_state: ListingState,
+) -> Result<()> {
+    let mut tx = pool.begin().await.context("begin rollback transaction")?;
+
+    sqlx::query("DELETE FROM follow_ups WHERE application_id = ?")
+        .bind(app_id)
+        .execute(&mut *tx)
+        .await
+        .context("delete follow_ups on rollback")?;
+    sqlx::query("DELETE FROM application_variants WHERE application_id = ?")
+        .bind(app_id)
+        .execute(&mut *tx)
+        .await
+        .context("delete application_variants on rollback")?;
+    sqlx::query("DELETE FROM interview_feedback WHERE application_id = ?")
+        .bind(app_id)
+        .execute(&mut *tx)
+        .await
+        .context("delete interview_feedback on rollback")?;
+    sqlx::query("DELETE FROM artifacts WHERE application_id = ?")
+        .bind(app_id)
+        .execute(&mut *tx)
+        .await
+        .context("delete artifacts on rollback")?;
+    sqlx::query("DELETE FROM application_payloads WHERE application_id = ?")
+        .bind(app_id)
+        .execute(&mut *tx)
+        .await
+        .context("delete application_payloads on rollback")?;
+    sqlx::query("DELETE FROM applications WHERE id = ?")
+        .bind(app_id)
+        .execute(&mut *tx)
+        .await
+        .context("delete application on rollback")?;
+
+    let now = chrono::Utc::now();
+    sqlx::query("UPDATE listings SET state = ?, updated_at = ? WHERE id = ?")
+        .bind(target_listing_state.as_str())
+        .bind(now)
+        .bind(listing_id)
+        .execute(&mut *tx)
+        .await
+        .context("update listing state on rollback")?;
+    sqlx::query("INSERT INTO events (listing_id, from_state, to_state, note) VALUES (?, ?, ?, ?)")
+        .bind(listing_id)
+        .bind(from_state)
+        .bind(target_listing_state.as_str())
+        .bind("rollback")
+        .execute(&mut *tx)
+        .await
+        .context("insert rollback event")?;
+    tx.commit().await.context("commit rollback transaction")?;
+    Ok(())
 }
 
 /// Rollback all listings matching `from_state` to `to_state`.
@@ -195,8 +199,8 @@ pub async fn rollback_all(
 /// Backward means `to` appears at or before `from` in this sequence.
 /// `failed` and `skipped` are terminal side-states; rolling back from
 /// them to any main-line state is allowed.
-fn is_backward_transition(from: &ListingState, to: &ListingState) -> bool {
-    let rank = |s: &ListingState| -> usize {
+fn is_backward_transition(from: ListingState, to: ListingState) -> bool {
+    let rank = |s: ListingState| -> usize {
         match s {
             ListingState::Discovered | ListingState::FilteredOut => 0,
             ListingState::Shortlisted => 1,

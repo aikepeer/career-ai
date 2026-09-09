@@ -9,10 +9,10 @@ use sqlx::SqlitePool;
 
 use crate::error::Result;
 
-/// Store a cover letter template in the library, indexed by domain + role
-/// + profile_hash. The profile_hash ensures a letter written for one
+/// Store a cover letter template in the library, indexed by domain, role,
+/// and profile_hash. The profile_hash ensures a letter written for one
 /// candidate is never reused for a different candidate with the same
-/// domain+role (R02).
+/// domain and role (R02).
 pub async fn store_cover_letter(
     pool: &SqlitePool,
     domain: &str,

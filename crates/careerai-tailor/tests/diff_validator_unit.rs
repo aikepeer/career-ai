@@ -11,8 +11,15 @@ mod common;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::common::{fixture_profile, VALID_DIFF_JSON};
+    use careerai_tailor::diff::{validate, DiffDoc};
     use careerai_tailor::error::TailorError;
     use careerai_tailor::schema::parse_and_validate;
+
+    /// Parse JSON to a DiffDoc for strict validation tests.
+    fn parse(raw: &str) -> DiffDoc {
+        let stripped = raw.trim();
+        serde_json::from_str(stripped).unwrap()
+    }
 
     #[test]
     fn rule1_coverage_positive_control_passes() {
@@ -148,7 +155,8 @@ mod tests {
                 "cover_letter":"short"
             }}"#
         );
-        let err = parse_and_validate(&raw, &fixture_profile(), "").unwrap_err();
+        let doc = parse(&raw);
+        let err = validate(&doc, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::InventedContent { reason, .. } if reason == "bullet over 280 chars"),
             "got {err:?}"
@@ -168,7 +176,8 @@ mod tests {
             ],
             "cover_letter":"short"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
+        let doc = parse(raw);
+        let err = validate(&doc, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
             "got {err:?}"

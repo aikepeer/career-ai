@@ -52,4 +52,6 @@ pub struct TailorOutcome {
     pub resume_view: ResumeView,
     pub cover_letter: CoverLetter,
     pub diff_raw_json: String,
+    pub quality_score: Option<crate::quality::QualityScore>,
+    pub tone_label: Option<String>,
 }

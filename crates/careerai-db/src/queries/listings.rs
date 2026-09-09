@@ -157,12 +157,9 @@ pub async fn transition_if(
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
-    let from = match prev {
-        Some((s,)) => s,
-        None => {
-            tx.rollback().await.ok();
-            return Err(DbError::NotFound(id.to_string()));
-        }
+    let Some((from,)) = prev else {
+        tx.rollback().await.ok();
+        return Err(DbError::NotFound(id.to_string()));
     };
     if !expected.iter().any(|e| e.as_str() == from) {
         tx.rollback().await.ok();

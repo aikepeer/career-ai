@@ -273,3 +273,26 @@ async fn inspect_show_surfaces_events_and_artifacts() {
     let kinds: Vec<&str> = report.artifacts.iter().map(|a| a.kind.as_str()).collect();
     assert!(kinds.contains(&"resume_docx"));
 }
+
+#[tokio::test]
+async fn apply_one_accepts_listing_id_fallback() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    scaffold_project(root);
+    let (listing_id, _application_id) = seed_rendered_application(root, "greenhouse").await;
+
+    let mut cfg = CoreConfig::load(root).expect("load cfg");
+    cfg.submit.per_source.insert(
+        "greenhouse".into(),
+        SubmitSource {
+            enabled: true,
+            ..Default::default()
+        },
+    );
+
+    // Pass listing_id instead of application_id; must resolve seamlessly.
+    let outcome = pipeline::apply_one(root, &cfg, &listing_id, Some(false))
+        .await
+        .expect("apply_one must resolve listing_id");
+    assert_eq!(outcome.source, "greenhouse");
+}

@@ -281,139 +281,146 @@ async fn run_live(
         .map_err(SubmitError::from)?;
 
     match submitter.submit(ctx).await {
-        Ok(remote_id) => {
-            info!(
-                target: "submit",
-                source = submitter.name(),
-                application_id = %ctx.application.id,
-                remote_id = %remote_id,
-                attempt_id = attempt.id,
-                "submitted"
-            );
+        Ok(remote_id) => handle_submit_success(pool, submitter, ctx, &attempt, remote_id).await,
+        Err(err) => handle_submit_failure(pool, submitter, ctx, &attempt, err).await,
+    }
+}
 
-            // R01: record the successful outcome on the attempt row
-            // before transitioning state. If this fails we still proceed
-            // — the state transition is the source of truth for
-            // pipeline flow, the attempt row is for audit/recovery.
-            if let Err(e) = queries::mark_attempt_submitted(
-                pool,
-                attempt.id,
-                Some(&remote_id),
-                None,
-            )
-            .await
-            {
-                warn!(
-                    target: "submit",
-                    application_id = %ctx.application.id,
-                    attempt_id = attempt.id,
-                    error = %e,
-                    "mark_attempt_submitted failed (non-blocking)",
-                );
-            }
+async fn handle_submit_success(
+    pool: &SqlitePool,
+    submitter: &dyn Submitter,
+    ctx: &SubmitContext<'_>,
+    attempt: &queries::SubmissionAttempt,
+    remote_id: String,
+) -> Result<SubmitOutcome> {
+    info!(
+        target: "submit",
+        source = submitter.name(),
+        application_id = %ctx.application.id,
+        remote_id = %remote_id,
+        attempt_id = attempt.id,
+        "submitted"
+    );
 
-            queries::transition_application_and_listing(
-                pool,
-                &ctx.application.id,
-                &ctx.listing.id,
-                ListingState::Submitted.as_str(),
-                ListingState::Submitted,
-                Some(&format!("submitted via {}", submitter.name())),
-            )
-            .await?;
+    // R01: record the successful outcome on the attempt row
+    // before transitioning state. Non-blocking — the state
+    // transition is the source of truth for pipeline flow.
+    if let Err(e) =
+        queries::mark_attempt_submitted(pool, attempt.id, Some(&remote_id), None).await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            attempt_id = attempt.id,
+            error = %e,
+            "mark_attempt_submitted failed (non-blocking)",
+        );
+    }
 
-            // Record A/B variant for this submission. The variant label
-            // is derived deterministically from the application ID so the
-            // same application always gets the same label.
-            let variant_label = if ctx.application.id.bytes().fold(0u8, u8::wrapping_add) % 2 == 0 {
-                "A"
-            } else {
-                "B"
-            };
-            let metadata = serde_json::json!({
-                "source": submitter.name(),
-                "listing_id": &ctx.listing.id,
-                "attempt_id": attempt.id,
-            })
-            .to_string();
-            if let Err(e) = queries::record_variant(
-                pool,
-                &ctx.application.id,
-                variant_label,
-                Some(&metadata),
-                Some(&ctx.application.profile_hash),
-            )
-            .await
-            {
-                warn!(
-                    target: "submit",
-                    application_id = %ctx.application.id,
-                    error = %e,
-                    "record_variant failed (non-blocking)",
-                );
-            }
+    queries::transition_application_and_listing(
+        pool,
+        &ctx.application.id,
+        &ctx.listing.id,
+        ListingState::Submitted.as_str(),
+        ListingState::Submitted,
+        Some(&format!("submitted via {}", submitter.name())),
+    )
+    .await?;
 
-            Ok(SubmitOutcome::Submitted { remote_id })
-        }
-        Err(err) => {
+    // Record A/B variant for this submission. The label is derived
+    // deterministically from the application ID.
+    let variant_label = if ctx.application.id.bytes().fold(0u8, u8::wrapping_add) % 2 == 0 {
+        "A"
+    } else {
+        "B"
+    };
+    let metadata = serde_json::json!({
+        "source": submitter.name(),
+        "listing_id": &ctx.listing.id,
+        "attempt_id": attempt.id,
+    })
+    .to_string();
+    if let Err(e) = queries::record_variant(
+        pool,
+        &ctx.application.id,
+        variant_label,
+        Some(&metadata),
+        Some(&ctx.application.profile_hash),
+    )
+    .await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            error = %e,
+            "record_variant failed (non-blocking)",
+        );
+    }
+
+    Ok(SubmitOutcome::Submitted { remote_id })
+}
+
+async fn handle_submit_failure(
+    pool: &SqlitePool,
+    submitter: &dyn Submitter,
+    ctx: &SubmitContext<'_>,
+    attempt: &queries::SubmissionAttempt,
+    err: SubmitError,
+) -> Result<SubmitOutcome> {
+    warn!(
+        target: "submit",
+        source = submitter.name(),
+        application_id = %ctx.application.id,
+        attempt_id = attempt.id,
+        error = %err,
+        "submission failed"
+    );
+
+    // R01: classify the failure. Network/timeout errors after the
+    // request was sent are "uncertain" — the remote may have received
+    // it. Structural/policy errors are "failed".
+    let is_uncertain = is_uncertain_error(&err);
+    if is_uncertain {
+        if let Err(e) = queries::mark_attempt_uncertain(pool, attempt.id, &err.to_string()).await
+        {
             warn!(
                 target: "submit",
-                source = submitter.name(),
                 application_id = %ctx.application.id,
                 attempt_id = attempt.id,
-                error = %err,
-                "submission failed"
+                error = %e,
+                "mark_attempt_uncertain failed (non-blocking)",
             );
-
-            // R01: classify the failure. Network/timeout errors after the
-            // request was sent are "uncertain" — the remote may have
-            // received it. Structural/policy errors are "failed".
-            let is_uncertain = is_uncertain_error(&err);
-            if is_uncertain {
-                if let Err(e) = queries::mark_attempt_uncertain(pool, attempt.id, &err.to_string())
-                    .await
-                {
-                    warn!(
-                        target: "submit",
-                        application_id = %ctx.application.id,
-                        attempt_id = attempt.id,
-                        error = %e,
-                        "mark_attempt_uncertain failed (non-blocking)",
-                    );
-                }
-            } else if let Err(e) =
-                queries::mark_attempt_failed(pool, attempt.id, &err.to_string()).await
-            {
-                warn!(
-                    target: "submit",
-                    application_id = %ctx.application.id,
-                    attempt_id = attempt.id,
-                    error = %e,
-                    "mark_attempt_failed failed (non-blocking)",
-                );
-            }
-
-            let note = format!("failed: {err}");
-            if let Err(transition_err) = queries::transition_application_and_listing(
-                pool,
-                &ctx.application.id,
-                &ctx.listing.id,
-                ListingState::Failed.as_str(),
-                ListingState::Failed,
-                Some(&note),
-            )
-            .await
-            {
-                warn!(
-                    target: "submit",
-                    application_id = %ctx.application.id,
-                    error = %transition_err,
-                    "failed to transition application to failed state after submission error"
-                );
-            }
-            Err(err)
         }
+    } else if let Err(e) = queries::mark_attempt_failed(pool, attempt.id, &err.to_string()).await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            attempt_id = attempt.id,
+            error = %e,
+            "mark_attempt_failed failed (non-blocking)",
+        );
     }
+
+    let note = format!("failed: {err}");
+    if let Err(transition_err) = queries::transition_application_and_listing(
+        pool,
+        &ctx.application.id,
+        &ctx.listing.id,
+        ListingState::Failed.as_str(),
+        ListingState::Failed,
+        Some(&note),
+    )
+    .await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            error = %transition_err,
+            "failed to transition application to failed state after submission error"
+        );
+    }
+    Err(err)
 }
 
 /// R01: classify whether a submit error means the remote may have

@@ -463,3 +463,72 @@ fn still_rejects_invented_noun_not_in_jd_or_profile() {
         "got {err:?}"
     );
 }
+
+#[test]
+fn accepts_theme_labels_and_technical_headings() {
+    let p = fixture();
+    let bullets = [
+        "System Architecture: Designed high availability edge telemetry systems.",
+        "Reliability & Diagnostics: Resolved complex hardware bring-up and timing faults.",
+        "High-Throughput Streaming: Optimized low-latency media acquisition pipelines.",
+        "OTA Upgrades: Architected rollback-safe firmware deployment infrastructure.",
+        "Edge Sensing Telemetry: Developed real-time sensor processing pipelines.",
+        "Resource Optimization: Optimized system-level resource utilization on Qualcomm chips.",
+    ];
+    for b in bullets {
+        forbid_invented_entities(b, "shipped 35% throughput win", &p, "x")
+            .unwrap_or_else(|e| panic!("theme label should be accepted in {b:?}: {e:?}"));
+    }
+}
+
+#[test]
+fn accepts_morphological_derivation_from_original_bullet() {
+    let p = fixture();
+    forbid_invented_entities(
+        "Resource Optimization: Streamlined memory footprint and throughput.",
+        "Qualcomm Depth: Optimized system-level resource utilization on QNX.",
+        &p,
+        "experience[0].bullets[1]",
+    )
+    .unwrap();
+}
+
+#[test]
+fn accepts_target_roles_and_summary_tokens() {
+    let mut p = fixture();
+    p.target_roles = vec![
+        "AI Solution Architect".into(),
+        "Principal Embedded Consultant".into(),
+    ];
+    p.summary = "Senior Embedded Architect specializing in edge sensing and robotics.".into();
+    forbid_invented_entities(
+        "AI Solution Architect: Consulted on embedded robotics deployments.",
+        "shipped 35% throughput win",
+        &p,
+        "x",
+    )
+    .unwrap();
+}
+
+#[test]
+fn accepts_technical_acronyms_and_codecs() {
+    let p = fixture();
+    let bullets = [
+        "SoC Architecture: Optimized CPU and GPU memory bandwidth on embedded targets.",
+        "Custom Linux BSPs: Developed custom BSPs for NXP i.MX platforms.",
+        "POSIX Compliance: Engineered real-time telemetry pipelines adhering to POSIX standards.",
+        "Video Pipelines: Optimized V4L2 and GStreamer H.264 video decoding on ARMv8 SoC.",
+        "Security Hardening: Integrated HSM and Cryptographic modules for Root-of-Trust.",
+        "Kernel Subsystem: Triaged and Isolated complex bootloader panics.",
+        "Cloud & Edge Infra: Modernized continuous deployment pipelines.",
+    ];
+    for b in bullets {
+        forbid_invented_entities(
+            b,
+            "Qualcomm Depth: Optimized system-level resource utilization on QNX.",
+            &p,
+            "x",
+        )
+        .unwrap_or_else(|e| panic!("technical vocabulary should be accepted in {b:?}: {e:?}"));
+    }
+}

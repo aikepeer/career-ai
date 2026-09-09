@@ -98,9 +98,9 @@ async fn run_agent_engine(
         })?;
 
     let bin_name = bin.file_name().and_then(|n| n.to_str()).unwrap_or("agent");
-    let model = cfg.map_or("gemini-3.7-flash", |c| {
+    let model = cfg.map_or("zai-org-glm-52-fp8", |c| {
         if c.llm.tailor_model.is_empty() {
-            "gemini-3.7-flash"
+            "zai-org-glm-52-fp8"
         } else {
             &c.llm.tailor_model
         }
@@ -218,7 +218,7 @@ fn portal_discovery_reply(query: &str) -> String {
 }
 
 fn token_cost_reply(cfg: Option<&careerai_core::config::CoreConfig>) -> String {
-    let model = cfg.map_or("gemini-3.7-flash", |c| &c.llm.tailor_model);
+    let model = cfg.map_or("zai-org-glm-52-fp8", |c| &c.llm.tailor_model);
     let strategy = cfg.map_or("local", |c| &c.llm.strategy);
     format!(
         "💰 **LLM Token Usage & Cost Estimation**\n\n- **Active Tailoring Strategy:** `{strategy}`\n- **Configured Model:** `{model}`\n\n**Cost Estimation for 100 Shortlisted Jobs:**\n1. **Local Deterministic (`strategy: \"local\"`)**: **$0.00** (0 tokens, <1ms per job)\n2. **Gemini 2.0/3.7 Flash**: **~$0.04** total (~120k tokens)\n3. **Claude 3.5 Haiku**: **~$0.15** total\n4. **Claude 3.7 Sonnet**: **~$0.85** total\n\n⚡ *Recommendation: Use `strategy: \"local\"` for high-throughput zero-cost tailoring and reserved LLM queries for deep cover-letter personalization.*"

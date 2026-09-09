@@ -80,6 +80,12 @@ pub(super) enum WhitelistedCommand {
     NotifyTest,
     ProfileShow,
     ProfileValidate,
+    Patterns,
+    Upskill,
+    AnalyzeProfile,
+    Interview,
+    Email,
+    Negotiate,
 }
 
 pub(super) fn parse_command(raw: &str) -> Result<WhitelistedCommand, CliRunValidationError> {
@@ -106,6 +112,12 @@ pub(super) fn parse_command(raw: &str) -> Result<WhitelistedCommand, CliRunValid
         "notify test" => WhitelistedCommand::NotifyTest,
         "profile show" => WhitelistedCommand::ProfileShow,
         "profile validate" => WhitelistedCommand::ProfileValidate,
+        "patterns" => WhitelistedCommand::Patterns,
+        "upskill" => WhitelistedCommand::Upskill,
+        "analyze-profile" | "analyze_profile" => WhitelistedCommand::AnalyzeProfile,
+        "interview" => WhitelistedCommand::Interview,
+        "email" => WhitelistedCommand::Email,
+        "negotiate" => WhitelistedCommand::Negotiate,
         "init" | "profile import" | "daemon" | "status serve" | "status" | "service"
         | "service install" | "service status" | "service uninstall" | "cookies refresh" => {
             return Err(CliRunValidationError::DisallowedCommand(raw.to_string()));
