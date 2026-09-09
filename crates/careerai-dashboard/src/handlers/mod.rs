@@ -1,6 +1,6 @@
 //! Dashboard HTTP handlers.
 
-#![allow(clippy::cast_precision_loss, clippy::similar_names)]
+#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::similar_names)]
 
 pub mod config_gen;
 pub mod listings;
@@ -215,7 +215,8 @@ pub async fn api_save_config(
 /// - `remote`: "1" to show only remote listings
 /// - `limit`: page size (default 100, max 500)
 /// - `offset`: pagination offset
-/// Returns `{ items: [...], total: N, limit, offset }` so the client can
+///
+/// Response: `{ items, total, limit, offset }` so the client can
 /// distinguish loaded rows from total matches.
 pub async fn api_explorer(
     State(state): State<Arc<AppState>>,
@@ -707,4 +708,165 @@ pub async fn api_pipeline_match(State(_state): State<Arc<AppState>>) -> impl Int
         args: crate::profile_handler::pipeline_types::CliRunArgs::default(),
     };
     crate::profile_handler::run_cli_request(&req).await
+}
+/// F01: `GET /api/v1/onboarding` — guided first-session setup state.
+///
+/// Returns the current onboarding phase, preview matches, and next action.
+/// Does not send submissions or messages.
+pub async fn api_onboarding(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let snap = match crate::data::snapshot(&state.pool).await {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let config = match details::fetch_config_view(&state.pool).await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    // Fetch top 5 shortlisted listings for the preview. If none shortlisted,
+    // fall back to the 5 highest-scoring discovered listings.
+    let preview = match fetch_preview_matches(&state.pool).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(target: "dashboard.onboarding", error = %e, "preview fetch failed");
+            vec![]
+        }
+    };
+    let onboarding_state = crate::onboarding::compute(&snap, &config, preview, None);
+    (StatusCode::OK, Json(onboarding_state)).into_response()
+}
+
+async fn fetch_preview_matches(
+    pool: &sqlx::SqlitePool,
+) -> crate::Result<Vec<crate::onboarding::PreviewMatch>> {
+    use sqlx::Row;
+    let rows = sqlx::query(
+        "SELECT id, title, company, score, state, location \
+         FROM listings \
+         WHERE state IN ('shortlisted', 'discovered') \
+         ORDER BY CASE state WHEN 'shortlisted' THEN 0 ELSE 1 END, score DESC \
+         LIMIT 5",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(careerai_db::DbError::from)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        if id.is_empty() {
+            continue;
+        }
+        let title: String = row.try_get("title").unwrap_or_default();
+        let company: String = row.try_get("company").unwrap_or_default();
+        let score_f64: Option<f64> = row.try_get("score").ok();
+        let score = score_f64.map_or(0.0, |s| s as f32);
+        let state: String = row.try_get("state").unwrap_or_default();
+        let location: Option<String> = row.try_get("location").ok();
+        let is_remote = location
+            .as_deref()
+            .is_some_and(|l| l.to_ascii_lowercase().contains("remote"));
+        out.push(crate::onboarding::PreviewMatch {
+            listing_id: id,
+            title,
+            company,
+            score,
+            state,
+            is_remote,
+        });
+    }
+    Ok(out)
+}
+/// F03: `GET /api/v1/review-queue` — applications awaiting explicit approval.
+pub async fn api_review_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match crate::review_queue::fetch_review_queue(&state.pool).await {
+        Ok(entries) => (StatusCode::OK, Json(entries)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F03: `GET /api/v1/review-queue/:id` — full review detail for one application.
+pub async fn api_review_detail(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match crate::review_queue::fetch_review_detail(&state.pool, &id).await {
+        Ok(Some(detail)) => (StatusCode::OK, Json(detail)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "application not found" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F03: `POST /api/v1/review-queue/:id/approve` — approve for submission.
+/// Idempotent; rejects stale content versions.
+pub async fn api_review_approve(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(mut action): Json<crate::review_queue::ReviewAction>,
+) -> impl IntoResponse {
+    action.content_version.application_id = id;
+    match crate::review_queue::approve(&state.pool, &action).await {
+        Ok(outcome) => (StatusCode::OK, Json(serde_json::json!({ "outcome": outcome }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F03: `POST /api/v1/review-queue/:id/skip` — skip this application.
+pub async fn api_review_skip(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(mut action): Json<crate::review_queue::ReviewAction>,
+) -> impl IntoResponse {
+    action.content_version.application_id = id;
+    match crate::review_queue::skip(&state.pool, &action).await {
+        Ok(outcome) => (StatusCode::OK, Json(serde_json::json!({ "outcome": outcome }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// F03: `POST /api/v1/review-queue/:id/retry` — retry a failed application.
+pub async fn api_review_retry(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(mut action): Json<crate::review_queue::ReviewAction>,
+) -> impl IntoResponse {
+    action.content_version.application_id = id;
+    match crate::review_queue::retry(&state.pool, &action).await {
+        Ok(outcome) => (StatusCode::OK, Json(serde_json::json!({ "outcome": outcome }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use tera::Tera;
 
+pub mod activity;
 pub mod chat;
 pub mod cli_catalog;
 pub mod daemon_health;
@@ -12,8 +13,11 @@ pub mod details;
 pub mod error;
 pub mod guided;
 pub mod handlers;
+pub mod llm_costs;
 pub mod llm_health;
 pub mod next_steps;
+pub mod onboarding;
+pub mod review_queue;
 pub mod profile_handler;
 pub mod profile_llm;
 pub mod routes;
@@ -109,8 +113,21 @@ fn build_tera() -> Result<Tera> {
     // the template under an `.html` name to guarantee every `{{ }}` of
     // job-board / DB / profile data is HTML-escaped.
     tera.register_filter("js", js_escape_filter);
+    tera.register_filter("posting_url", posting_url_filter);
     tera.add_raw_template("index.html", INDEX_TERA)?;
     Ok(tera)
+}
+
+fn posting_url_filter(
+    value: &tera::Value,
+    _args: &std::collections::HashMap<String, tera::Value>,
+) -> std::result::Result<tera::Value, tera::Error> {
+    let value = value.as_str().unwrap_or_default();
+    let valid = value.parse::<axum::http::Uri>().is_ok_and(|uri| {
+        matches!(uri.scheme_str(), Some("http" | "https")) && uri.host().is_some()
+    });
+    let result = if valid { value } else { "#" };
+    tera::to_value(result).map_err(tera::Error::from)
 }
 
 /// Escape a string for safe embedding inside a single-quoted JavaScript
@@ -235,10 +252,10 @@ mod tests {
             "careerai init",
             "careerai daemon",
             "tab-btn-commands",
-            "tab-btn-canvas",
+            "tab-btn-bounties",
             "discovery-observatory",
             "command-journey",
-            "spatial-viewport",
+            "bounty-grid",
         ] {
             assert!(
                 INDEX_TERA.contains(needle),
