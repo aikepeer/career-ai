@@ -73,6 +73,10 @@
       <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Review Queue
       <span class="tab-badge" id="review-badge" hidden>0</span>
     </button>
+    <button class="nav-btn" id="tab-btn-followups" onclick="switchTab('followups')">
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span> Follow-Ups
+      <span class="tab-badge" id="followups-badge" hidden>0</span>
+    </button>
     <button class="nav-btn" id="tab-btn-explorer" onclick="switchTab('explorer')">
       <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></span> Discovered Explorer
       {% if view.explorer_total > 0 %}
@@ -1492,6 +1496,37 @@
     </div>
     <div id="review-detail-panel" hidden></div>
   </div>
+  <!-- TAB: FOLLOW-UPS (F05) -->
+  <div id="tab-followups" class="tab-panel">
+    <div class="panel-header mission-panel-head head-followups">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Persistence layer</span>
+        <h2>Follow-Up Inbox</h2>
+        <p class="panel-sub">Scheduled follow-ups for submitted applications. Snooze, dismiss, mark as handled, or edit the body before sending.</p>
+      </div>
+    </div>
+    <div id="followups-container" class="table-container">
+      <table class="data-table" id="followups-table">
+        <thead>
+          <tr>
+            <th>Company / Role</th>
+            <th>Status</th>
+            <th>Scheduled</th>
+            <th>Step</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="followups-tbody">
+          <tr id="followups-loading">
+            <td colspan="5" class="empty-cell" style="text-align:center; padding:24px;">
+              <span class="explorer-spinner"></span> Loading follow-ups…
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="followup-edit-panel" hidden></div>
+  </div>
 
   <!-- TAB 6: CLI COMMAND CENTER -->
   <div id="tab-commands" class="tab-panel">
@@ -2188,6 +2223,9 @@ function switchTab(tabId) {
   if (tabId === 'review' && typeof loadReviewQueue === 'function') {
     loadReviewQueue();
   }
+  if (tabId === 'followups' && typeof loadFollowUps === 'function') {
+    loadFollowUps();
+  }
 }
 
 function activateCareerMoment(button, skipScroll) {
@@ -2619,6 +2657,114 @@ function reviewAction(appId, action, contentVersionJson) {
       console.error('review action failed:', err);
       alert('Action failed: ' + err);
     });
+}
+// F05: Load and render the follow-up inbox.
+function loadFollowUps() {
+  fetch('/api/v1/follow-ups')
+    .then(function(res) { return res.json(); })
+    .then(function(items) {
+      var tbody = document.getElementById('followups-tbody');
+      var badge = document.getElementById('followups-badge');
+      if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell" style="text-align:center; padding:24px;">No pending follow-ups. Submit applications to generate follow-up cadences.</td></tr>';
+        if (badge) { badge.hidden = true; }
+        return;
+      }
+      if (badge) { badge.hidden = false; badge.textContent = items.length; }
+      tbody.innerHTML = items.map(function(f) {
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(f.company) + '</strong> — ' + escapeHtml(f.title) + '<br><code style="font-size:10px;">' + escapeHtml(f.application_id) + '</code></td>' +
+          '<td><span class="sev-badge sev-info">' + escapeHtml(f.status) + '</span></td>' +
+          '<td style="font-size:12px;">' + escapeHtml(f.scheduled_at) + '</td>' +
+          '<td style="text-align:center;">' + f.cadence_step + '</td>' +
+          '<td>' +
+            '<button class="btn-primary btn-sm" onclick="editFollowUpBody(' + f.id + ', ' + JSON.stringify(JSON.stringify(f)).replace(/'/g, '&#39;') + ')">Edit</button> ' +
+            '<button class="btn-primary btn-sm" onclick="handleFollowUp(' + f.id + ')">Mark Handled</button> ' +
+            '<button class="detail-link-btn" onclick="snoozeFollowUp(' + f.id + ')">Snooze</button> ' +
+            '<button class="detail-link-btn" onclick="dismissFollowUp(' + f.id + ')">Dismiss</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    })
+    .catch(function(err) {
+      console.error('follow-ups fetch failed:', err);
+      var tbody = document.getElementById('followups-tbody');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-cell" style="text-align:center; padding:24px; color:#dc2626;">Failed to load follow-ups.</td></tr>';
+      }
+    });
+}
+
+// F05: Open an editable panel for the follow-up body.
+function editFollowUpBody(id, itemJson) {
+  var item = JSON.parse(itemJson);
+  var panel = document.getElementById('followup-edit-panel');
+  panel.hidden = false;
+  panel.innerHTML = '<div style="background:var(--surface-2, #f8f9fa); border:1px solid var(--border, #e2e8f0); border-radius:8px; padding:16px; margin-top:16px;">' +
+    '<div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px;">' +
+    '<div><h3 style="margin:0;">' + escapeHtml(item.company) + ' — ' + escapeHtml(item.title) + '</h3>' +
+    '<div style="font-size:12px; color:var(--text-muted, #64748b);">Step ' + item.cadence_step + ' · Scheduled: ' + escapeHtml(item.scheduled_at) + '</div></div>' +
+    '<button class="detail-link-btn" onclick="document.getElementById(\'followup-edit-panel\').hidden = true;">Close</button></div>' +
+    '<textarea id="followup-body-textarea" style="width:100%; min-height:200px; font-family:monospace; font-size:12px; padding:8px; border-radius:4px; border:1px solid var(--border, #e2e8f0);">' + escapeHtml(item.body || '') + '</textarea>' +
+    '<div style="display:flex; gap:8px; margin-top:8px;">' +
+    '<button class="btn-primary" onclick="saveFollowUpBody(' + id + ')">Save Body</button>' +
+    '<button class="btn-primary" onclick="handleFollowUp(' + id + ')">Mark Handled</button>' +
+    '<button class="detail-link-btn" onclick="snoozeFollowUp(' + id + ')">Snooze 7d</button>' +
+    '</div></div>';
+}
+
+// F05: Save the edited follow-up body.
+function saveFollowUpBody(id) {
+  var textarea = document.getElementById('followup-body-textarea');
+  var body = textarea.value;
+  fetch('/api/v1/follow-ups/' + id + '/body', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({body: body})
+  })
+    .then(function(res) {
+      if (res.ok) { alert('Follow-up body saved.'); loadFollowUps(); }
+      else { alert('Failed to save body.'); }
+    })
+    .catch(function(err) { alert('Save failed: ' + err); });
+}
+
+// F05: Snooze a follow-up by 7 days.
+function snoozeFollowUp(id) {
+  var d = new Date();
+  d.setDate(d.getDate() + 7);
+  var iso = d.toISOString();
+  fetch('/api/v1/follow-ups/' + id + '/snooze', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({new_scheduled_at: iso})
+  })
+    .then(function(res) {
+      if (res.ok) { alert('Snoozed to ' + iso); loadFollowUps(); }
+      else { alert('Failed to snooze.'); }
+    })
+    .catch(function(err) { alert('Snooze failed: ' + err); });
+}
+
+// F05: Dismiss a follow-up.
+function dismissFollowUp(id) {
+  if (!confirm('Dismiss this follow-up?')) return;
+  fetch('/api/v1/follow-ups/' + id + '/dismiss', {method: 'POST'})
+    .then(function(res) {
+      if (res.ok) { loadFollowUps(); }
+      else { alert('Failed to dismiss.'); }
+    })
+    .catch(function(err) { alert('Dismiss failed: ' + err); });
+}
+
+// F05: Mark a follow-up as handled.
+function handleFollowUp(id) {
+  fetch('/api/v1/follow-ups/' + id + '/handle', {method: 'POST'})
+    .then(function(res) {
+      if (res.ok) { alert('Marked as handled.'); loadFollowUps(); }
+      else { alert('Failed to mark handled.'); }
+    })
+    .catch(function(err) { alert('Handle failed: ' + err); });
 }
 // F01: Load onboarding state and render a first-session banner.
 function loadOnboarding() {
