@@ -69,6 +69,10 @@
       <span class="tab-badge badge-accent">{{ view.action_items | length }}</span>
       {% endif %}
     </button>
+    <button class="nav-btn" id="tab-btn-review" onclick="switchTab('review')">
+      <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Review Queue
+      <span class="tab-badge" id="review-badge" hidden>0</span>
+    </button>
     <button class="nav-btn" id="tab-btn-explorer" onclick="switchTab('explorer')">
       <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></span> Discovered Explorer
       {% if view.explorer_total > 0 %}
@@ -141,6 +145,7 @@
       </div>
       <span class="workspace-local">Your personal workspace</span>
     </div>
+    <div id="onboarding-banner" hidden></div>
     <section class="workspace-hero" aria-labelledby="mission-title">
       <div class="focus-hero">
         <span class="workspace-eyebrow">Your daily focus</span>
@@ -1428,6 +1433,9 @@
             <td>{% if item.score %}{{ (item.score * 100) | round(method="floor") }}%{% else %}—{% endif %}</td>
             <td>
               <button class="detail-link-btn" onclick="openAppModal('{{ item.id | js | safe }}')">Inspect →</button>
+              {% if item.score %}
+              <button class="detail-link-btn" style="margin-left:4px;" onclick="toggleMatchReasons('{{ item.id | js | safe }}', this)">Why?</button>
+              {% endif %}
               {% if item.state == "discovered" or item.state == "filtered_out" %}
               <button class="btn-primary btn-sm" style="margin-left:4px;" onclick="forceShortlist('{{ item.id | js | safe }}')">⚡ Shortlist</button>
               {% elif item.state == "shortlisted" %}
@@ -1451,6 +1459,38 @@
         </tbody>
       </table>
     </div>
+  </div>
+  <!-- TAB: REVIEW QUEUE (F03) -->
+  <div id="tab-review" class="tab-panel">
+    <div class="panel-header mission-panel-head head-review">
+      <div class="panel-head-main">
+        <span class="panel-kicker"><i></i> Approval checkpoint</span>
+        <h2>Unified Review Queue</h2>
+        <p class="panel-sub">Applications awaiting your explicit approval. JD, tailored resume, cover letter, and artifacts shown together. Stale or repeated clicks are rejected via content-version tracking.</p>
+      </div>
+    </div>
+    <div id="review-queue-container" class="table-container">
+      <table class="data-table" id="review-queue-table">
+        <thead>
+          <tr>
+            <th>Job Title</th>
+            <th>Company</th>
+            <th>State</th>
+            <th>Score</th>
+            <th>Content</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="review-queue-tbody">
+          <tr id="review-queue-loading">
+            <td colspan="6" class="empty-cell" style="text-align:center; padding:24px;">
+              <span class="explorer-spinner"></span> Loading review queue…
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="review-detail-panel" hidden></div>
   </div>
 
   <!-- TAB 6: CLI COMMAND CENTER -->
@@ -2145,6 +2185,9 @@ function switchTab(tabId) {
   if (tabId === 'analytics' && typeof lazyLoadAnalytics === 'function') {
     lazyLoadAnalytics();
   }
+  if (tabId === 'review' && typeof loadReviewQueue === 'function') {
+    loadReviewQueue();
+  }
 }
 
 function activateCareerMoment(button, skipScroll) {
@@ -2399,6 +2442,222 @@ function openAppModal(id) {
 
 function closeAppModal() {
   document.getElementById('app-modal').classList.remove('active');
+}
+// F02: Fetch and toggle match reasons for a listing inline in the explorer.
+function toggleMatchReasons(listingId, btn) {
+  var existing = document.getElementById('match-reasons-' + listingId);
+  if (existing) {
+    existing.remove();
+    btn.textContent = 'Why?';
+    return;
+  }
+  btn.textContent = 'Loading…';
+  fetch('/api/v1/match-reasons/' + encodeURIComponent(listingId))
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      btn.textContent = 'Why?';
+      var row = btn.closest('tr');
+      var detailRow = document.createElement('tr');
+      detailRow.id = 'match-reasons-' + listingId;
+      detailRow.className = 'match-reasons-row';
+      var cell = document.createElement('td');
+      cell.colSpan = 8;
+      cell.style.background = 'var(--surface-2, #f8f9fa)';
+      cell.style.padding = '12px 16px';
+      cell.style.fontSize = '12px';
+
+      var html = '<div style="display:flex; gap:24px; flex-wrap:wrap;">';
+      if (data.matched_keywords) {
+        html += '<div><strong style="color:#16a34a;">Matched:</strong> ' +
+          data.matched_keywords.map(escapeHtml).join(', ') + '</div>';
+      }
+      if (data.missing_keywords && data.missing_keywords.length > 0) {
+        html += '<div><strong style="color:#dc2626;">Missing:</strong> ' +
+          data.missing_keywords.map(escapeHtml).join(', ') + '</div>';
+      }
+      if (data.filter_reason) {
+        html += '<div><strong>Filter:</strong> ' + escapeHtml(data.filter_reason) + '</div>';
+      }
+      if (data.legitimacy_tier) {
+        html += '<div><strong>Legitimacy:</strong> ' + escapeHtml(data.legitimacy_tier) + '</div>';
+      }
+      html += '</div>';
+      cell.innerHTML = html;
+      detailRow.appendChild(cell);
+      row.parentNode.insertBefore(detailRow, row.nextSibling);
+    })
+    .catch(function(err) {
+      btn.textContent = 'Why?';
+      console.error('match reasons fetch failed:', err);
+    });
+}
+// F03: Load and render the review queue.
+function loadReviewQueue() {
+  fetch('/api/v1/review-queue')
+    .then(function(res) { return res.json(); })
+    .then(function(entries) {
+      var tbody = document.getElementById('review-queue-tbody');
+      var badge = document.getElementById('review-badge');
+      if (!entries || entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-cell" style="text-align:center; padding:24px;">No applications awaiting review. Tailor + render listings to populate this queue.</td></tr>';
+        if (badge) { badge.hidden = true; }
+        return;
+      }
+      if (badge) { badge.hidden = false; badge.textContent = entries.length; }
+      tbody.innerHTML = entries.map(function(e) {
+        var contentFlags = [];
+        if (e.has_resume) contentFlags.push('Resume');
+        if (e.has_cover_letter) contentFlags.push('Cover');
+        if (e.artifact_count > 0) contentFlags.push(e.artifact_count + ' file' + (e.artifact_count > 1 ? 's' : ''));
+        var contentStr = contentFlags.length > 0 ? contentFlags.join(' · ') : '—';
+        var scoreStr = e.score ? Math.floor(e.score * 100) + '%' : '—';
+        return '<tr>' +
+          '<td><a href="#" onclick="openReviewDetail(\'' + escapeHtml(e.application_id) + '\'); return false;" class="title-link">' + escapeHtml(e.title) + '</a></td>' +
+          '<td>' + escapeHtml(e.company) + '</td>' +
+          '<td><span class="sev-badge sev-warn">' + escapeHtml(e.state) + '</span></td>' +
+          '<td>' + scoreStr + '</td>' +
+          '<td style="font-size:11px;">' + contentStr + '</td>' +
+          '<td>' +
+            '<button class="btn-primary btn-sm" onclick="reviewAction(\'' + escapeHtml(e.application_id) + '\', \'approve\', ' + JSON.stringify(JSON.stringify({application_id: e.application_id, profile_hash: e.profile_hash, prompt_version: e.prompt_version, updated_at_rfc3339: e.updated_at})).replace(/'/g, "&#39;") + ')">Approve</button> ' +
+            '<button class="btn-primary btn-sm" onclick="openReviewDetail(\'' + escapeHtml(e.application_id) + '\')">Inspect</button> ' +
+            '<button class="detail-link-btn" onclick="reviewAction(\'' + escapeHtml(e.application_id) + '\', \'skip\', ' + JSON.stringify(JSON.stringify({application_id: e.application_id, profile_hash: e.profile_hash, prompt_version: e.prompt_version, updated_at_rfc3339: e.updated_at})).replace(/'/g, "&#39;") + ')">Skip</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    })
+    .catch(function(err) {
+      console.error('review queue fetch failed:', err);
+      var tbody = document.getElementById('review-queue-tbody');
+      if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-cell" style="text-align:center; padding:24px; color:#dc2626;">Failed to load review queue.</td></tr>';
+      }
+    });
+}
+
+// F03: Open the review detail panel showing JD + resume + cover letter + artifacts.
+function openReviewDetail(appId) {
+  var panel = document.getElementById('review-detail-panel');
+  panel.hidden = false;
+  panel.innerHTML = '<div style="padding:24px; text-align:center;"><span class="explorer-spinner"></span> Loading application detail…</div>';
+  fetch('/api/v1/review-queue/' + encodeURIComponent(appId))
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data.error) {
+        panel.innerHTML = '<div style="padding:16px; color:#dc2626;">Error: ' + escapeHtml(data.error) + '</div>';
+        return;
+      }
+      var html = '<div style="background:var(--surface-2, #f8f9fa); border:1px solid var(--border, #e2e8f0); border-radius:8px; padding:16px; margin-top:16px;">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px;">';
+      html += '<div><h3 style="margin:0;">' + escapeHtml(data.title) + ' — ' + escapeHtml(data.company) + '</h3>';
+      html += '<div style="font-size:12px; color:var(--text-muted, #64748b);">State: ' + escapeHtml(data.state) + ' · Model: ' + escapeHtml(data.llm_model) + ' · Profile: ' + escapeHtml(data.profile_hash).substring(0, 20) + '…</div></div>';
+      html += '<button class="detail-link-btn" onclick="document.getElementById(\'review-detail-panel\').hidden = true;">Close</button>';
+      html += '</div>';
+
+      html += '<details style="margin-bottom:12px;"><summary style="cursor:pointer; font-weight:600;">Job Description</summary>';
+      html += '<div style="white-space:pre-wrap; font-size:12px; max-height:300px; overflow-y:auto; padding:8px; background:var(--surface, #fff); border-radius:4px;">' + escapeHtml(data.description || '—') + '</div></details>';
+
+      html += '<details open style="margin-bottom:12px;"><summary style="cursor:pointer; font-weight:600;">Cover Letter</summary>';
+      html += '<div style="white-space:pre-wrap; font-size:12px; max-height:300px; overflow-y:auto; padding:8px; background:var(--surface, #fff); border-radius:4px;">' + escapeHtml(data.cover_letter_text || 'No cover letter generated.') + '</div></details>';
+
+      html += '<details style="margin-bottom:12px;"><summary style="cursor:pointer; font-weight:600;">Resume View (JSON)</summary>';
+      html += '<pre style="font-size:10px; max-height:300px; overflow:auto; padding:8px; background:var(--surface, #fff); border-radius:4px;">' + escapeHtml(data.resume_view_json || '—') + '</pre></details>';
+
+      if (data.artifacts && data.artifacts.length > 0) {
+        html += '<details style="margin-bottom:12px;"><summary style="cursor:pointer; font-weight:600;">Artifacts (' + data.artifacts.length + ')</summary><ul>';
+        data.artifacts.forEach(function(art) {
+          var downloadUrl = '/api/v1/artifacts/download?path=' + encodeURIComponent(art.path);
+          html += '<li style="font-size:12px;">' + escapeHtml(art.kind) + ' — <a href="' + downloadUrl + '" target="_blank">Download</a> (' + (art.bytes / 1024).toFixed(1) + ' KB)</li>';
+        });
+        html += '</ul></details>';
+      }
+
+      var cv = JSON.stringify({application_id: data.id, profile_hash: data.profile_hash, prompt_version: data.prompt_version, updated_at_rfc3339: data.updated_at});
+      var cvEsc = cv.replace(/'/g, '&#39;');
+      html += '<div style="display:flex; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border, #e2e8f0);">';
+      html += '<button class="btn-primary" onclick="reviewAction(\'' + escapeHtml(data.id) + '\', \'approve\', \'' + cvEsc + '\')">Approve for Submission</button>';
+      html += '<button class="btn-primary" onclick="reviewAction(\'' + escapeHtml(data.id) + '\', \'skip\', \'' + cvEsc + '\')">Skip</button>';
+      if (data.state === 'failed') {
+        html += '<button class="btn-primary" onclick="reviewAction(\'' + escapeHtml(data.id) + '\', \'retry\', \'' + cvEsc + '\')">Retry</button>';
+      }
+      html += '</div>';
+      html += '</div>';
+      panel.innerHTML = html;
+    })
+    .catch(function(err) {
+      panel.innerHTML = '<div style="padding:16px; color:#dc2626;">Failed to load detail: ' + escapeHtml(String(err)) + '</div>';
+    });
+}
+
+// F03: Execute a review action (approve/skip/retry) with content-version safety.
+function reviewAction(appId, action, contentVersionJson) {
+  var cv = JSON.parse(contentVersionJson);
+  var body = JSON.stringify({content_version: cv, note: null});
+  fetch('/api/v1/review-queue/' + encodeURIComponent(appId) + '/' + action, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: body
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var outcome = data.outcome || 'unknown';
+      var msg = action + ': ' + outcome;
+      if (outcome === 'stale_content') {
+        msg = 'Stale content — this application was edited since you opened it. Refresh and review again.';
+      } else if (outcome === 'already_approved' || outcome === 'already_skipped') {
+        msg = 'Already ' + action + 'd — no duplicate action taken.';
+      } else if (outcome === 'not_failed') {
+        msg = 'Cannot retry — application is not in failed state.';
+      } else if (outcome === 'not_found') {
+        msg = 'Application not found.';
+      }
+      alert(msg);
+      loadReviewQueue();
+      var panel = document.getElementById('review-detail-panel');
+      if (panel && outcome !== 'stale_content') { panel.hidden = true; }
+    })
+    .catch(function(err) {
+      console.error('review action failed:', err);
+      alert('Action failed: ' + err);
+    });
+}
+// F01: Load onboarding state and render a first-session banner.
+function loadOnboarding() {
+  fetch('/api/v1/onboarding')
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var banner = document.getElementById('onboarding-banner');
+      if (!banner) return;
+      if (data.phase === 'complete') {
+        banner.hidden = true;
+        return;
+      }
+      banner.hidden = false;
+      var phaseLabels = {
+        import_profile: 'Import your profile',
+        confirm_preferences: 'Confirm your preferences',
+        preview_matches: 'Preview your matches',
+        review_match: 'Review your first tailored match'
+      };
+      var html = '<div style="background:linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color:#fff; border-radius:12px; padding:20px 24px; margin-bottom:16px;">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">';
+      html += '<strong style="font-size:14px;">First-session setup · Step ' + (data.step_number || 1) + ' of 4</strong>';
+      html += '<span style="font-size:12px; opacity:0.8;">' + escapeHtml(phaseLabels[data.phase] || data.phase) + '</span>';
+      html += '</div>';
+      html += '<p style="margin:0 0 12px; font-size:13px; line-height:1.5;">' + escapeHtml(data.guidance || '') + '</p>';
+      if (data.preview_matches && data.preview_matches.length > 0) {
+        html += '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">';
+        data.preview_matches.slice(0, 3).forEach(function(m) {
+          html += '<div style="background:rgba(255,255,255,0.15); border-radius:6px; padding:6px 10px; font-size:11px;">' + escapeHtml(m.title) + ' · ' + escapeHtml(m.company) + (m.score ? ' (' + Math.floor(m.score * 100) + '%)' : '') + '</div>';
+        });
+        html += '</div>';
+      }
+      html += '<button class="btn-primary" style="background:#fff; color:#6366f1; border:none;" onclick="switchTab(\'' + escapeHtml(data.next_action_tab || 'config') + '\')">' + escapeHtml(data.next_action_label || 'Continue') + ' →</button>';
+      html += '</div>';
+      banner.innerHTML = html;
+    })
+    .catch(function(err) {
+      console.error('onboarding fetch failed:', err);
+    });
 }
 
 // Status element for the "Generate Config from Profile" card (right of
@@ -3743,6 +4002,9 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(lazyLoadExplorer, 800);
   }
   {% endif %}
+
+  // F01: Load first-session onboarding banner on page load.
+  if (typeof loadOnboarding === 'function') loadOnboarding();
 });
 
 var _explorerLoaded = false;
