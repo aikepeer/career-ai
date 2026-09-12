@@ -16,6 +16,7 @@ members = [
     "crates/careerai-mcp",
     "crates/careerai-notify",
     "crates/careerai-dashboard",
+    "crates/careerai-hosted",
 ]
 
 [workspace.package]
