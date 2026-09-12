@@ -41,9 +41,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log.as_deref());
 
-    // App root: `CAREERAI_ROOT` override → CWD → home-fallback to the
-    // project workspace (runit services start in $HOME). Every
-    // subcommand reads config/, data/, and profile/ from here.
+    // App root: `CAREERAI_ROOT` override → current working directory.
+    // Every subcommand reads config/, data/, and profile/ from here.
     let cwd = careerai_core::paths::resolve_root_env();
 
     // Parse the global `--llm-backend` flag once so subcommands can

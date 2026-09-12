@@ -17,7 +17,6 @@ pub fn scaffold(root: &Path, force: bool) -> Result<()> {
     ensure_dir(&root.join("config"))?;
     ensure_dir(&root.join("profile"))?;
     ensure_dir(&root.join("artifacts"))?;
-    ensure_dir(&root.join("logs"))?;
 
     write_if_absent(&root.join("config/default.yaml"), DEFAULT_YAML, force)?;
     write_if_absent(
@@ -66,7 +65,7 @@ mod tests {
         assert!(tmp.path().join("profile/profile.example.yaml").is_file());
         assert!(tmp.path().join(".env.example").is_file());
         assert!(tmp.path().join("artifacts").is_dir());
-        assert!(tmp.path().join("logs").is_dir());
+        assert!(!tmp.path().join("logs").exists());
     }
 
     #[test]
