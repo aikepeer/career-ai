@@ -1,6 +1,6 @@
 //! Curated company-record fixtures for vertical slice integration tests.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
 use careerai_hosted::workers::adapters::{MatchListing};
 use careerai_hosted::workers::preparation::CompanyRecord;
