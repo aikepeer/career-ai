@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::manual_assert)]
 
 //! Integration tests for the MCP server.
 //!
@@ -92,9 +92,8 @@ impl Drop for ServerGuard {
             Ok(Err(join_err)) => {
                 if join_err.is_panic() {
                     panic!("server task panicked: {join_err}");
-                } else {
-                    // cancelled/aborted: no panic to surface.
                 }
+                // cancelled/aborted: no panic to surface.
             }
             Err(_elapsed) => {
                 // Server still running after client cancel + 2 s

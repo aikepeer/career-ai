@@ -460,11 +460,33 @@ dependencies = [
 name = "careerai-hosted"
 version = "0.1.3"
 dependencies = [
+ "axum",
+ "base64 0.22.1",
  "careerai-core",
+ "careerai-llm",
+ "careerai-match",
+ "careerai-profile",
+ "careerai-render",
+ "careerai-tailor",
+ "chrono",
+ "constant_time_eq",
+ "hex",
+ "hmac",
+ "rand 0.8.8",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
+ "sqlx",
+ "tempfile",
  "thiserror 2.0.20",
+ "tokio",
+ "tower",
+ "tower-http",
  "tracing",
+ "unicode-normalization",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -977,6 +999,12 @@ name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "core-foundation-sys"
@@ -3989,6 +4017,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -4069,6 +4098,7 @@ dependencies = [
  "stringprep",
  "thiserror 2.0.20",
  "tracing",
+ "uuid",
  "whoami",
 ]
 
@@ -4107,6 +4137,7 @@ dependencies = [
  "stringprep",
  "thiserror 2.0.20",
  "tracing",
+ "uuid",
  "whoami",
 ]
 
@@ -4133,6 +4164,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]

@@ -5,14 +5,45 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Hosted multi-tenant API surface for career-ai (PR 1: scope, classification, threat model, beta contract)"
+description = "Hosted multi-tenant API surface for career-ai (PRs 2-7: auth, RLS, entitlements, jobs, audit, actions, vertical slice, artifacts)"
 
 [dependencies]
 careerai-core = { path = "../careerai-core" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-match = { path = "../careerai-match" }
+careerai-tailor = { path = "../careerai-tailor" }
+careerai-render = { path = "../careerai-render" }
+careerai-llm = { path = "../careerai-llm" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tokio.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+# Axum for the hosted API server
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "matched-path", "original-uri", "query", "tower-log"] }
+tower = "0.5"
+tower-http = { version = "0.6", default-features = false, features = ["cors", "trace"] }
+# Separate sqlx with postgres (workspace dep has only sqlite)
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "chrono", "uuid"] }
+# HMAC for TOTP (RFC 6238)
+hmac = "0.12"
+# SHA-1 for TOTP HMAC
+sha1 = "0.10"
+# Constant-time comparison for tokens
+constant_time_eq = "0.3"
+# Random token generation
+rand = "0.8"
+# Unicode NFC normalization for canonical JSON
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
 
 [lints]
 workspace = true
