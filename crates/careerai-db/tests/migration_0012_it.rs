@@ -11,12 +11,11 @@ async fn migration_0012_match_reasons_applies_and_upsert_works() {
     let pool = pool_in_memory().await.unwrap();
 
     // Verify the table exists and has the expected columns.
-    let cols: Vec<(String, String)> = sqlx::query_as(
-        "SELECT name, type FROM pragma_table_info('match_reasons') ORDER BY cid",
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+    let cols: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, type FROM pragma_table_info('match_reasons') ORDER BY cid")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
 
     let col_names: Vec<&str> = cols.iter().map(|(n, _)| n.as_str()).collect();
     for expected in [
@@ -119,6 +118,8 @@ async fn migration_0012_match_reasons_applies_and_upsert_works() {
 #[tokio::test]
 async fn match_reasons_fetch_returns_none_for_unknown_listing() {
     let pool = pool_in_memory().await.unwrap();
-    let result = queries::fetch_match_reasons(&pool, "nonexistent").await.unwrap();
+    let result = queries::fetch_match_reasons(&pool, "nonexistent")
+        .await
+        .unwrap();
     assert!(result.is_none());
 }

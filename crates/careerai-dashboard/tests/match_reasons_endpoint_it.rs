@@ -153,7 +153,16 @@ async fn match_reasons_endpoint_returns_404_for_unknown_listing() {
 
     let url = format!("http://127.0.0.1:{port}/api/v1/match-reasons/nonexistent-listing");
     let output = std::process::Command::new("curl")
-        .args(["-sS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", &url])
+        .args([
+            "-sS",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--max-time",
+            "10",
+            &url,
+        ])
         .output()
         .expect("curl failed");
     let status = String::from_utf8_lossy(&output.stdout).to_string();

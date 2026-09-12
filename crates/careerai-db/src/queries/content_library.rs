@@ -190,9 +190,16 @@ mod tests {
             .await
             .unwrap();
 
-        store_cover_letter(&pool, "ml", "engineer", "Dear ML team...", &app.id, "hash-1")
-            .await
-            .unwrap();
+        store_cover_letter(
+            &pool,
+            "ml",
+            "engineer",
+            "Dear ML team...",
+            &app.id,
+            "hash-1",
+        )
+        .await
+        .unwrap();
 
         let result = fetch_cover_letter_for_domain(&pool, "ml", "engineer", "hash-1")
             .await

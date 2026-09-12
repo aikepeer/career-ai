@@ -54,7 +54,6 @@ pub async fn record_outcome(
     Ok(id)
 }
 
-
 /// List all outcomes for an application, newest first by occurrence.
 pub async fn outcomes_for_application(
     pool: &SqlitePool,

@@ -67,15 +67,15 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
         })
         .collect();
     let profile_text = flatten_profile(&profile);
-     // F02: Collect domain keywords once for match-breakdown computation.
+    // F02: Collect domain keywords once for match-breakdown computation.
     let domain_keywords: Vec<String> = cfg
         .domains
         .iter()
         .flat_map(|d| d.keywords_any.iter().cloned())
         .collect();
 
-     // Apply hard filters first. When not in tune mode, rejected listings are
-     // transitioned to `FilteredOut` so they are skipped on subsequent runs.
+    // Apply hard filters first. When not in tune mode, rejected listings are
+    // transitioned to `FilteredOut` so they are skipped on subsequent runs.
     let mut post_filter: Vec<(&careerai_db::models::Listing, RawListing)> = Vec::new();
     let mut filtered_out = 0usize;
     for (db_row, raw) in discovered.iter().zip(raws) {
@@ -85,10 +85,8 @@ pub async fn match_all(root: &Path, cfg: &CoreConfig, tune: bool) -> Result<Matc
                 filtered_out += 1;
                 if !tune {
                     let breakdown = match_breakdown(&profile_text, &raw, &domain_keywords);
-                    persist_match_reasons(
-                        &pool, &db_row.id, 0.0, &breakdown, Some(reason), None,
-                    )
-                    .await?;
+                    persist_match_reasons(&pool, &db_row.id, 0.0, &breakdown, Some(reason), None)
+                        .await?;
                     queries::transition(&pool, &db_row.id, ListingState::FilteredOut, Some(reason))
                         .await?;
                 }

@@ -81,7 +81,8 @@ pub async fn fetch_review_queue(pool: &SqlitePool) -> Result<Vec<ReviewQueueEntr
         }
         let listing_id: String = row.try_get("listing_id").unwrap_or_default();
         let has_resume = has_payload_field(pool, &application_id, "resume_view_json").await?;
-        let has_cover_letter = has_payload_field(pool, &application_id, "cover_letter_text").await?;
+        let has_cover_letter =
+            has_payload_field(pool, &application_id, "cover_letter_text").await?;
         let artifact_count = count_artifacts(pool, &application_id).await?;
         let score_f64: Option<f64> = row.try_get("score").ok();
         out.push(ReviewQueueEntry {
@@ -105,7 +106,10 @@ pub async fn fetch_review_queue(pool: &SqlitePool) -> Result<Vec<ReviewQueueEntr
 
 /// Fetch the full review detail for a single application (JD + resume +
 /// cover letter + artifacts + timeline).
-pub async fn fetch_review_detail(pool: &SqlitePool, application_id: &str) -> Result<Option<ApplicationDetail>> {
+pub async fn fetch_review_detail(
+    pool: &SqlitePool,
+    application_id: &str,
+) -> Result<Option<ApplicationDetail>> {
     crate::details::fetch_application_detail(pool, application_id).await
 }
 
@@ -114,11 +118,13 @@ pub async fn fetch_review_detail(pool: &SqlitePool, application_id: &str) -> Res
 /// changing state. Returns `Err` if the content version is stale.
 pub async fn approve(pool: &SqlitePool, action: &ReviewAction) -> Result<ApproveOutcome> {
     let mut tx = pool.begin().await.map_err(careerai_db::DbError::from)?;
-    let row = sqlx::query("SELECT id, state, profile_hash, prompt_version, updated_at FROM applications WHERE id = ?")
-        .bind(&action.content_version.application_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(careerai_db::DbError::from)?;
+    let row = sqlx::query(
+        "SELECT id, state, profile_hash, prompt_version, updated_at FROM applications WHERE id = ?",
+    )
+    .bind(&action.content_version.application_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(careerai_db::DbError::from)?;
     let Some(row) = row else {
         tx.rollback().await.ok();
         return Ok(ApproveOutcome::NotFound);
@@ -154,11 +160,13 @@ pub async fn approve(pool: &SqlitePool, action: &ReviewAction) -> Result<Approve
 /// Skip an application — moves it to `skipped` state. Idempotent.
 pub async fn skip(pool: &SqlitePool, action: &ReviewAction) -> Result<SkipOutcome> {
     let mut tx = pool.begin().await.map_err(careerai_db::DbError::from)?;
-    let row = sqlx::query("SELECT id, state, profile_hash, prompt_version, updated_at FROM applications WHERE id = ?")
-        .bind(&action.content_version.application_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(careerai_db::DbError::from)?;
+    let row = sqlx::query(
+        "SELECT id, state, profile_hash, prompt_version, updated_at FROM applications WHERE id = ?",
+    )
+    .bind(&action.content_version.application_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(careerai_db::DbError::from)?;
     let Some(row) = row else {
         tx.rollback().await.ok();
         return Ok(SkipOutcome::NotFound);
@@ -243,9 +251,7 @@ pub enum RetryOutcome {
 }
 
 async fn has_payload_field(pool: &SqlitePool, app_id: &str, field: &str) -> Result<bool> {
-    let sql = format!(
-        "SELECT {field} FROM application_payloads WHERE application_id = ?"
-    );
+    let sql = format!("SELECT {field} FROM application_payloads WHERE application_id = ?");
     let row = sqlx::query(&sql)
         .bind(app_id)
         .fetch_optional(pool)

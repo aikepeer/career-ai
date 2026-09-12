@@ -46,11 +46,7 @@ pub async fn api_record_outcome(
     )
     .await
     {
-        Ok(id) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({ "id": id })),
-        )
-            .into_response(),
+        Ok(id) => (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response(),
         Err(e) => outcome_error_response(&e),
     }
 }
@@ -67,9 +63,7 @@ pub async fn api_list_outcomes(
 }
 
 /// `GET /api/v1/outcomes` — list recent outcomes across all applications.
-pub async fn api_list_recent_outcomes(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+pub async fn api_list_recent_outcomes(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match careerai_db::queries::list_recent_outcomes(&state.pool, 50).await {
         Ok(outcomes) => (StatusCode::OK, Json(outcomes)).into_response(),
         Err(e) => outcome_error_response(&e),
@@ -103,11 +97,7 @@ fn outcome_error_response(e: &careerai_db::DbError) -> axum::response::Response 
         careerai_db::DbError::Conflict(_) => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    (
-        status,
-        Json(serde_json::json!({ "error": e.to_string() })),
-    )
-        .into_response()
+    (status, Json(serde_json::json!({ "error": e.to_string() }))).into_response()
 }
 
 // ─── F05: Follow-up inbox lifecycle ──────────────────────────────────
@@ -175,11 +165,7 @@ fn follow_up_error_response(e: &careerai_db::DbError) -> axum::response::Respons
         careerai_db::DbError::NotFound(_) => StatusCode::NOT_FOUND,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    (
-        status,
-        Json(serde_json::json!({ "error": e.to_string() })),
-    )
-        .into_response()
+    (status, Json(serde_json::json!({ "error": e.to_string() }))).into_response()
 }
 
 /// F05: a follow-up card with full editable body and company/title context.

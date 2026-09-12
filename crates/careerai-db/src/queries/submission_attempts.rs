@@ -52,8 +52,8 @@ pub async fn claim_submission_attempt(
             .bind(application_id)
             .fetch_optional(&mut *tx)
             .await?;
-    let (_, pre_submit_state) = app_row
-        .ok_or_else(|| DbError::NotFound(application_id.to_string()))?;
+    let (_, pre_submit_state) =
+        app_row.ok_or_else(|| DbError::NotFound(application_id.to_string()))?;
 
     // Atomically compute the next attempt_no and insert.
     let row: (i64,) = sqlx::query_as(

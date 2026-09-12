@@ -120,7 +120,10 @@ async fn commit_render_transaction(
     application: &careerai_db::Application,
     artifacts: &careerai_render::RenderedArtifacts,
 ) -> Result<()> {
-    let mut tx = pool.begin().await.context("begin render commit transaction")?;
+    let mut tx = pool
+        .begin()
+        .await
+        .context("begin render commit transaction")?;
 
     for (kind, path) in [
         ("resume_md", &artifacts.resume_md),
@@ -189,7 +192,6 @@ async fn commit_render_transaction(
     tx.commit().await.context("commit render transaction")?;
     Ok(())
 }
-
 
 /// ATS text-layer verification (ported from ai-job-search `/apply` 5d):
 /// an ATS reads the PDF's embedded text, not the rendered page. Check

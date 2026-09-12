@@ -93,9 +93,14 @@ async fn onboarding_returns_preview_matches_when_listings_exist() {
         )
         .await
         .unwrap();
-        queries::transition(&pool, &id, careerai_core::state::ListingState::Shortlisted, None)
-            .await
-            .unwrap();
+        queries::transition(
+            &pool,
+            &id,
+            careerai_core::state::ListingState::Shortlisted,
+            None,
+        )
+        .await
+        .unwrap();
         sqlx::query("UPDATE listings SET score = ? WHERE id = ?")
             .bind(0.9 - f64::from(i) * 0.1)
             .bind(&id)

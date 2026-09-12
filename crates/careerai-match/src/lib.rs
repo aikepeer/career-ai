@@ -34,5 +34,5 @@ pub use rules::FilterRules;
 pub use salary::{extract_salary_range, SalaryRange};
 pub use score::{flatten_profile, match_breakdown, JaccardScorer, MatchBreakdown, Scorer};
 pub use skill_gap::{analyze_skill_gaps, SkillGapEntry, SkillGapReport as JDSkillGapReport};
-pub use upskill::analyse_skill_gap;
 pub use tier::{tier_for, Tier};
+pub use upskill::analyse_skill_gap;

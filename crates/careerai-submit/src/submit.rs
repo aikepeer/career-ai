@@ -305,8 +305,7 @@ async fn handle_submit_success(
     // R01: record the successful outcome on the attempt row
     // before transitioning state. Non-blocking — the state
     // transition is the source of truth for pipeline flow.
-    if let Err(e) =
-        queries::mark_attempt_submitted(pool, attempt.id, Some(&remote_id), None).await
+    if let Err(e) = queries::mark_attempt_submitted(pool, attempt.id, Some(&remote_id), None).await
     {
         warn!(
             target: "submit",
@@ -381,8 +380,7 @@ async fn handle_submit_failure(
     // it. Structural/policy errors are "failed".
     let is_uncertain = is_uncertain_error(&err);
     if is_uncertain {
-        if let Err(e) = queries::mark_attempt_uncertain(pool, attempt.id, &err.to_string()).await
-        {
+        if let Err(e) = queries::mark_attempt_uncertain(pool, attempt.id, &err.to_string()).await {
             warn!(
                 target: "submit",
                 application_id = %ctx.application.id,
@@ -391,8 +389,7 @@ async fn handle_submit_failure(
                 "mark_attempt_uncertain failed (non-blocking)",
             );
         }
-    } else if let Err(e) = queries::mark_attempt_failed(pool, attempt.id, &err.to_string()).await
-    {
+    } else if let Err(e) = queries::mark_attempt_failed(pool, attempt.id, &err.to_string()).await {
         warn!(
             target: "submit",
             application_id = %ctx.application.id,

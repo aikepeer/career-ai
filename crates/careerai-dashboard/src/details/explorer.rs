@@ -53,9 +53,8 @@ pub async fn fetch_explorer_filtered(
 
     if let Some(ref q) = filter.query {
         let pat = format!("%{q}%");
-        where_clauses.push(
-            "(LOWER(l.title) LIKE LOWER(?) OR LOWER(l.company) LIKE LOWER(?))".to_string(),
-        );
+        where_clauses
+            .push("(LOWER(l.title) LIKE LOWER(?) OR LOWER(l.company) LIKE LOWER(?))".to_string());
         binds.push(pat.clone());
         binds.push(pat);
     }
@@ -68,9 +67,7 @@ pub async fn fetch_explorer_filtered(
         binds.push(state.clone());
     }
     if filter.remote_only {
-        where_clauses.push(
-            "LOWER(l.location) LIKE '%remote%' OR l.location IS NULL".to_string(),
-        );
+        where_clauses.push("LOWER(l.location) LIKE '%remote%' OR l.location IS NULL".to_string());
     }
 
     let where_sql = if where_clauses.is_empty() {
@@ -175,9 +172,8 @@ pub async fn fetch_explorer_filtered_count(
 
     if let Some(ref q) = filter.query {
         let pat = format!("%{q}%");
-        where_clauses.push(
-            "(LOWER(l.title) LIKE LOWER(?) OR LOWER(l.company) LIKE LOWER(?))".to_string(),
-        );
+        where_clauses
+            .push("(LOWER(l.title) LIKE LOWER(?) OR LOWER(l.company) LIKE LOWER(?))".to_string());
         binds.push(pat.clone());
         binds.push(pat);
     }
@@ -190,9 +186,7 @@ pub async fn fetch_explorer_filtered_count(
         binds.push(state.clone());
     }
     if filter.remote_only {
-        where_clauses.push(
-            "LOWER(l.location) LIKE '%remote%' OR l.location IS NULL".to_string(),
-        );
+        where_clauses.push("LOWER(l.location) LIKE '%remote%' OR l.location IS NULL".to_string());
     }
 
     let where_sql = if where_clauses.is_empty() {

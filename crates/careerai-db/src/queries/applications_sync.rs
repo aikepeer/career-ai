@@ -93,14 +93,15 @@ pub async fn transition_application_and_listing(
     }
 
     // Application state — scoped by id + listing_id.
-    let app_res =
-        sqlx::query("UPDATE applications SET state = ?, updated_at = ? WHERE id = ? AND listing_id = ?")
-            .bind(application_state)
-            .bind(now)
-            .bind(application_id)
-            .bind(listing_id)
-            .execute(&mut *tx)
-            .await?;
+    let app_res = sqlx::query(
+        "UPDATE applications SET state = ?, updated_at = ? WHERE id = ? AND listing_id = ?",
+    )
+    .bind(application_state)
+    .bind(now)
+    .bind(application_id)
+    .bind(listing_id)
+    .execute(&mut *tx)
+    .await?;
     if app_res.rows_affected() == 0 {
         return Err(DbError::NotFound(application_id.to_string()));
     }

@@ -57,9 +57,7 @@ pub async fn rollback_one_with_pool(
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid current state '{from_state}': {e}"))?;
             if !is_backward_transition(from_parsed, parsed) {
-                anyhow::bail!(
-                    "rollback target '{t}' is not backward from state '{from_state}'"
-                );
+                anyhow::bail!("rollback target '{t}' is not backward from state '{from_state}'");
             }
             t.to_string()
         }
@@ -76,7 +74,14 @@ pub async fn rollback_one_with_pool(
 
     if let Ok(Some(app)) = queries::find_latest_application_for_listing(pool, &listing.id).await {
         if to_state == "shortlisted" || to_state == "discovered" {
-            rollback_with_application_delete(pool, &app.id, &listing.id, &from_state, target_listing_state).await?;
+            rollback_with_application_delete(
+                pool,
+                &app.id,
+                &listing.id,
+                &from_state,
+                target_listing_state,
+            )
+            .await?;
         } else {
             queries::transition_application_and_listing(
                 pool,

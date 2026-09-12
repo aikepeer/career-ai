@@ -228,15 +228,10 @@ async fn record_variant_persists_to_application_variants_table() {
     })
     .to_string();
 
-    let row_id = queries::record_variant(
-        &pool,
-        &app.id,
-        label,
-        Some(&metadata),
-        Some("content-v1"),
-    )
-    .await
-    .unwrap();
+    let row_id =
+        queries::record_variant(&pool, &app.id, label, Some(&metadata), Some("content-v1"))
+            .await
+            .unwrap();
 
     assert!(row_id > 0);
 

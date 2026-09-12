@@ -128,7 +128,10 @@ async fn match_all_persists_reasons_for_below_threshold_listing() {
     drop(pool);
 
     let report = pipeline::match_all(root, &cfg, false).await.unwrap();
-    assert_eq!(report.also_filtered, 1, "one listing should be below threshold");
+    assert_eq!(
+        report.also_filtered, 1,
+        "one listing should be below threshold"
+    );
 
     let pool = pipeline::open_pool(root).await.unwrap();
     let reasons = queries::fetch_match_reasons(&pool, &listing_id)

@@ -139,7 +139,11 @@ pub struct MatchBreakdown {
 /// `domain_keywords` are the configured keywords from `cfg.domains` —
 /// any that are absent from the listing are reported as missing.
 #[must_use]
-pub fn match_breakdown(profile_text: &str, listing: &RawListing, domain_keywords: &[String]) -> MatchBreakdown {
+pub fn match_breakdown(
+    profile_text: &str,
+    listing: &RawListing,
+    domain_keywords: &[String],
+) -> MatchBreakdown {
     let profile_tokens = tokenize(profile_text);
     let listing_text = format!("{} {}", listing.title, listing.description);
     let listing_tokens = tokenize(&listing_text);

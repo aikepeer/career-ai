@@ -31,7 +31,18 @@ fn http_get(url: &str) -> String {
 
 fn http_post(url: &str, body: &str) -> String {
     let output = std::process::Command::new("curl")
-        .args(["-sS", "--max-time", "10", "-X", "POST", "-H", "Content-Type: application/json", "-d", body, url])
+        .args([
+            "-sS",
+            "--max-time",
+            "10",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            body,
+            url,
+        ])
         .output()
         .expect("curl failed");
     String::from_utf8_lossy(&output.stdout).to_string()
@@ -65,15 +76,30 @@ async fn seed_rendered_application(pool: &sqlx::SqlitePool) -> String {
     )
     .await
     .unwrap();
-    queries::transition(pool, &listing_id, careerai_core::state::ListingState::Shortlisted, None)
-        .await
-        .unwrap();
-    queries::transition(pool, &listing_id, careerai_core::state::ListingState::Tailored, None)
-        .await
-        .unwrap();
-    queries::transition(pool, &listing_id, careerai_core::state::ListingState::Rendered, None)
-        .await
-        .unwrap();
+    queries::transition(
+        pool,
+        &listing_id,
+        careerai_core::state::ListingState::Shortlisted,
+        None,
+    )
+    .await
+    .unwrap();
+    queries::transition(
+        pool,
+        &listing_id,
+        careerai_core::state::ListingState::Tailored,
+        None,
+    )
+    .await
+    .unwrap();
+    queries::transition(
+        pool,
+        &listing_id,
+        careerai_core::state::ListingState::Rendered,
+        None,
+    )
+    .await
+    .unwrap();
 
     // Create an application in the rendered state.
     let app_id = format!("app_{listing_id}");
