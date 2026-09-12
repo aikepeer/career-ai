@@ -13,34 +13,26 @@ use std::path::{Path, PathBuf};
 ///
 /// Resolution order:
 /// 1. `env_root` (the `CAREERAI_ROOT` override) when non-empty — wins.
-/// 2. `cwd` when it is NOT the user's home dir (dev runs, tests, and any
-///    checkout the operator actually works inside).
-/// 3. When `cwd == home` (runit services and bare shells start in
-///    `$HOME`), the project workspace `~/projects/career-ai` if it has a
-///    `config/` directory — this is the deployed layout for this machine.
-/// 4. Fallback: `cwd` unchanged.
-pub fn resolve_root(cwd: &Path, home: Option<&Path>, env_root: Option<&str>) -> PathBuf {
+/// 2. The process working directory.
+///
+/// The working directory is intentionally used verbatim. Data created by the
+/// application must stay in the directory where the command is run rather
+/// than being redirected into a machine-specific home-directory checkout.
+pub fn resolve_root(cwd: &Path, _home: Option<&Path>, env_root: Option<&str>) -> PathBuf {
     if let Some(root) = env_root {
         if !root.trim().is_empty() {
             return PathBuf::from(root);
         }
     }
-    if let Some(home) = home.filter(|h| !h.as_os_str().is_empty() && cwd == *h) {
-        let project = home.join("projects").join("career-ai");
-        if project.join("config").is_dir() {
-            return project;
-        }
-    }
     cwd.to_path_buf()
 }
 
-/// [`resolve_root`] with the real environment: `CAREERAI_ROOT` env var,
-/// `$HOME`, and the process working directory.
+/// [`resolve_root`] with the real environment: `CAREERAI_ROOT` and the
+/// process working directory.
 pub fn resolve_root_env() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let home = std::env::var_os("HOME").map(PathBuf::from);
     let env_root = std::env::var("CAREERAI_ROOT").ok();
-    resolve_root(&cwd, home.as_deref(), env_root.as_deref())
+    resolve_root(&cwd, None, env_root.as_deref())
 }
 
 /// Return the canonical path to `profile/profile.yaml` for a given root directory.
@@ -56,6 +48,34 @@ pub fn profile_draft_path(root: &Path) -> PathBuf {
 /// Return the canonical path to `profile/` directory for a given root directory.
 pub fn profile_dir(root: &Path) -> PathBuf {
     root.join("profile")
+}
+
+/// Return the user state directory used for logs and runtime metadata.
+///
+/// `XDG_STATE_HOME` is honored when set; otherwise state is stored under
+/// `$HOME/.local/state/career-ai`. If no home directory is available, the
+/// current directory is used as the final fallback.
+pub fn state_dir(home: Option<&Path>, xdg_state_home: Option<&str>, cwd: &Path) -> PathBuf {
+    if let Some(base) = xdg_state_home.filter(|value| !value.trim().is_empty()) {
+        return PathBuf::from(base).join("career-ai");
+    }
+    if let Some(home) = home.filter(|path| !path.as_os_str().is_empty()) {
+        return home.join(".local").join("state").join("career-ai");
+    }
+    cwd.join(".local").join("state").join("career-ai")
+}
+
+/// Return the directory for application logs and metadata.
+pub fn log_dir(home: Option<&Path>, xdg_state_home: Option<&str>, cwd: &Path) -> PathBuf {
+    state_dir(home, xdg_state_home, cwd).join("logs")
+}
+
+/// Resolve the log directory from the real process environment.
+pub fn log_dir_env() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let xdg_state_home = std::env::var("XDG_STATE_HOME").ok();
+    log_dir(home.as_deref(), xdg_state_home.as_deref(), &cwd)
 }
 
 #[cfg(test)]
@@ -82,35 +102,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_env_root_falls_through() {
+    fn empty_env_root_falls_through_to_cwd() {
         let home = tempfile::tempdir().unwrap();
-        let project = project_layout(home.path());
+        project_layout(home.path());
         let cwd = home.path().to_path_buf();
-        assert_eq!(resolve_root(&cwd, Some(home.path()), Some("")), project);
-        assert_eq!(resolve_root(&cwd, Some(home.path()), Some("   ")), project);
+        assert_eq!(resolve_root(&cwd, Some(home.path()), Some("")), cwd);
+        assert_eq!(resolve_root(&cwd, Some(home.path()), Some("   ")), cwd);
     }
 
     #[test]
-    fn cwd_in_home_with_project_dir_uses_project() {
+    fn cwd_in_home_is_used_without_machine_specific_fallback() {
         let home = tempfile::tempdir().unwrap();
-        let project = project_layout(home.path());
-        let cwd = home.path().to_path_buf();
-        assert_eq!(resolve_root(&cwd, Some(home.path()), None), project);
-    }
-
-    #[test]
-    fn cwd_in_home_without_project_dir_keeps_cwd() {
-        let home = tempfile::tempdir().unwrap();
-        let cwd = home.path().to_path_buf();
-        assert_eq!(resolve_root(&cwd, Some(home.path()), None), cwd);
-    }
-
-    #[test]
-    fn project_dir_without_config_marker_is_ignored() {
-        let home = tempfile::tempdir().unwrap();
-        // `projects/career-ai` exists but has no `config/` dir — must not
-        // be treated as the app root.
-        std::fs::create_dir_all(home.path().join("projects").join("career-ai")).unwrap();
+        project_layout(home.path());
         let cwd = home.path().to_path_buf();
         assert_eq!(resolve_root(&cwd, Some(home.path()), None), cwd);
     }
@@ -128,6 +131,34 @@ mod tests {
     fn missing_home_falls_back_to_cwd() {
         let cwd = tempfile::tempdir().unwrap().path().to_path_buf();
         assert_eq!(resolve_root(&cwd, None, None), cwd);
+    }
+
+    #[test]
+    fn state_paths_use_xdg_state_home_or_home_without_project_data() {
+        let home = Path::new("/home/example");
+        let cwd = Path::new("/workspace/career-ai");
+        assert_eq!(
+            state_dir(Some(home), None, cwd),
+            PathBuf::from("/home/example/.local/state/career-ai")
+        );
+        assert_eq!(
+            log_dir(Some(home), None, cwd),
+            PathBuf::from("/home/example/.local/state/career-ai/logs")
+        );
+        assert_eq!(
+            log_dir(Some(home), Some("/var/lib/user-state"), cwd),
+            PathBuf::from("/var/lib/user-state/career-ai/logs")
+        );
+        assert!(!state_dir(Some(home), None, cwd).starts_with(home.join("data")));
+    }
+
+    #[test]
+    fn state_paths_fall_back_to_cwd_without_home() {
+        let cwd = Path::new("/workspace/career-ai");
+        assert_eq!(
+            log_dir(None, None, cwd),
+            PathBuf::from("/workspace/career-ai/.local/state/career-ai/logs")
+        );
     }
 
     #[test]

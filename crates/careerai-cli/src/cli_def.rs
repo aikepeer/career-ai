@@ -257,12 +257,9 @@ pub(crate) fn init_tracing(log_flag: Option<&str>) {
         None => EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
     };
 
-    // Logs live under the resolved career-ai root, never the invocation
-    // CWD — `careerai` can be run from anywhere and runit services do not
-    // share the developer's working directory.
-    let log_dir = careerai_core::paths::resolve_root_env()
-        .join("data")
-        .join("logs");
+    // Logs and runtime metadata belong in the user state directory, separate
+    // from the project data created under the current working directory.
+    let log_dir = careerai_core::paths::log_dir_env();
     let _ = std::fs::create_dir_all(&log_dir);
     let log_file_path = log_dir.join("careerai.log");
 

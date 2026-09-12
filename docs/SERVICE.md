@@ -53,10 +53,12 @@ WantedBy=default.target
 Things to know:
 
 - **`WorkingDirectory` is pinned to your `current_dir()` at install
-  time.** career-ai resolves `config/`, `data/`, and `profile/` from
-  the daemon's cwd; without `WorkingDirectory` set, `systemd --user`
-  would start the daemon in the manager's default directory and read
-  the wrong tree. Run `service install` from the project root.
+  time.** career-ai resolves project files such as `config/`, `data/`, and
+  `profile/` from the daemon's cwd; without `WorkingDirectory` set,
+  `systemd --user` would start the daemon in the manager's default directory
+  and read the wrong tree. Logs and runtime metadata are stored separately
+  under `~/.local/state/career-ai/`. Run `service install` from the project
+  root.
 - **The unit does NOT contain secrets.** If you want to set
   `ANTHROPIC_API_KEY`, `CAREERAI_ROOT`, or any other env var, drop a
   file at `~/.config/careerai/env`:
