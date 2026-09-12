@@ -6,6 +6,7 @@
 //! careerai-match, careerai-tailor, careerai-render) without modifying
 //! their behavior.
 
+pub mod adapters;
 pub mod artifacts;
 pub mod outcomes;
 pub mod preparation;
@@ -77,12 +78,43 @@ pub fn dispatch(job: &QueuedJob) -> WorkerResult {
             let program = preparation::generate_program(&req);
             WorkerResult::ok(serde_json::to_value(&program).unwrap_or_default())
         }
-        JobKind::ProfileImport
-        | JobKind::Discovery
-        | JobKind::Match
-        | JobKind::TailorArtifact
-        | JobKind::RenderArtifact => WorkerResult::fail(format!(
-            "{} jobs require I/O adapters not yet wired in this beta build",
+        JobKind::ProfileImport => {
+            let req: adapters::ProfileImportRequest =
+                match serde_json::from_value(job.payload.clone()) {
+                    Ok(r) => r,
+                    Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
+                };
+            match adapters::import_profile(&req) {
+                Ok(result) => WorkerResult::ok(
+                    serde_json::to_value(&result).unwrap_or_default(),
+                ),
+                Err(e) => WorkerResult::fail(e),
+            }
+        }
+        JobKind::Match => {
+            let req: adapters::MatchRequest =
+                match serde_json::from_value(job.payload.clone()) {
+                    Ok(r) => r,
+                    Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
+                };
+            let results = adapters::match_listings(&req);
+            WorkerResult::ok(serde_json::to_value(&results).unwrap_or_default())
+        }
+        JobKind::TailorArtifact => {
+            let req: adapters::TailorRequest =
+                match serde_json::from_value(job.payload.clone()) {
+                    Ok(r) => r,
+                    Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
+                };
+            match adapters::tailor_resume(&req) {
+                Ok(result) => WorkerResult::ok(
+                    serde_json::to_value(&result).unwrap_or_default(),
+                ),
+                Err(e) => WorkerResult::fail(e),
+            }
+        }
+        JobKind::Discovery | JobKind::RenderArtifact => WorkerResult::fail(format!(
+            "{} jobs require async I/O not available in sync dispatch",
             job_payload_name(&job.kind)
         )),
     }
@@ -131,7 +163,7 @@ mod tests {
     #[test]
     fn dispatch_io_job_fails_gracefully() {
         let job = QueuedJob {
-            kind: JobKind::ProfileImport,
+            kind: JobKind::Discovery,
             payload: serde_json::Value::Null,
             tenant_id: uuid::Uuid::new_v4(),
             actor_id: uuid::Uuid::new_v4(),
@@ -140,7 +172,7 @@ mod tests {
         };
         let result = dispatch(&job);
         assert!(!result.success);
-        assert!(result.error.unwrap_or_default().contains("profile_import"));
+        assert!(result.error.unwrap_or_default().contains("discovery"));
     }
 
     #[test]

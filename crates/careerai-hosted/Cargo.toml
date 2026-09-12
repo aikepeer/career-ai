@@ -14,9 +14,12 @@ careerai-match = { path = "../careerai-match" }
 careerai-tailor = { path = "../careerai-tailor" }
 careerai-render = { path = "../careerai-render" }
 careerai-llm = { path = "../careerai-llm" }
+careerai-sources = { path = "../careerai-sources" }
+careerai-db = { path = "../careerai-db" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 tracing.workspace = true
 tokio.workspace = true
 chrono.workspace = true
