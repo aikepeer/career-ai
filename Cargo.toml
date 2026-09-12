@@ -66,7 +66,7 @@ quick-xml = { version = "0.41", features = ["serialize"] }
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 1
+codegen-units = 4
 strip = "symbols"
 
 # cargo-dist — prebuilt binaries on GitHub Releases. Run `cargo dist init`
