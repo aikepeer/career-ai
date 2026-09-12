@@ -137,6 +137,12 @@ impl SessionManager {
     pub fn touch(record: &mut SessionRecord, now: DateTime<Utc>) {
         record.last_active_at = now;
     }
+
+    /// Hash a raw session token for storage/lookup.
+    /// The raw token is never stored; only its SHA-256 hash.
+    pub fn hash_token(raw_token: &str) -> String {
+        hash_session(raw_token)
+    }
 }
 
 fn hash_session(raw_token: &str) -> String {

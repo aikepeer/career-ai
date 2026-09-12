@@ -4,7 +4,16 @@
 //! extracts tenant context and sets `SET LOCAL` per-request. Problem+json
 //! error responses. Reauth middleware for sensitive endpoints.
 
+pub mod action_handlers;
+pub mod auth_handlers;
+pub mod billing_handlers;
 pub mod error;
+pub mod middleware;
+pub mod resource_handlers;
 pub mod routes;
+pub mod state;
+pub mod workspace_handlers;
 
 pub use error::{ApiError, problem_json};
+pub use middleware::SessionAuth;
+pub use state::AppState;
