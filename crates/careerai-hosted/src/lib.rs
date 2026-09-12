@@ -15,6 +15,7 @@ pub mod auth;
 pub mod classify;
 pub mod db;
 pub mod entitlement;
+pub mod export;
 pub mod jobs;
 pub mod workers;
 

@@ -245,4 +245,26 @@ mod tests {
         let (raw, record) = MagicLinkToken::generate("a@b.com", ctx, "tx1", None);
         assert!(!record.token_hash.contains(&raw));
     }
+
+    #[test]
+    fn forwarded_link_rejected_on_different_device() {
+        let ctx = DeviceContext::from_request("Firefox/121", "192.168.1.50");
+        let (raw, record) = MagicLinkToken::generate("victim@b.com", ctx, "tx1", None);
+        // Attacker forwards link to victim's different device
+        let attacker_ctx = DeviceContext::from_request("Chrome/120", "10.0.0.99");
+        let err = record.verify(&raw, &attacker_ctx, Utc::now()).unwrap_err();
+        assert!(matches!(err, MagicLinkError::ContextMismatch));
+    }
+
+    #[test]
+    fn replayed_link_after_new_login_invalidated() {
+        let ctx = test_ctx();
+        let (_, record) = MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
+        // User requests a new login — tx1 is invalidated by tx2
+        assert!(record.is_invalidated_by("tx2"));
+        // Even if the raw token is correct, a new login transaction
+        // supersedes the old one
+        let (_, record2) = MagicLinkToken::generate("a@b.com", ctx, "tx2", None);
+        assert_ne!(record.login_tx_id, record2.login_tx_id);
+    }
 }

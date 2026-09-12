@@ -217,4 +217,26 @@ mod tests {
         let (codes, _) = RecoveryCodeSet::generate();
         assert!(codes[0].contains('-'));
     }
+
+    #[test]
+    fn rotation_invalidates_prior_set() {
+        // Generate first set
+        let (codes1, mut set1) = RecoveryCodeSet::generate();
+        // Verify a code from set 1 works
+        set1.verify(&codes1[0]).unwrap();
+
+        // Regenerate: new set replaces old
+        let (codes2, mut set2) = RecoveryCodeSet::generate();
+        set1.invalidate();
+
+        // Set 1 codes are now fully rejected (even unused ones)
+        let err = set1.verify(&codes1[1]).unwrap_err();
+        assert!(matches!(err, RecoveryCodeError::Invalidated));
+
+        // Set 2 codes work
+        set2.verify(&codes2[0]).unwrap();
+
+        // Sets have different IDs
+        assert_ne!(set1.set_id, set2.set_id);
+    }
 }

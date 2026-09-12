@@ -43,6 +43,8 @@ constant_time_eq = "0.3"
 rand = "0.8"
 # Unicode NFC normalization for canonical JSON
 unicode-normalization = "0.1"
+# AES-256-GCM for encrypted exports
+aes-gcm = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true
