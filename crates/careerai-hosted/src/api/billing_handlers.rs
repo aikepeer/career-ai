@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use crate::api::error::ApiError;
 use crate::api::middleware::SessionAuth;
 use crate::api::state::AppState;
-use crate::entitlement::billing::{process_event, verify_signature, BillingEvent, BillingEventStatus};
+use crate::entitlement::billing::{
+    process_event, verify_signature, BillingEvent, BillingEventStatus,
+};
 
 // ── Checkout ────────────────────────────────────────────────────────
 
@@ -70,8 +72,7 @@ pub async fn billing_webhook(
     };
 
     // Verify signature
-    verify_signature(&body, signature, &secret)
-        .map_err(|_| ApiError::unauthorized())?;
+    verify_signature(&body, signature, &secret).map_err(|_| ApiError::unauthorized())?;
 
     // Parse the event
     let payload: serde_json::Value = serde_json::from_str(&body)
@@ -130,8 +131,7 @@ pub async fn billing_webhook(
         raw_payload: body,
     };
 
-    process_event(&mut event, 0)
-        .map_err(|e| ApiError::bad_request(&format!("processing: {e}")))?;
+    process_event(&mut event, 0).map_err(|e| ApiError::bad_request(&format!("processing: {e}")))?;
 
     Ok(StatusCode::OK)
 }

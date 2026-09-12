@@ -58,7 +58,9 @@ pub struct EntitlementDecision {
 impl EntitlementDecision {
     /// Available units = limit - used - reserved.
     pub fn available(&self) -> u64 {
-        self.limit.saturating_sub(self.used).saturating_sub(self.reserved)
+        self.limit
+            .saturating_sub(self.used)
+            .saturating_sub(self.reserved)
     }
 
     /// Check if the entitlement is active and can admit a request.

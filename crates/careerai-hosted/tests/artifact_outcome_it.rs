@@ -9,16 +9,13 @@
 mod fixtures;
 use fixtures::*;
 
-use careerai_hosted::workers::adapters::{
-    tailor_resume, TailorRequest,
-};
+use careerai_hosted::workers::adapters::{tailor_resume, TailorRequest};
 use careerai_hosted::workers::artifacts::{
-    content_digest, validate_diff, transition_status,
-    ArtifactKind, ArtifactStatus, ReviewArtifact,
+    content_digest, transition_status, validate_diff, ArtifactKind, ArtifactStatus, ReviewArtifact,
 };
 use careerai_hosted::workers::outcomes::{
-    validate_outcome, overdue_follow_ups, FollowUpReminder, ManualOutcome,
-    OutcomeStatus, OutcomeType,
+    overdue_follow_ups, validate_outcome, FollowUpReminder, ManualOutcome, OutcomeStatus,
+    OutcomeType,
 };
 
 use chrono::{Duration, Utc};
@@ -116,7 +113,10 @@ fn artifact_cover_letter_lifecycle() {
     };
 
     assert_eq!(cover_artifact.kind, ArtifactKind::CoverLetter);
-    assert!(cover_artifact.diff_json.is_none(), "cover letter has no diff");
+    assert!(
+        cover_artifact.diff_json.is_none(),
+        "cover letter has no diff"
+    );
 
     // Preview → Rejected
     let rejected = transition_status(cover_artifact.status, ArtifactStatus::Rejected)
@@ -302,28 +302,33 @@ async fn render_produces_docx_and_pdf() {
         listing_company: "Google".to_string(),
     };
 
-    let rendered = careerai_hosted::workers::adapters::render_artifacts(
-        &render_req,
-        &artifacts_dir,
-    )
-    .await;
+    let rendered =
+        careerai_hosted::workers::adapters::render_artifacts(&render_req, &artifacts_dir).await;
 
     // Rendering may fail if pandoc PDF engine is missing, but DOCX should work
     match rendered {
         Ok(rendered) => {
             // Verify markdown files exist
-            assert!(std::path::Path::new(&rendered.resume_md_path).exists(),
-                "resume markdown should exist");
-            assert!(std::path::Path::new(&rendered.cover_md_path).exists(),
-                "cover letter markdown should exist");
+            assert!(
+                std::path::Path::new(&rendered.resume_md_path).exists(),
+                "resume markdown should exist"
+            );
+            assert!(
+                std::path::Path::new(&rendered.cover_md_path).exists(),
+                "cover letter markdown should exist"
+            );
 
             // Verify content digest is non-empty
-            assert!(!rendered.content_digest.is_empty(),
-                "content digest should be computed");
+            assert!(
+                !rendered.content_digest.is_empty(),
+                "content digest should be computed"
+            );
 
             // Verify DOCX exists (pandoc should produce this)
-            assert!(std::path::Path::new(&rendered.resume_docx_path).exists(),
-                "resume DOCX should exist");
+            assert!(
+                std::path::Path::new(&rendered.resume_docx_path).exists(),
+                "resume DOCX should exist"
+            );
         }
         Err(e) => {
             // If rendering fails, it should be a pandoc/dependency issue, not a code bug

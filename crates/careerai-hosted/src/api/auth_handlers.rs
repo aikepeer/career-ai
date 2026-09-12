@@ -111,11 +111,7 @@ async fn create_user_session(
     let ws_id = workspace_id.unwrap_or_else(|| ws.id.clone());
     let membership = WorkspaceMembership::owner(&ws_id, &user_id);
 
-    state
-        .workspaces
-        .write()
-        .await
-        .insert(ws_id.clone(), ws);
+    state.workspaces.write().await.insert(ws_id.clone(), ws);
     state
         .memberships
         .write()
@@ -131,8 +127,7 @@ async fn create_user_session(
         .insert(email.to_string(), code_set);
 
     // Create session
-    let (raw_token, record) =
-        SessionManager::create(&tenant_id, &user_id, &ws_id, "owner");
+    let (raw_token, record) = SessionManager::create(&tenant_id, &user_id, &ws_id, "owner");
     state
         .sessions
         .write()
@@ -214,15 +209,10 @@ pub async fn login_callback(
     if !totp_enrolled {
         // First login: enroll TOTP, return secret (no session yet)
         let (b32_secret, totp) = Totp::generate();
-        state
-            .totp_secrets
-            .write()
-            .await
-            .insert(email.clone(), totp);
+        state.totp_secrets.write().await.insert(email.clone(), totp);
 
-        let qr_uri = format!(
-            "otpauth://totp/career-ai:{email}?secret={b32_secret}&issuer=career-ai",
-        );
+        let qr_uri =
+            format!("otpauth://totp/career-ai:{email}?secret={b32_secret}&issuer=career-ai");
 
         return Ok(Json(LoginCallbackResponse::TotpEnrollment {
             base32_secret: b32_secret,

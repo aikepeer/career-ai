@@ -11,19 +11,16 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Serialize;
 
+use crate::action::ActionState;
 use crate::api::error::ApiError;
 use crate::api::middleware::SessionAuth;
 use crate::api::state::AppState;
 use crate::auth::roles::{Permission, Role};
 use crate::auth::session::SessionManager;
-use crate::action::ActionState;
 use crate::export::{check_reauth, encrypt_export, ExportBundle};
 
 /// Check reauth + role permission for a sensitive operation.
-fn authorize_sensitive(
-    session: &SessionAuth,
-    permission: Permission,
-) -> Result<Role, ApiError> {
+fn authorize_sensitive(session: &SessionAuth, permission: Permission) -> Result<Role, ApiError> {
     let role = match session.role_str() {
         "owner" => Role::Owner,
         "support_readonly" => Role::SupportReadonly,
@@ -123,8 +120,7 @@ pub async fn create_export(
     authorize_sensitive(&session, Permission::ExportDelete)?;
 
     // Reauth check via export module
-    check_reauth(&session.record, chrono::Utc::now())
-        .map_err(|_| ApiError::reauth_required())?;
+    check_reauth(&session.record, chrono::Utc::now()).map_err(|_| ApiError::reauth_required())?;
 
     // Export tenant data (beta: export session metadata)
     let export_data = serde_json::json!({

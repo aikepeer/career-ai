@@ -97,12 +97,7 @@ impl AuditEvent {
         transaction_id: &str,
     ) -> Self {
         let seq = prev.sequence + 1;
-        let hash = Self::compute_hash(
-            &prev.shard_id,
-            seq,
-            &prev.event_hash,
-            &canonical_event,
-        );
+        let hash = Self::compute_hash(&prev.shard_id, seq, &prev.event_hash, &canonical_event);
         Self {
             shard_id: prev.shard_id.clone(),
             sequence: seq,
@@ -297,12 +292,8 @@ mod tests {
 
     #[test]
     fn merkle_root_changes_with_different_leaves() {
-        let leaves1 = vec![
-            ("listing".to_string(), "l1".to_string(), b"data1".to_vec()),
-        ];
-        let leaves2 = vec![
-            ("listing".to_string(), "l1".to_string(), b"data2".to_vec()),
-        ];
+        let leaves1 = vec![("listing".to_string(), "l1".to_string(), b"data1".to_vec())];
+        let leaves2 = vec![("listing".to_string(), "l1".to_string(), b"data2".to_vec())];
         assert_ne!(merkle_root(&leaves1), merkle_root(&leaves2));
     }
 

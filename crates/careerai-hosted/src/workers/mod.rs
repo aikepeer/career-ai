@@ -85,31 +85,25 @@ pub fn dispatch(job: &QueuedJob) -> WorkerResult {
                     Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
                 };
             match adapters::import_profile(&req) {
-                Ok(result) => WorkerResult::ok(
-                    serde_json::to_value(&result).unwrap_or_default(),
-                ),
+                Ok(result) => WorkerResult::ok(serde_json::to_value(&result).unwrap_or_default()),
                 Err(e) => WorkerResult::fail(e),
             }
         }
         JobKind::Match => {
-            let req: adapters::MatchRequest =
-                match serde_json::from_value(job.payload.clone()) {
-                    Ok(r) => r,
-                    Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
-                };
+            let req: adapters::MatchRequest = match serde_json::from_value(job.payload.clone()) {
+                Ok(r) => r,
+                Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
+            };
             let results = adapters::match_listings(&req);
             WorkerResult::ok(serde_json::to_value(&results).unwrap_or_default())
         }
         JobKind::TailorArtifact => {
-            let req: adapters::TailorRequest =
-                match serde_json::from_value(job.payload.clone()) {
-                    Ok(r) => r,
-                    Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
-                };
+            let req: adapters::TailorRequest = match serde_json::from_value(job.payload.clone()) {
+                Ok(r) => r,
+                Err(e) => return WorkerResult::fail(format!("invalid payload: {e}")),
+            };
             match adapters::tailor_resume(&req) {
-                Ok(result) => WorkerResult::ok(
-                    serde_json::to_value(&result).unwrap_or_default(),
-                ),
+                Ok(result) => WorkerResult::ok(serde_json::to_value(&result).unwrap_or_default()),
                 Err(e) => WorkerResult::fail(e),
             }
         }

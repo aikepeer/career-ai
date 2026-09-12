@@ -91,8 +91,8 @@ fn generate_id() -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use super::*;
     use super::super::roles::Role;
+    use super::*;
 
     #[test]
     fn new_workspace_has_unique_id() {

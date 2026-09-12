@@ -112,12 +112,7 @@ pub struct ExternalAction {
 
 impl ExternalAction {
     /// Create a new external action in the `created` state.
-    pub fn new(
-        tenant_id: &str,
-        actor_id: &str,
-        action_type: &str,
-        payload_digest: &str,
-    ) -> Self {
+    pub fn new(tenant_id: &str, actor_id: &str, action_type: &str, payload_digest: &str) -> Self {
         let now = Utc::now();
         let action_id = generate_id();
         Self {
@@ -149,8 +144,7 @@ impl ExternalAction {
 
     /// Check if the approval has expired.
     pub fn is_approval_expired(&self, now: DateTime<Utc>) -> bool {
-        self.approval_expiry
-            .map_or(true, |exp| now > exp)
+        self.approval_expiry.map_or(true, |exp| now > exp)
     }
 
     /// Lease the action for execution.
@@ -192,19 +186,31 @@ impl ExternalAction {
     }
 
     /// Reconciliation proved no side effect occurred.
-    pub fn confirm_no_side_effect(&mut self, worker: &str, at: DateTime<Utc>) -> Result<(), TransitionError> {
+    pub fn confirm_no_side_effect(
+        &mut self,
+        worker: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), TransitionError> {
         self.transition_to(ActionState::NoSideEffectConfirmed, worker, at)?;
         self.fencing_token = None;
         Ok(())
     }
 
     /// Reconciliation proved a side effect did occur.
-    pub fn confirm_side_effect(&mut self, worker: &str, at: DateTime<Utc>) -> Result<(), TransitionError> {
+    pub fn confirm_side_effect(
+        &mut self,
+        worker: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), TransitionError> {
         self.transition_to(ActionState::SideEffectConfirmed, worker, at)
     }
 
     /// Reconciliation failed to determine outcome.
-    pub fn permanently_fail(&mut self, worker: &str, at: DateTime<Utc>) -> Result<(), TransitionError> {
+    pub fn permanently_fail(
+        &mut self,
+        worker: &str,
+        at: DateTime<Utc>,
+    ) -> Result<(), TransitionError> {
         self.transition_to(ActionState::PermanentlyFailed, worker, at)
     }
 

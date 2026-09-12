@@ -6,4 +6,4 @@
 
 pub mod queue;
 
-pub use queue::{JobState, JobTransitionError, LeaseInfo, JobConfig};
+pub use queue::{JobConfig, JobState, JobTransitionError, LeaseInfo};

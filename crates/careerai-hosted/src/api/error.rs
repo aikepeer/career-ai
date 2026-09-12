@@ -105,11 +105,7 @@ impl IntoResponse for ApiError {
 }
 
 /// Create a problem+json response directly.
-pub fn problem_json(
-    status: StatusCode,
-    title: &str,
-    detail: &str,
-) -> Response {
+pub fn problem_json(status: StatusCode, title: &str, detail: &str) -> Response {
     let problem = Problem {
         kind: "about:blank".into(),
         title: title.to_string(),

@@ -88,9 +88,7 @@ pub struct LeaseInfo {
 /// Compute the exponential backoff delay for a given attempt number.
 /// attempt 0 → 2s, 1 → 4s, 2 → 8s, 3 → 16s, 4 → 32s, capped at 300s.
 pub fn backoff_delay(attempt: u32) -> Duration {
-    let secs = BACKOFF_BASE_SECS
-        .pow(attempt + 1)
-        .min(BACKOFF_MAX_SECS);
+    let secs = BACKOFF_BASE_SECS.pow(attempt + 1).min(BACKOFF_MAX_SECS);
     Duration::seconds(secs)
 }
 

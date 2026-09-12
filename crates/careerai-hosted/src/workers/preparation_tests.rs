@@ -43,10 +43,7 @@ fn fit_map_cites_listing_evidence() {
     let fit = &program.sections[0];
     assert_eq!(fit.status, SectionStatus::Available);
     assert_eq!(fit.tasks.len(), 1);
-    assert_eq!(
-        fit.tasks[0].evidence_ref.as_deref(),
-        Some("lst-001")
-    );
+    assert_eq!(fit.tasks[0].evidence_ref.as_deref(), Some("lst-001"));
     assert!(fit.tasks[0].description.contains("Matched: Python"));
     assert!(fit.tasks[0].description.contains("Gaps: PyTorch"));
 }
@@ -84,12 +81,14 @@ fn interview_questions_include_known_and_technical() {
         .iter()
         .find(|s| s.title == "Interview Questions")
         .unwrap();
-    assert!(iq.tasks.iter().any(|t| t
-        .title
-        .contains("challenging project")));
-    assert!(iq.tasks.iter().any(|t| t
-        .title
-        .contains("Technical question on Python")));
+    assert!(iq
+        .tasks
+        .iter()
+        .any(|t| t.title.contains("challenging project")));
+    assert!(iq
+        .tasks
+        .iter()
+        .any(|t| t.title.contains("Technical question on Python")));
 }
 
 #[test]

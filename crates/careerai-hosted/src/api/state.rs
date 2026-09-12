@@ -17,6 +17,8 @@ use crate::auth::totp::Totp;
 use crate::auth::workspace::{Workspace, WorkspaceMembership};
 use crate::entitlement::admission::EntitlementDecision;
 use crate::entitlement::billing::WebhookDedup;
+use crate::ops::metrics::MetricsCollector;
+use crate::ops::object_store::ArtifactStore;
 
 /// Shared state accessible to all Axum handlers.
 ///
@@ -49,6 +51,10 @@ pub struct AppState {
     pub webhook_secrets: RwLock<HashMap<String, Vec<u8>>>,
     /// Master key for export encryption (32 bytes).
     pub master_key: [u8; 32],
+    /// Beta exit metrics collector.
+    pub metrics: Arc<MetricsCollector>,
+    /// Artifact object store with capability-based access.
+    pub artifacts: Arc<ArtifactStore>,
 }
 
 impl AppState {
@@ -68,6 +74,8 @@ impl AppState {
             webhook_dedup: RwLock::new(WebhookDedup::new()),
             webhook_secrets: RwLock::new(HashMap::new()),
             master_key,
+            metrics: Arc::new(MetricsCollector::new()),
+            artifacts: ArtifactStore::arc(b"artifact-cap-key-32-bytes-ok!".to_vec()),
         }
     }
 
@@ -86,8 +94,8 @@ impl AppState {
 
     /// Seed an active entitlement for a tenant.
     pub async fn seed_entitlement(&self, tenant_id: &str, limit: u64) {
-        use chrono::Utc;
         use crate::entitlement::admission::EntitlementStatus;
+        use chrono::Utc;
         self.entitlements.write().await.insert(
             tenant_id.to_string(),
             EntitlementDecision {

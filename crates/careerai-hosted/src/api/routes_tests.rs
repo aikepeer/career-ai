@@ -68,7 +68,12 @@ async fn health_returns_200() {
     let state = AppState::arc([0u8; 32]);
     let app = router(state);
     let resp = app
-        .oneshot(Request::builder().uri("/v1/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/v1/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -79,7 +84,12 @@ async fn unknown_route_returns_404() {
     let state = AppState::arc([0u8; 32]);
     let app = router(state);
     let resp = app
-        .oneshot(Request::builder().uri("/v1/nonexistent").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/v1/nonexistent")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -92,7 +102,11 @@ async fn start_login_returns_magic_link() {
     let state = AppState::arc([0u8; 32]);
     let app = router(state);
     let resp = app
-        .oneshot(json_request("POST", "/v1/auth/start", serde_json::json!({"email": "test@example.com"})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/start",
+            serde_json::json!({"email": "test@example.com"}),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -108,14 +122,22 @@ async fn login_callback_enrolls_totp_on_first_login() {
 
     let resp = app
         .clone()
-        .oneshot(json_request("POST", "/v1/auth/start", serde_json::json!({"email": "user@example.com"})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/start",
+            serde_json::json!({"email": "user@example.com"}),
+        ))
         .await
         .unwrap();
     let body = body_to_json(resp.into_body()).await;
     let magic_token = body["magic_link_token"].as_str().unwrap().to_string();
 
     let resp = app
-        .oneshot(json_request("POST", "/v1/auth/callback", serde_json::json!({"token": magic_token})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/callback",
+            serde_json::json!({"token": magic_token}),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -132,7 +154,11 @@ async fn full_auth_flow_creates_session() {
     // 1. Start login
     let resp = app
         .clone()
-        .oneshot(json_request("POST", "/v1/auth/start", serde_json::json!({"email": "full@example.com"})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/start",
+            serde_json::json!({"email": "full@example.com"}),
+        ))
         .await
         .unwrap();
     let body = body_to_json(resp.into_body()).await;
@@ -141,7 +167,11 @@ async fn full_auth_flow_creates_session() {
     // 2. Enroll TOTP
     let resp = app
         .clone()
-        .oneshot(json_request("POST", "/v1/auth/callback", serde_json::json!({"token": magic1})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/callback",
+            serde_json::json!({"token": magic1}),
+        ))
         .await
         .unwrap();
     let body = body_to_json(resp.into_body()).await;
@@ -150,7 +180,11 @@ async fn full_auth_flow_creates_session() {
     // 3. Start login again (new magic link)
     let resp = app
         .clone()
-        .oneshot(json_request("POST", "/v1/auth/start", serde_json::json!({"email": "full@example.com"})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/start",
+            serde_json::json!({"email": "full@example.com"}),
+        ))
         .await
         .unwrap();
     let body = body_to_json(resp.into_body()).await;
@@ -160,7 +194,11 @@ async fn full_auth_flow_creates_session() {
     let totp = Totp::from_base32(&b32_secret).unwrap();
     let code = totp.now();
     let resp = app
-        .oneshot(json_request("POST", "/v1/auth/callback", serde_json::json!({"token": magic2, "totp_code": code})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/callback",
+            serde_json::json!({"token": magic2, "totp_code": code}),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -176,7 +214,11 @@ async fn login_callback_rejects_bad_token() {
     let state = AppState::arc([0u8; 32]);
     let app = router(state);
     let resp = app
-        .oneshot(json_request("POST", "/v1/auth/callback", serde_json::json!({"token": "nonexistent"})))
+        .oneshot(json_request(
+            "POST",
+            "/v1/auth/callback",
+            serde_json::json!({"token": "nonexistent"}),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -189,7 +231,12 @@ async fn protected_endpoint_without_session_returns_401() {
     let state = AppState::arc([0u8; 32]);
     let app = router(state);
     let resp = app
-        .oneshot(Request::builder().uri("/v1/workspaces").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/v1/workspaces")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -214,7 +261,12 @@ async fn billing_checkout_returns_url() {
     let (state, token) = state_with_session().await;
     let app = router(state);
     let resp = app
-        .oneshot(authed_request("POST", "/v1/billing/checkout", &token, Some(serde_json::json!({"plan_id": "pro"}))))
+        .oneshot(authed_request(
+            "POST",
+            "/v1/billing/checkout",
+            &token,
+            Some(serde_json::json!({"plan_id": "pro"})),
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -328,7 +380,9 @@ async fn webhook_accepts_valid_signature() {
 #[tokio::test]
 async fn webhook_rejects_bad_signature() {
     let state = AppState::arc([0u8; 32]);
-    state.set_webhook_secret("stripe", b"whsec_test".to_vec()).await;
+    state
+        .set_webhook_secret("stripe", b"whsec_test".to_vec())
+        .await;
 
     let app = router(state);
     let resp = app

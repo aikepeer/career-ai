@@ -127,8 +127,15 @@ fn generate_fit_map(req: &PreparationRequest) -> PreparationSection {
         } else {
             format!(
                 "Matched: {}. Gaps: {}.",
-                matched.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
-                gaps.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                matched
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                gaps.iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         };
 
@@ -251,10 +258,7 @@ fn generate_recruiter_questions(req: &PreparationRequest) -> PreparationSection 
     for benefit in &company.benefits {
         tasks.push(PreparationTask {
             title: format!("Ask about: {benefit}"),
-            description: format!(
-                "Benefit to discuss with recruiter at {}.",
-                company.name
-            ),
+            description: format!("Benefit to discuss with recruiter at {}.", company.name),
             evidence_ref: None,
             task_type: TaskType::RecruiterQuestion,
         });

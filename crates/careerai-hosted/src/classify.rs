@@ -24,7 +24,10 @@ impl DataClass {
     }
 
     pub fn requires_proxy(self) -> bool {
-        matches!(self, DataClass::C1 | DataClass::C2 | DataClass::C3 | DataClass::C4)
+        matches!(
+            self,
+            DataClass::C1 | DataClass::C2 | DataClass::C3 | DataClass::C4
+        )
     }
 }
 

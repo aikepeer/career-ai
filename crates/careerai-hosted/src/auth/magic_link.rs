@@ -151,7 +151,8 @@ fn hash_token(raw_token: &str) -> String {
 /// Generate an HMAC-SHA256 signature for login transaction IDs.
 /// Used to ensure transaction IDs are tamper-resistant.
 pub fn sign_login_tx(tx_id: &str, secret: &[u8]) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret).unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
+    let mut mac = HmacSha256::new_from_slice(secret)
+        .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
     mac.update(tx_id.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -168,10 +169,8 @@ mod tests {
     #[test]
     fn token_generation_produces_different_tokens() {
         let ctx = test_ctx();
-        let (raw1, record1) =
-            MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
-        let (raw2, record2) =
-            MagicLinkToken::generate("a@b.com", ctx.clone(), "tx2", None);
+        let (raw1, record1) = MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
+        let (raw2, record2) = MagicLinkToken::generate("a@b.com", ctx.clone(), "tx2", None);
         assert_ne!(raw1, raw2);
         assert_ne!(record1.token_hash, record2.token_hash);
     }
@@ -179,8 +178,7 @@ mod tests {
     #[test]
     fn verify_accepts_correct_token() {
         let ctx = test_ctx();
-        let (raw, record) =
-            MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
+        let (raw, record) = MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
         record.verify(&raw, &ctx, Utc::now()).unwrap();
     }
 
@@ -205,8 +203,7 @@ mod tests {
     #[test]
     fn verify_rejects_used_token() {
         let ctx = test_ctx();
-        let (raw, mut record) =
-            MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
+        let (raw, mut record) = MagicLinkToken::generate("a@b.com", ctx.clone(), "tx1", None);
         record.mark_used();
         let err = record.verify(&raw, &ctx, Utc::now()).unwrap_err();
         assert!(matches!(err, MagicLinkError::AlreadyUsed));

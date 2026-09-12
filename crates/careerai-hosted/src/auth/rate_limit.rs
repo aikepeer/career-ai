@@ -84,7 +84,8 @@ impl RateLimiter {
     /// Remove expired entries to prevent unbounded memory growth.
     pub fn evict_expired(&mut self, max_age: Duration) {
         let now = Instant::now();
-        self.buckets.retain(|_, (_, start)| now.duration_since(*start) < max_age);
+        self.buckets
+            .retain(|_, (_, start)| now.duration_since(*start) < max_age);
     }
 }
 
@@ -107,7 +108,10 @@ mod tests {
             window: Duration::from_secs(60),
         };
         for _ in 0..3 {
-            assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Allow);
+            assert_eq!(
+                limiter.check("ip1:login", &config),
+                RateLimitDecision::Allow
+            );
         }
     }
 
@@ -118,8 +122,14 @@ mod tests {
             max_requests: 2,
             window: Duration::from_secs(60),
         };
-        assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Allow);
-        assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Allow);
+        assert_eq!(
+            limiter.check("ip1:login", &config),
+            RateLimitDecision::Allow
+        );
+        assert_eq!(
+            limiter.check("ip1:login", &config),
+            RateLimitDecision::Allow
+        );
         assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Deny);
     }
 
@@ -130,8 +140,14 @@ mod tests {
             max_requests: 1,
             window: Duration::from_secs(60),
         };
-        assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Allow);
-        assert_eq!(limiter.check("ip2:login", &config), RateLimitDecision::Allow);
+        assert_eq!(
+            limiter.check("ip1:login", &config),
+            RateLimitDecision::Allow
+        );
+        assert_eq!(
+            limiter.check("ip2:login", &config),
+            RateLimitDecision::Allow
+        );
     }
 
     #[test]
@@ -141,10 +157,16 @@ mod tests {
             max_requests: 1,
             window: Duration::from_millis(50),
         };
-        assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Allow);
+        assert_eq!(
+            limiter.check("ip1:login", &config),
+            RateLimitDecision::Allow
+        );
         assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Deny);
         std::thread::sleep(Duration::from_millis(60));
-        assert_eq!(limiter.check("ip1:login", &config), RateLimitDecision::Allow);
+        assert_eq!(
+            limiter.check("ip1:login", &config),
+            RateLimitDecision::Allow
+        );
     }
 
     #[test]

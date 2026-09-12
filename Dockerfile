@@ -1,43 +1,50 @@
-# syntax=docker/dockerfile:1
+# Multi-stage Dockerfile for careerai-hosted beta API.
+#
+# Build stage: compile the hosted API binary in release mode.
+# Runtime stage: minimal image with the binary + pandoc for rendering.
 
-# ---- builder: compile the workspace in release on Rust 1.78 (MSRV) ----
-FROM rust:1.78-bookworm AS builder
-WORKDIR /app
+FROM rust:1-bookworm AS builder
 
+WORKDIR /build
+
+# Install mold linker for faster linking
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
+    mold \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace
 COPY . .
 
-# The repo pins `channel = "stable"` in rust-toolchain.toml, which would
-# make rustup fetch latest stable and bypass this image's 1.78 toolchain.
-# Drop it so the build uses the pinned 1.78.0 (MSRV) from rust:1.78.
-RUN rm -f rust-toolchain.toml
+# Build the hosted API server binary
+RUN SCCACHE_DIRECT=true cargo build --release -p careerai-hosted --bin careerai-hosted || \
+    cargo build --release -p careerai-hosted
 
-RUN cargo build --release --workspace
+# ── Runtime stage ────────────────────────────────────────────────────
 
-# ---- runtime: slim Debian + pandoc + weasyprint for rendering -------
 FROM debian:bookworm-slim AS runtime
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        pandoc \
-        weasyprint \
-        fonts-dejavu-core \
- && rm -rf /var/lib/apt/lists/*
+# Install pandoc for resume rendering + ca-certificates for TLS
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pandoc \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY --from=builder /app/target/release/careerai /usr/local/bin/careerai
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh && mkdir -p /data
+# Copy the built binary
+COPY --from=builder /build/target/release/careerai-hosted /usr/local/bin/careerai-hosted
 
-# All app state (SQLite DB, LLM cache, logs, render artifacts, config,
-# profile) lives under CAREERAI_ROOT. Bind-mount /data from the host.
-ENV CAREERAI_ROOT=/data
-# The dashboard binds to loopback only by default. In a container the
-# published port must bind 0.0.0.0 to be reachable from the host, so
-# allow the non-loopback bind. Set CAREERAI_DASHBOARD_TOKEN to require
-# a bearer token on every request before exposing it to a network.
-ENV CAREERAI_DASHBOARD_ALLOW_NON_LOOPBACK=1
+# Non-root user
+RUN useradd --create-home --shell /bin/bash careerai
+USER careerai
+
+ENV RUST_LOG=info
+ENV CAREERAI_HOSTED_BIND=0.0.0.0:3000
 
 EXPOSE 3000
-ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["daemon"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -sf http://localhost:3000/v1/health || exit 1
+
+ENTRYPOINT ["careerai-hosted"]

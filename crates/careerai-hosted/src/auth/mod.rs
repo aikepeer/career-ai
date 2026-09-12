@@ -16,10 +16,10 @@ pub mod totp;
 pub mod workspace;
 
 // Re-export key types
-pub use magic_link::{MagicLinkToken, MagicLinkError};
-pub use rate_limit::{RateLimiter, RateLimitDecision};
-pub use recovery::{RecoveryCodeSet, RecoveryCodeError};
-pub use roles::{Role, Permission, AuthzDecision};
-pub use session::{SessionManager, SessionError};
+pub use magic_link::{MagicLinkError, MagicLinkToken};
+pub use rate_limit::{RateLimitDecision, RateLimiter};
+pub use recovery::{RecoveryCodeError, RecoveryCodeSet};
+pub use roles::{AuthzDecision, Permission, Role};
+pub use session::{SessionError, SessionManager};
 pub use totp::{Totp, TotpError};
-pub use workspace::{Workspace, WorkspaceMembership, WorkspaceError};
+pub use workspace::{Workspace, WorkspaceError, WorkspaceMembership};

@@ -47,7 +47,8 @@ pub fn canonical_bytes(value: &C14nValue) -> Vec<u8> {
 
 /// Serialize a C14nValue to a canonical JSON string.
 pub fn canonical_json(value: &C14nValue) -> String {
-    String::from_utf8(canonical_bytes(value)).unwrap_or_else(|_| unreachable!("canonical JSON is valid UTF-8"))
+    String::from_utf8(canonical_bytes(value))
+        .unwrap_or_else(|_| unreachable!("canonical JSON is valid UTF-8"))
 }
 
 /// Compute the SHA-256 digest of a canonical payload.
@@ -110,9 +111,9 @@ fn serialize_string(s: &str, out: &mut Vec<u8>) {
             }
             c => {
                 // Encode as UTF-8
-        let mut buf = [0u8; 4];
-        let s = c.encode_utf8(&mut buf);
-        out.extend_from_slice(s.as_bytes());
+                let mut buf = [0u8; 4];
+                let s = c.encode_utf8(&mut buf);
+                out.extend_from_slice(s.as_bytes());
             }
         }
     }
@@ -162,11 +163,10 @@ mod tests {
 
     #[test]
     fn canonical_no_whitespace() {
-        let val = C14nValue::Object(vec![
-            ("a".into(), C14nValue::Object(vec![
-                ("b".into(), C14nValue::Str("c".into())),
-            ])),
-        ]);
+        let val = C14nValue::Object(vec![(
+            "a".into(),
+            C14nValue::Object(vec![("b".into(), C14nValue::Str("c".into()))]),
+        )]);
         let json = canonical_json(&val);
         assert_eq!(json, r#"{"a":{"b":"c"}}"#);
         assert!(!json.contains(' '));
@@ -211,12 +211,8 @@ mod tests {
 
     #[test]
     fn payload_digest_changes_with_different_values() {
-        let val1 = C14nValue::Object(vec![
-            ("a".into(), C14nValue::Str("1".into())),
-        ]);
-        let val2 = C14nValue::Object(vec![
-            ("a".into(), C14nValue::Str("2".into())),
-        ]);
+        let val1 = C14nValue::Object(vec![("a".into(), C14nValue::Str("1".into()))]);
+        let val2 = C14nValue::Object(vec![("a".into(), C14nValue::Str("2".into()))]);
         assert_ne!(payload_digest(&val1), payload_digest(&val2));
     }
 

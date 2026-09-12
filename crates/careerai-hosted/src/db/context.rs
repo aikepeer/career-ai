@@ -78,7 +78,10 @@ impl TenantContext {
     /// These are executed at the start of every transaction.
     pub fn to_sql(&self) -> Vec<String> {
         let mut stmts = vec![
-            format!("SET LOCAL app.tenant_id = '{}'", escape_sql(&self.tenant_id)),
+            format!(
+                "SET LOCAL app.tenant_id = '{}'",
+                escape_sql(&self.tenant_id)
+            ),
             format!("SET LOCAL app.actor_id = '{}'", escape_sql(&self.actor_id)),
             format!(
                 "SET LOCAL app.access_reason = '{}'",
@@ -102,7 +105,8 @@ impl TenantContext {
     /// Workers receive this signed context from a signed queue envelope.
     pub fn sign(&self, secret: &[u8]) -> SignedContext {
         let payload = self.canonical_payload();
-        let mut mac = HmacSha256::new_from_slice(secret).unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
+        let mut mac = HmacSha256::new_from_slice(secret)
+            .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
         mac.update(payload.as_bytes());
         let signature = hex::encode(mac.finalize().into_bytes());
         SignedContext {
@@ -137,7 +141,8 @@ impl SignedContext {
     /// Verify the signature.
     pub fn verify(&self, secret: &[u8]) -> Result<(), ContextError> {
         let payload = self.context.canonical_payload();
-        let mut mac = HmacSha256::new_from_slice(secret).unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
+        let mut mac = HmacSha256::new_from_slice(secret)
+            .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
         mac.update(payload.as_bytes());
         let expected = hex::encode(mac.finalize().into_bytes());
         if expected != self.signature {

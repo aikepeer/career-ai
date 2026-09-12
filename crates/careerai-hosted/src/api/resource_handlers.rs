@@ -49,10 +49,8 @@ pub async fn import_profile(
         kind: JobKind::ProfileImport,
         payload: serde_json::to_value(ProfileImportRequest { paths: req.paths })
             .map_err(|e| ApiError::bad_request(&format!("serialization: {e}")))?,
-        tenant_id: uuid::Uuid::parse_str(session.tenant_id())
-            .unwrap_or_else(|_| uuid::Uuid::nil()),
-        actor_id: uuid::Uuid::parse_str(session.user_id())
-            .unwrap_or_else(|_| uuid::Uuid::nil()),
+        tenant_id: uuid::Uuid::parse_str(session.tenant_id()).unwrap_or_else(|_| uuid::Uuid::nil()),
+        actor_id: uuid::Uuid::parse_str(session.user_id()).unwrap_or_else(|_| uuid::Uuid::nil()),
         attempt: 1,
         fencing_token: 1,
     };
@@ -96,22 +94,16 @@ pub async fn create_program(
     // Build preparation request from profile + matches
     let profile: careerai_profile::Profile = serde_yaml::from_str(&req.profile_yaml)
         .map_err(|e| ApiError::bad_request(&format!("profile YAML: {e}")))?;
-    let prep_req = build_preparation_from_matches(
-        &profile,
-        &req.matches,
-        &req.listings,
-        &req.company_name,
-    );
+    let prep_req =
+        build_preparation_from_matches(&profile, &req.matches, &req.listings, &req.company_name);
 
     // Dispatch preparation program job
     let job = QueuedJob {
         kind: JobKind::PreparationProgram,
         payload: serde_json::to_value(&prep_req)
             .map_err(|e| ApiError::bad_request(&format!("serialization: {e}")))?,
-        tenant_id: uuid::Uuid::parse_str(session.tenant_id())
-            .unwrap_or_else(|_| uuid::Uuid::nil()),
-        actor_id: uuid::Uuid::parse_str(session.user_id())
-            .unwrap_or_else(|_| uuid::Uuid::nil()),
+        tenant_id: uuid::Uuid::parse_str(session.tenant_id()).unwrap_or_else(|_| uuid::Uuid::nil()),
+        actor_id: uuid::Uuid::parse_str(session.user_id()).unwrap_or_else(|_| uuid::Uuid::nil()),
         attempt: 1,
         fencing_token: 1,
     };
@@ -188,10 +180,8 @@ pub async fn preview_application(
         kind: JobKind::TailorArtifact,
         payload: serde_json::to_value(&tailor_req)
             .map_err(|e| ApiError::bad_request(&format!("serialization: {e}")))?,
-        tenant_id: uuid::Uuid::parse_str(session.tenant_id())
-            .unwrap_or_else(|_| uuid::Uuid::nil()),
-        actor_id: uuid::Uuid::parse_str(session.user_id())
-            .unwrap_or_else(|_| uuid::Uuid::nil()),
+        tenant_id: uuid::Uuid::parse_str(session.tenant_id()).unwrap_or_else(|_| uuid::Uuid::nil()),
+        actor_id: uuid::Uuid::parse_str(session.user_id()).unwrap_or_else(|_| uuid::Uuid::nil()),
         attempt: 1,
         fencing_token: 1,
     };

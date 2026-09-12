@@ -36,8 +36,7 @@ pub struct Totp {
 impl Totp {
     /// Create a new TOTP from a base32-encoded secret.
     pub fn from_base32(secret: &str) -> Result<Self, TotpError> {
-        let bytes = decode_base32(secret)
-            .ok_or(TotpError::InvalidSecret)?;
+        let bytes = decode_base32(secret).ok_or(TotpError::InvalidSecret)?;
         Ok(Self { secret: bytes })
     }
 
@@ -94,7 +93,8 @@ impl Totp {
 
 /// Compute a TOTP code for a given counter.
 fn compute_totp(secret: &[u8], counter: u64, digits: u32) -> String {
-    let mut mac = HmacSha1::new_from_slice(secret).unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
+    let mut mac = HmacSha1::new_from_slice(secret)
+        .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
     mac.update(&counter.to_be_bytes());
     let hash = mac.finalize().into_bytes();
     let offset = (hash[hash.len() - 1] & 0x0f) as usize;

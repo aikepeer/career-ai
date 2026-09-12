@@ -17,6 +17,7 @@ pub mod db;
 pub mod entitlement;
 pub mod export;
 pub mod jobs;
+pub mod ops;
 pub mod workers;
 
 pub use careerai_core;

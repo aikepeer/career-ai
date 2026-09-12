@@ -77,11 +77,10 @@ pub fn decrypt_export(
     master_key: &[u8; 32],
 ) -> Result<Vec<u8>, ExportError> {
     let cipher = Aes256Gcm::new(master_key.into());
-    let nonce_bytes = hex::decode(&bundle.nonce_hex)
-        .map_err(|_| ExportError::DecryptionFailed)?;
+    let nonce_bytes = hex::decode(&bundle.nonce_hex).map_err(|_| ExportError::DecryptionFailed)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = hex::decode(&bundle.ciphertext_hex)
-        .map_err(|_| ExportError::DecryptionFailed)?;
+    let ciphertext =
+        hex::decode(&bundle.ciphertext_hex).map_err(|_| ExportError::DecryptionFailed)?;
     cipher
         .decrypt(nonce, ciphertext.as_ref())
         .map_err(|_| ExportError::DecryptionFailed)

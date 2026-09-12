@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
-use careerai_hosted::workers::adapters::{MatchListing};
+use careerai_hosted::workers::adapters::MatchListing;
 use careerai_hosted::workers::preparation::CompanyRecord;
 
 pub fn google_company_record() -> CompanyRecord {
@@ -41,13 +41,8 @@ pub fn anthropic_company_record() -> CompanyRecord {
             "Take-home exercise".to_string(),
             "Virtual onsite".to_string(),
         ],
-        benefits: vec![
-            "Unlimited PTO".to_string(),
-            "Commuter benefits".to_string(),
-        ],
-        known_questions: vec![
-            "How would you align an AI system to human values?".to_string(),
-        ],
+        benefits: vec!["Unlimited PTO".to_string(), "Commuter benefits".to_string()],
+        known_questions: vec!["How would you align an AI system to human values?".to_string()],
     }
 }
 
@@ -131,8 +126,7 @@ pub fn mismatch_listing() -> MatchListing {
         company: "StartupCo".to_string(),
         location: None,
         url: "https://startup.com/1".to_string(),
-        description: "Build React web applications with TypeScript and Tailwind CSS."
-            .to_string(),
+        description: "Build React web applications with TypeScript and Tailwind CSS.".to_string(),
         raw_json: None,
     }
 }

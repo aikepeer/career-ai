@@ -9,4 +9,4 @@
 pub mod context;
 pub mod migrations;
 
-pub use context::{TenantContext, ContextError, SignedContext};
+pub use context::{ContextError, SignedContext, TenantContext};

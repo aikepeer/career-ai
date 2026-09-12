@@ -51,10 +51,10 @@ impl Role {
             (
                 Role::Owner,
                 Permission::ReadWriteProfile
-                    | Permission::GenerateArtifacts
-                    | Permission::BillingManagement
-                    | Permission::ViewSecurityAudit
-                    | Permission::SwitchWorkspace,
+                | Permission::GenerateArtifacts
+                | Permission::BillingManagement
+                | Permission::ViewSecurityAudit
+                | Permission::SwitchWorkspace,
             )
             | (
                 Role::SupportReadonly,
@@ -69,11 +69,11 @@ impl Role {
             | (
                 Role::SupportReadonly,
                 Permission::ReadWriteProfile
-                    | Permission::GenerateArtifacts
-                    | Permission::ExportDelete
-                    | Permission::ApproveSideEffect
-                    | Permission::BillingManagement
-                    | Permission::SwitchWorkspace,
+                | Permission::GenerateArtifacts
+                | Permission::ExportDelete
+                | Permission::ApproveSideEffect
+                | Permission::BillingManagement
+                | Permission::SwitchWorkspace,
             ) => deny(),
         }
     }

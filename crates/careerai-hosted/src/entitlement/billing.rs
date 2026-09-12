@@ -93,12 +93,9 @@ impl WebhookDedup {
 
 /// Verify a webhook signature.
 /// Uses HMAC-SHA256 with the provider's webhook secret.
-pub fn verify_signature(
-    payload: &str,
-    signature: &str,
-    secret: &[u8],
-) -> Result<(), BillingError> {
-    let mut mac = HmacSha256::new_from_slice(secret).unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
+pub fn verify_signature(payload: &str, signature: &str, secret: &[u8]) -> Result<(), BillingError> {
+    let mut mac = HmacSha256::new_from_slice(secret)
+        .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
     mac.update(payload.as_bytes());
     let expected = hex::encode(mac.finalize().into_bytes());
     if expected != signature {
@@ -254,10 +251,7 @@ mod tests {
 
     #[test]
     fn plan_upgrade_is_immediate() {
-        assert_eq!(
-            plan_change_effect(2, 1, true),
-            PlanChangeEffect::Immediate
-        );
+        assert_eq!(plan_change_effect(2, 1, true), PlanChangeEffect::Immediate);
     }
 
     #[test]
@@ -270,9 +264,6 @@ mod tests {
 
     #[test]
     fn payment_failed_is_readonly() {
-        assert_eq!(
-            plan_change_effect(2, 1, false),
-            PlanChangeEffect::ReadOnly
-        );
+        assert_eq!(plan_change_effect(2, 1, false), PlanChangeEffect::ReadOnly);
     }
 }

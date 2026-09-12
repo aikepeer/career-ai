@@ -8,4 +8,4 @@ pub mod canonical;
 pub mod state;
 
 pub use canonical::{canonical_json, payload_digest, CanonicalError};
-pub use state::{ActionState, ActionTransition, TransitionError, ExternalAction};
+pub use state::{ActionState, ActionTransition, ExternalAction, TransitionError};

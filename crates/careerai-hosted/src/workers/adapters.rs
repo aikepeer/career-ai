@@ -38,11 +38,7 @@ pub struct ProfileImportResult {
 /// This calls `careerai_profile::import_paths` on the real files.
 /// Returns a summary of the imported profile.
 pub fn import_profile(req: &ProfileImportRequest) -> Result<ProfileImportResult, String> {
-    let path_refs: Vec<&std::path::Path> = req
-        .paths
-        .iter()
-        .map(std::path::Path::new)
-        .collect();
+    let path_refs: Vec<&std::path::Path> = req.paths.iter().map(std::path::Path::new).collect();
     let profile = careerai_profile::import_paths(&path_refs)
         .map_err(|e| format!("profile import failed: {e}"))?;
 
@@ -173,13 +169,9 @@ pub fn tailor_resume(req: &TailorRequest) -> Result<TailorResult, String> {
     };
 
     let scorer = careerai_match::JaccardBulletScorer;
-    let resume_view = careerai_tailor::local::tailor_local(
-        &profile,
-        &listing,
-        &scorer,
-        req.drop_threshold,
-    )
-    .map_err(|e| format!("tailoring failed: {e}"))?;
+    let resume_view =
+        careerai_tailor::local::tailor_local(&profile, &listing, &scorer, req.drop_threshold)
+            .map_err(|e| format!("tailoring failed: {e}"))?;
 
     let application_id = uuid::Uuid::new_v4().to_string();
     let resume_view_json = serde_json::to_string(&resume_view)
@@ -200,9 +192,10 @@ pub fn tailor_resume(req: &TailorRequest) -> Result<TailorResult, String> {
         .experience
         .iter()
         .flat_map(|exp| {
-            exp.bullets.iter().enumerate().map(|(i, _)| {
-                serde_json::json!({"op": "reorder", "index": i})
-            })
+            exp.bullets
+                .iter()
+                .enumerate()
+                .map(|(i, _)| serde_json::json!({"op": "reorder", "index": i}))
         })
         .collect();
     let diff_json = serde_json::json!({ "ops": diff_ops }).to_string();
@@ -354,7 +347,9 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(results[0].score > 0.0);
         assert!(results[0].matched_keywords.contains(&"rust".to_string()));
-        assert!(results[0].matched_keywords.contains(&"embedded".to_string()));
+        assert!(results[0]
+            .matched_keywords
+            .contains(&"embedded".to_string()));
     }
 
     #[test]
@@ -375,7 +370,9 @@ mod tests {
         };
         let results = match_listings(&req);
         assert!(results[0].missing_keywords.contains(&"rust".to_string()));
-        assert!(results[0].missing_keywords.contains(&"embedded".to_string()));
+        assert!(results[0]
+            .missing_keywords
+            .contains(&"embedded".to_string()));
     }
 
     #[test]

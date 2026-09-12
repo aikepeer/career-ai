@@ -60,9 +60,7 @@ impl FollowUpReminder {
 
     /// Check if the reminder is due soon (within the next 24 hours).
     pub fn is_due_soon(&self, now: DateTime<Utc>) -> bool {
-        !self.completed
-            && self.due_at >= now
-            && self.due_at <= now + chrono::Duration::hours(24)
+        !self.completed && self.due_at >= now && self.due_at <= now + chrono::Duration::hours(24)
     }
 }
 
@@ -93,17 +91,10 @@ pub fn validate_outcome(outcome: &ManualOutcome) -> Result<(), String> {
 }
 
 /// Filter outcomes that have overdue follow-up reminders.
-pub fn overdue_follow_ups(
-    outcomes: &[ManualOutcome],
-    now: DateTime<Utc>,
-) -> Vec<&ManualOutcome> {
+pub fn overdue_follow_ups(outcomes: &[ManualOutcome], now: DateTime<Utc>) -> Vec<&ManualOutcome> {
     outcomes
         .iter()
-        .filter(|o| {
-            o.follow_up
-                .as_ref()
-                .is_some_and(|f| f.is_overdue(now))
-        })
+        .filter(|o| o.follow_up.as_ref().is_some_and(|f| f.is_overdue(now)))
         .collect()
 }
 

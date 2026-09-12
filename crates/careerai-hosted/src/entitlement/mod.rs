@@ -7,5 +7,5 @@
 pub mod admission;
 pub mod billing;
 
-pub use admission::{EntitlementDecision, AdmissionResult, UsageReservation, EntitlementStatus};
+pub use admission::{AdmissionResult, EntitlementDecision, EntitlementStatus, UsageReservation};
 pub use billing::{BillingEvent, BillingEventStatus, WebhookDedup};

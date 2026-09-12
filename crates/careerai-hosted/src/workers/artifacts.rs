@@ -51,23 +51,16 @@ pub struct ReviewArtifact {
 /// only reorder or rewrite existing bullets — never add new experience,
 /// titles, dates, or employers.
 pub fn validate_diff(diff_json: &str) -> Result<(), DiffValidationError> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(diff_json).map_err(|e| DiffValidationError::MalformedJson(e.to_string()))?;
+    let parsed: serde_json::Value = serde_json::from_str(diff_json)
+        .map_err(|e| DiffValidationError::MalformedJson(e.to_string()))?;
 
-    let obj = parsed
-        .as_object()
-        .ok_or(DiffValidationError::NotAnObject)?;
+    let obj = parsed.as_object().ok_or(DiffValidationError::NotAnObject)?;
 
     // Check for forbidden operations that invent new content
     if let Some(ops) = obj.get("ops").and_then(|o| o.as_array()) {
         for op in ops {
-            let op_obj = op
-                .as_object()
-                .ok_or(DiffValidationError::OpNotAnObject)?;
-            let op_type = op_obj
-                .get("op")
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
+            let op_obj = op.as_object().ok_or(DiffValidationError::OpNotAnObject)?;
+            let op_type = op_obj.get("op").and_then(|t| t.as_str()).unwrap_or("");
 
             match op_type {
                 "reorder" | "rewrite" | "omit" => { /* allowed */ }
@@ -127,14 +120,9 @@ pub fn transition_status(
         (ArtifactStatus::Preview, ArtifactStatus::Approved) => Ok(ArtifactStatus::Approved),
         (ArtifactStatus::Preview, ArtifactStatus::Rejected) => Ok(ArtifactStatus::Rejected),
         (ArtifactStatus::Approved | ArtifactStatus::Rejected, _) => {
-            Err(StatusTransitionError::TerminalState {
-                current,
-                target,
-            })
+            Err(StatusTransitionError::TerminalState { current, target })
         }
-        (_, ArtifactStatus::Preview) => Err(StatusTransitionError::CannotRevert {
-            current,
-        }),
+        (_, ArtifactStatus::Preview) => Err(StatusTransitionError::CannotRevert { current }),
     }
 }
 
@@ -154,7 +142,10 @@ impl std::fmt::Display for StatusTransitionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TerminalState { current, target } => {
-                write!(f, "cannot transition from terminal state {current:?} to {target:?}")
+                write!(
+                    f,
+                    "cannot transition from terminal state {current:?} to {target:?}"
+                )
             }
             Self::CannotRevert { current } => {
                 write!(f, "cannot revert from {current:?} back to Preview")
@@ -188,28 +179,46 @@ mod tests {
     fn validate_rejects_add_op() {
         let diff = r#"{"ops":[{"op":"add"}]}"#;
         let err = validate_diff(diff).unwrap_err();
-        assert_eq!(err, DiffValidationError::InventedContent { op: "add".into() });
+        assert_eq!(
+            err,
+            DiffValidationError::InventedContent { op: "add".into() }
+        );
     }
 
     #[test]
     fn validate_rejects_create_op() {
         let diff = r#"{"ops":[{"op":"create"}]}"#;
         let err = validate_diff(diff).unwrap_err();
-        assert_eq!(err, DiffValidationError::InventedContent { op: "create".into() });
+        assert_eq!(
+            err,
+            DiffValidationError::InventedContent {
+                op: "create".into()
+            }
+        );
     }
 
     #[test]
     fn validate_rejects_insert_op() {
         let diff = r#"{"ops":[{"op":"insert"}]}"#;
         let err = validate_diff(diff).unwrap_err();
-        assert_eq!(err, DiffValidationError::InventedContent { op: "insert".into() });
+        assert_eq!(
+            err,
+            DiffValidationError::InventedContent {
+                op: "insert".into()
+            }
+        );
     }
 
     #[test]
     fn validate_rejects_unknown_op() {
         let diff = r#"{"ops":[{"op":"teleport"}]}"#;
         let err = validate_diff(diff).unwrap_err();
-        assert_eq!(err, DiffValidationError::UnknownOp { op: "teleport".into() });
+        assert_eq!(
+            err,
+            DiffValidationError::UnknownOp {
+                op: "teleport".into()
+            }
+        );
     }
 
     #[test]
@@ -245,13 +254,19 @@ mod tests {
     #[test]
     fn transition_approved_is_terminal() {
         let result = transition_status(ArtifactStatus::Approved, ArtifactStatus::Rejected);
-        assert!(matches!(result, Err(StatusTransitionError::TerminalState { .. })));
+        assert!(matches!(
+            result,
+            Err(StatusTransitionError::TerminalState { .. })
+        ));
     }
 
     #[test]
     fn transition_rejected_is_terminal() {
         let result = transition_status(ArtifactStatus::Rejected, ArtifactStatus::Approved);
-        assert!(matches!(result, Err(StatusTransitionError::TerminalState { .. })));
+        assert!(matches!(
+            result,
+            Err(StatusTransitionError::TerminalState { .. })
+        ));
     }
 
     #[test]
