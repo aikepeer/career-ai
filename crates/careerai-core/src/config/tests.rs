@@ -142,3 +142,23 @@ fn llm_budget_round_trips() {
     assert_eq!(cfg.max_daily_cost_usd, Some(1.50));
     assert_eq!(cfg.max_daily_calls, Some(200));
 }
+
+#[test]
+fn tailoring_reduction_defaults_are_safe_and_configurable() {
+    let cfg: LlmConfig = serde_yaml::from_str(
+        "variant_count: 4\nskeleton_count: 6\nskeleton_confidence_threshold: 0.7\nbatch_size: 8",
+    )
+    .unwrap();
+    assert_eq!(cfg.variant_count, 4);
+    assert_eq!(cfg.skeleton_count, 6);
+    assert!((cfg.skeleton_confidence_threshold - 0.7).abs() < f32::EPSILON);
+    assert_eq!(cfg.batch_size, 8);
+}
+
+#[test]
+fn cluster_config_defaults_to_disabled_and_conservative_threshold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = CoreConfig::load(tmp.path()).unwrap();
+    assert!(!cfg.cluster.enabled);
+    assert!((cfg.cluster.threshold - 0.85).abs() < f32::EPSILON);
+}

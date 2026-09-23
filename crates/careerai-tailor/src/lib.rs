@@ -8,7 +8,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod batch;
 pub mod budget;
+pub mod compiled;
 pub mod content_reuse;
 pub mod cover_letter;
 pub mod cover_skeleton;
@@ -25,12 +27,15 @@ pub mod quality;
 pub mod reduce;
 pub mod reviewer;
 pub mod schema;
+pub mod skeleton_compiler;
 pub mod tone;
+pub mod variant_compiler;
 pub mod variants;
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
+pub use crate::cover_skeleton::{skeleton_confidence, CoverSkeleton, CoverSlots};
 use careerai_core::config::LlmConfig;
 use careerai_db::models::NewApplication;
 use careerai_db::queries;
@@ -41,7 +46,7 @@ use careerai_profile::schema::Profile;
 use sqlx::SqlitePool;
 use tracing::{info, warn};
 
-pub use crate::cover_skeleton::{CoverSkeleton, CoverSlots};
+pub use crate::batch::{reword_summaries, SummaryJob, SummaryResult};
 pub use crate::email_draft::{draft_email, email_prompt, EmailDraft};
 pub use crate::error::{Result, TailorError};
 pub use crate::interview::{
@@ -54,15 +59,17 @@ pub use crate::negotiation::{
 };
 pub use crate::quality::{score_application_quality, QualityScore};
 pub use crate::reviewer::{review_tailored, BulletSuggestion, ReviewCritique};
+pub use crate::skeleton_compiler::compile_skeletons;
 pub use crate::tone::{detect_tone, tone_label, CoverLetterTone, ToneAnalysis};
 pub use crate::variants::{
     compile_profile_variants, BulletVariant, EntryVariants, ProfileVariants,
 };
 
-/// Resolve the LLM response cache directory, anchoring relative paths to `base_dir`.
+/// Resolve the LLM response cache directory, anchoring relative paths to
+/// `base_dir` and placing the default in XDG_CACHE_HOME.
 fn resolve_cache_root(cfg: &LlmConfig, base_dir: &Path) -> PathBuf {
     if cfg.cache_dir.is_empty() {
-        base_dir.join("data").join("cache").join("llm")
+        careerai_core::paths::cache_dir_for_root(base_dir).join("llm")
     } else {
         let p = PathBuf::from(&cfg.cache_dir);
         if p.is_absolute() {
@@ -173,9 +180,9 @@ async fn draft_cover_letter_smart(
 /// output violated the safety invariant; `Db` / `Llm` indicate an
 /// infrastructure failure.
 ///
-/// `base_dir` is the resolved project root: relative `cache_dir` values
-/// (e.g. `default.yaml`'s `"data/cache/llm"`) are anchored to it so the
-/// response cache is CWD-independent.
+/// `base_dir` is the resolved data root. Relative custom `cache_dir` values
+/// are anchored to it; an empty value uses XDG_CACHE_HOME so the response
+/// cache is CWD-independent.
 #[allow(clippy::too_many_lines)] // quality score + tone detection add ~15 lines
 pub async fn tailor_for_listing(
     pool: &SqlitePool,

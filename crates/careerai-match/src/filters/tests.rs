@@ -22,6 +22,7 @@ fn cfg(locations: &[&str], domain_kws: &[&str]) -> CoreConfig {
             }]
         },
         matching: crate::tests_shared::test_match_config(),
+        cluster: careerai_core::config::ClusterConfig::default(),
         rates: careerai_core::config::RatesConfig::default(),
         submit: careerai_core::config::SubmitConfig::default(),
         llm: careerai_core::config::LlmConfig::default(),

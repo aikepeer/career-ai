@@ -8,8 +8,10 @@ repository.workspace = true
 description = "Hard filters + keyword-similarity ranking of listings against a profile"
 
 [dependencies]
+careerai-db = { path = "../careerai-db" }
 careerai-core = { path = "../careerai-core" }
 careerai-profile = { path = "../careerai-profile" }
+chrono.workspace = true
 careerai-sources = { path = "../careerai-sources" }
 regex = "1"
 thiserror.workspace = true
@@ -24,6 +26,10 @@ tempfile = "3"
 
 [[bench]]
 name = "jaccard"
+harness = false
+
+[[bench]]
+name = "cluster"
 harness = false
 
 [lints]

@@ -98,7 +98,7 @@ pub struct LlmConfig {
     #[serde(default)]
     pub parse_resume_model: String,
     /// Disk cache root for `careerai-llm::Cache`. Relative paths resolve
-    /// against the workspace root at call time.
+    /// against the resolved data root; empty uses the XDG cache directory.
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
     #[serde(default = "default_max_retries")]
@@ -148,6 +148,18 @@ pub struct LlmConfig {
     /// mode. `None` = unlimited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_daily_calls: Option<u64>,
+    /// Maximum number of generated variants kept for each profile bullet.
+    #[serde(default = "default_variant_count")]
+    pub variant_count: usize,
+    /// Number of cover-letter skeletons generated during profile compilation.
+    #[serde(default = "default_skeleton_count")]
+    pub skeleton_count: usize,
+    /// Minimum local skeleton confidence before the LLM fallback is required.
+    #[serde(default = "default_skeleton_confidence_threshold")]
+    pub skeleton_confidence_threshold: f32,
+    /// Number of fallback jobs included in one LLM request.
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
 }
 
 fn default_tailor_strategy() -> String {
@@ -164,7 +176,7 @@ fn default_effort() -> String {
 }
 
 fn default_cache_dir() -> String {
-    "data/cache/llm".to_string()
+    String::new()
 }
 fn default_max_retries() -> u32 {
     3
@@ -184,4 +196,20 @@ fn default_prompt_version() -> String {
 }
 fn default_anthropic_prompt_cache() -> bool {
     true
+}
+
+fn default_variant_count() -> usize {
+    3
+}
+
+fn default_skeleton_count() -> usize {
+    5
+}
+
+fn default_skeleton_confidence_threshold() -> f32 {
+    0.6
+}
+
+fn default_batch_size() -> usize {
+    5
 }

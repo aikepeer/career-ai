@@ -264,6 +264,10 @@ mod tests {
             effort: "low".into(),
             max_daily_cost_usd: None,
             max_daily_calls: None,
+            variant_count: 3,
+            skeleton_count: 5,
+            skeleton_confidence_threshold: 0.6,
+            batch_size: 5,
         }
     }
 

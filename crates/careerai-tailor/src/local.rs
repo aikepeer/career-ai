@@ -1,11 +1,5 @@
-//! Deterministic local tailoring engine without LLM dependencies.
-//!
-//! Implements Phase 1 of LLM Reduction (Strategy 1: Fast bullet scoring + local rank/prune):
-//! 1. Scores every experience and project bullet against the job description using a [`BulletScorer`].
-//! 2. Sorts bullets in descending order of relevance.
-//! 3. Drops bullets below `drop_threshold`, ensuring ≥ 1 bullet is preserved per experience entry.
-//! 4. Drops projects with 0 surviving bullets.
-//! 5. Produces a validated, zero-hallucination [`ResumeView`].
+//! Deterministic local tailoring engine: score, rank, prune, and slot-fill.
+//! All emitted text comes from the profile or validated skeleton cache.
 
 use careerai_db::models::{Listing, NewApplication};
 use careerai_db::queries;
@@ -14,6 +8,7 @@ use careerai_profile::schema::{Experience, Profile, Project};
 use sqlx::SqlitePool;
 use tracing::info;
 
+use crate::compiled::load_compiled_material;
 use crate::cover_skeleton::{default_skeletons, extract_slots, fill_skeleton, pick_best_skeleton};
 use crate::error::Result;
 use crate::model::{CoverLetter, ExperienceView, ProjectView, ResumeView, TailorOutcome};
@@ -87,7 +82,6 @@ fn tailor_experience_entry(
                 || vec![b.clone()],
                 |v| v.experience_bullet_candidates(entry_idx, bullet_idx, b),
             );
-            // Pick candidate variant with highest score.
             candidates
                 .into_iter()
                 .map(|c| {
@@ -102,17 +96,14 @@ fn tailor_experience_entry(
         })
         .collect();
 
-    // Sort descending by relevance score.
     scored_bullets.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Keep bullets above drop_threshold.
     let mut kept_bullets: Vec<String> = scored_bullets
         .iter()
         .filter(|(_, score)| *score >= drop_threshold)
         .map(|(b, _)| b.clone())
         .collect();
 
-    // Invariant (Validator Rule 5): At least 1 bullet must remain per experience.
     if kept_bullets.is_empty() {
         if let Some((best, _)) = scored_bullets.first() {
             kept_bullets.push(best.clone());
@@ -204,20 +195,34 @@ pub async fn tailor_for_listing_local(
         "running local deterministic tailor"
     );
 
-    let resume_view = tailor_local(profile, &listing, &scorer, drop_threshold)?;
     let profile_hash = careerai_llm::hashing::canonical_profile_hash(profile);
+    let (compiled_variants, compiled_skeletons) =
+        load_compiled_material(pool, &profile_hash).await?;
+    let resume_view = crate::local::tailor_local_with_variants(
+        profile,
+        &listing,
+        &scorer,
+        drop_threshold,
+        compiled_variants.as_ref(),
+    )?;
     let diff_raw_json = serde_json::json!({
         "strategy": "local_rank_prune_skeleton",
         "drop_threshold": drop_threshold,
+        "compiled_profile_material": compiled_variants.is_some() || !compiled_skeletons.is_empty(),
     })
     .to_string();
 
-    // Draft domain-calibrated cover letter via skeleton templates (Phase 3).
+    // Prefer validated profile-scoped skeletons; built-ins remain the safe
+    // cold-start fallback when compilation has not been run.
+    let skeletons = if compiled_skeletons.is_empty() {
+        default_skeletons()
+    } else {
+        compiled_skeletons
+    };
     let jd_text = format!(
         "{} {} {}",
         listing.title, listing.company, listing.description
     );
-    let skeletons = default_skeletons();
     let best_skeleton = pick_best_skeleton(&skeletons, &jd_text, &scorer);
     let slots = extract_slots(profile, &listing);
     let cover_letter_body = fill_skeleton(best_skeleton, &slots);

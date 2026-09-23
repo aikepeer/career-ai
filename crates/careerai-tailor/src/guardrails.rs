@@ -19,6 +19,6 @@ mod tokens;
 mod validator;
 
 pub use tokens::build_jd_token_sets;
-pub(crate) use tokens::{build_token_sets, flat_profile_text, ProfileTokenSets};
+pub(crate) use tokens::{build_token_sets, flat_profile_text};
 pub use validator::forbid_invented_entities;
 pub(crate) use validator::forbid_invented_entities_with;

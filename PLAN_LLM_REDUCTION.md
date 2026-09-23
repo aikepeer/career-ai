@@ -12,6 +12,29 @@ For **100 JDs** that's **200 LLM calls**, each sending the full profile (which c
 
 …different JDs produce different cache keys, so **every new JD = 2 fresh LLM calls**. At Claude Sonnet pricing (~$3/M input, $15/M output), 100 JDs with a 3K-token profile + 1K-token JD + 2K-token response ≈ **$4-6 per run**. That adds up fast across daily daemon runs.
 
+## Reconciliation status — 2026-09-22
+
+The local-first foundations described by this plan are present in the current
+tree:
+
+- Phase 0/1: `JaccardBulletScorer` and deterministic local reorder/drop
+  tailoring.
+- Phase 2: compiled profile variants and local variant selection.
+- Phase 3: cover-letter skeleton slots and deterministic skeleton selection.
+- Integration: the configured local strategy is authoritative in the pipeline,
+  with LLM use remaining an explicit strategy choice.
+
+The following deliverables are implemented in the local-first path:
+compiled variants and cover skeletons are persisted in SQLite, JD clustering
+is deterministic and configurable, hybrid orchestration tails one
+representative then safely local-tails cluster members, and summary
+rewording supports bounded batches with retry.
+
+Measured cost/quality benchmarks and live profile compilation remain open.
+The implementation does not claim the historical cost or quality targets
+until those measurements are collected against the configured remote backend.
+
+
 ## Current Architecture (as-is)
 
 ```

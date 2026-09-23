@@ -10,13 +10,10 @@ use std::path::Path;
 use careerai_core::config::LlmConfig;
 use careerai_llm::hashing::canonical_profile_hash;
 use careerai_llm::trait_def::Llm;
-use careerai_llm::LlmRequest;
 use careerai_profile::schema::Profile;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
 
 use crate::error::Result;
-use crate::guardrails::{self, ProfileTokenSets};
 
 /// A single bullet and its pre-computed emphasis variants.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,140 +137,14 @@ impl ProfileVariants {
     }
 }
 
-/// Prompt LLM to compile multiple emphasis variants per bullet, validating each through guardrails.
+/// Compile all profile bullets in one cached LLM request, validating each
+/// candidate through the existing entity guardrails.
 pub async fn compile_profile_variants(
     profile: &Profile,
     llm: &(dyn Llm + Send + Sync),
     cfg: &LlmConfig,
 ) -> Result<ProfileVariants> {
-    let profile_hash = canonical_profile_hash(profile);
-    let token_sets = guardrails::build_token_sets(profile);
-
-    info!(
-        target: "tailor::variants",
-        profile_hash = %profile_hash,
-        "compiling bullet variants via LLM"
-    );
-
-    let mut experience_entries = Vec::new();
-    for (entry_index, exp) in profile.experience.iter().enumerate() {
-        let mut bullet_variants = Vec::new();
-        for (bullet_index, original_bullet) in exp.bullets.iter().enumerate() {
-            let path_label = format!("experience[{entry_index}].bullets[{bullet_index}]");
-            let variants =
-                compile_single_bullet_variants(original_bullet, &path_label, &token_sets, llm, cfg)
-                    .await?;
-            bullet_variants.push(BulletVariant {
-                original: original_bullet.clone(),
-                variants,
-            });
-        }
-        experience_entries.push(EntryVariants {
-            entry_index,
-            bullets: bullet_variants,
-        });
-    }
-
-    let mut project_entries = Vec::new();
-    for (entry_index, proj) in profile.projects.iter().enumerate() {
-        let mut bullet_variants = Vec::new();
-        for (bullet_index, original_bullet) in proj.bullets.iter().enumerate() {
-            let path_label = format!("projects[{entry_index}].bullets[{bullet_index}]");
-            let variants =
-                compile_single_bullet_variants(original_bullet, &path_label, &token_sets, llm, cfg)
-                    .await?;
-            bullet_variants.push(BulletVariant {
-                original: original_bullet.clone(),
-                variants,
-            });
-        }
-        project_entries.push(EntryVariants {
-            entry_index,
-            bullets: bullet_variants,
-        });
-    }
-
-    Ok(ProfileVariants {
-        profile_hash,
-        experience: experience_entries,
-        projects: project_entries,
-    })
-}
-
-async fn compile_single_bullet_variants(
-    original: &str,
-    path_label: &str,
-    token_sets: &ProfileTokenSets,
-    llm: &(dyn Llm + Send + Sync),
-    cfg: &LlmConfig,
-) -> Result<Vec<String>> {
-    let prompt = format!(
-        "You are an expert technical resume editor. Given this resume bullet:\n\n\
-        \"{original}\"\n\n\
-        Generate 3 distinct reworded variants emphasizing different angles (e.g. scale, reliability, technical depth).\n\
-        CRITICAL RULES:\n\
-        1. Keep all numbers, metrics, proper nouns, and company names byte-identical or truthful to the original.\n\
-        2. Maximum length 280 characters per variant.\n\
-        3. Output ONLY a valid JSON array of 3 strings. Example: [\"Variant 1\", \"Variant 2\", \"Variant 3\"]"
-    );
-
-    let req = LlmRequest {
-        system:
-            "You are an expert technical resume editor. Output only valid JSON arrays of strings."
-                .into(),
-        profile_block: String::new(),
-        user: prompt,
-        prompt_version: "variants.v1".into(),
-        model: if cfg.tailor_model.is_empty() {
-            cfg.model.clone()
-        } else {
-            cfg.tailor_model.clone()
-        },
-        temperature: 0.2,
-        max_tokens: 500,
-        cache_profile: false,
-    };
-
-    let mut accepted = vec![original.to_string()];
-
-    match llm.complete(&req).await {
-        Ok(resp) => {
-            if let Ok(parsed) = serde_json::from_str::<Vec<String>>(resp.text.trim()) {
-                for candidate in parsed {
-                    let trimmed = candidate.trim();
-                    if trimmed.is_empty() || trimmed.chars().count() > 280 {
-                        continue;
-                    }
-                    if guardrails::forbid_invented_entities_with(
-                        trimmed, original, token_sets, path_label,
-                    )
-                    .is_ok()
-                    {
-                        if !accepted.contains(&trimmed.to_string()) {
-                            accepted.push(trimmed.to_string());
-                        }
-                    } else {
-                        warn!(
-                            target = "tailor::variants",
-                            path = path_label,
-                            candidate = trimmed,
-                            "variant dropped: failed entity guardrails"
-                        );
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            warn!(
-                target = "tailor::variants",
-                error = %e,
-                path = path_label,
-                "variant LLM call failed, falling back to original bullet"
-            );
-        }
-    }
-
-    Ok(accepted)
+    crate::variant_compiler::compile_profile_variants_once(profile, llm, cfg).await
 }
 
 #[cfg(test)]

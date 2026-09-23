@@ -23,6 +23,7 @@ pub mod applications;
 pub mod applications_sync;
 pub mod artifacts;
 pub mod command_log;
+pub mod compiled;
 pub mod content_library;
 pub mod employer_outcomes;
 pub mod events;
@@ -56,6 +57,10 @@ pub use applications_sync::{
 };
 pub use artifacts::{all_artifact_paths, attach_artifact, list_artifacts};
 pub use command_log::{list_recent_commands, log_command, CommandLogEntry};
+pub use compiled::{
+    list_bullet_variants, list_cover_skeletons, replace_bullet_variants, replace_cover_skeletons,
+    BulletVariantRow, CoverSkeletonRow, NewBulletVariant, NewCoverSkeleton,
+};
 pub use content_library::{
     fetch_bullets_for_domain, fetch_cover_letter_for_domain, library_stats, store_bullet,
     store_cover_letter, DomainEntry, LibraryStats,

@@ -25,7 +25,7 @@ pub async fn build_live_llm(
     #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
     {
         let cache_root = if cfg.llm.cache_dir.is_empty() {
-            root.join("data").join("cache").join("llm")
+            careerai_core::paths::cache_dir_for_root(root).join("llm")
         } else {
             let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
             if p.is_absolute() {
@@ -50,7 +50,9 @@ pub async fn build_live_llm(
 
 /// Resolve a fixtures-based `MockLlm` for offline/test use.
 pub fn build_fixture_llm(root: &Path) -> Result<Arc<dyn Llm + Send + Sync>> {
-    let fixtures = root.join("data").join("cache").join("llm").join("fixtures");
+    let fixtures = careerai_core::paths::cache_dir_for_root(root)
+        .join("llm")
+        .join("fixtures");
     if !fixtures.is_dir() {
         anyhow::bail!(
             "no LLM fixtures at {}; set CAREERAI_LLM_LIVE=1 or provide fixtures",

@@ -125,6 +125,12 @@ pub fn fill_skeleton(skeleton: &CoverSkeleton, slots: &CoverSlots) -> String {
         .replace("{{keywords_summary}}", &slots.keywords_summary)
 }
 
+/// Return the deterministic overlap confidence for a skeleton and JD.
+#[must_use]
+pub fn skeleton_confidence(jd_text: &str, skeleton: &CoverSkeleton) -> f32 {
+    let scorer = careerai_match::bullet_score::JaccardBulletScorer;
+    scorer.score(&skeleton.keywords.join(" "), jd_text)
+}
 /// Match a job description to the best domain skeleton based on keyword overlap.
 #[must_use]
 pub fn pick_best_skeleton<'a>(

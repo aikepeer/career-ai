@@ -25,10 +25,14 @@ pub struct TailoredOutcome {
 }
 
 /// Resolve the LLM fixtures directory. Honors the `CAREERAI_LLM_FIXTURES_DIR`
-/// environment override, else falls back to `<root>/data/cache/llm/fixtures`.
+/// environment override, else falls back to the XDG cache directory.
 fn fixtures_dir(root: &Path) -> PathBuf {
     std::env::var("CAREERAI_LLM_FIXTURES_DIR").map_or_else(
-        |_| root.join("data").join("cache").join("llm").join("fixtures"),
+        |_| {
+            careerai_core::paths::cache_dir_for_root(root)
+                .join("llm")
+                .join("fixtures")
+        },
         PathBuf::from,
     )
 }
@@ -44,9 +48,8 @@ fn live_llm_opt_in() -> bool {
 /// Tailor a shortlisted listing into an application row + persisted payload.
 ///
 /// Backend selection: `CAREERAI_LLM_LIVE=1` opts in to a live backend
-/// (`Backend::resolve` picks CLI vs API per `cfg.llm.backend`). Without
-/// the env var, falls back to the `MockLlm` fixtures dir at
-/// `CAREERAI_LLM_FIXTURES_DIR` (default `<root>/data/cache/llm/fixtures`)
+/// `CAREERAI_LLM_FIXTURES_DIR` (default
+/// `XDG_CACHE_HOME/career-ai/llm/fixtures`).
 /// — this keeps integration tests deterministic even on dev boxes with
 /// a real `claude` install or `ANTHROPIC_API_KEY`.
 #[allow(clippy::too_many_lines)]
@@ -62,7 +65,7 @@ pub async fn tailor_one(
 /// Inner implementation that reuses an already-open pool. `tailor_all`
 /// passes its shared pool here — opening one pool per listing would
 /// create N SQLite pools (up to 8 connections each) for a batch run.
-async fn tailor_one_with_pool(
+pub(crate) async fn tailor_one_with_pool(
     pool: &SqlitePool,
     root: &Path,
     cfg: &CoreConfig,
@@ -170,7 +173,7 @@ async fn live_or_fixture_tailor(
     if live_llm_opt_in() {
         use std::sync::Arc;
         let cache_root = if cfg.llm.cache_dir.is_empty() {
-            root.join("data").join("cache").join("llm")
+            careerai_core::paths::cache_dir_for_root(root).join("llm")
         } else {
             let p = std::path::PathBuf::from(&cfg.llm.cache_dir);
             if p.is_absolute() {
@@ -198,7 +201,7 @@ async fn live_or_fixture_tailor(
         anyhow::bail!(
             "no LLM fixtures at {}; either set CAREERAI_LLM_LIVE=1 (with a live \
              backend compiled in) or provide fixtures via CAREERAI_LLM_FIXTURES_DIR \
-             / `<root>/data/cache/llm/fixtures/`",
+             / XDG_CACHE_HOME/career-ai/llm/fixtures/",
             fixtures.display()
         );
     }
@@ -222,6 +225,9 @@ pub async fn tailor_all(
     cfg: &CoreConfig,
     limit: Option<usize>,
 ) -> Result<Vec<TailoredOutcome>> {
+    if cfg.cluster.enabled && cfg.llm.strategy == "hybrid" {
+        return crate::cluster_tailor::tailor_all_clustered(root, cfg, limit).await;
+    }
     let pool = open_pool(root).await?;
     let mut q = sqlx::QueryBuilder::new(
         "SELECT id FROM listings WHERE state = 'shortlisted' ORDER BY score DESC",

@@ -30,6 +30,7 @@ use careerai_profile::Profile;
 // `careerai_pipeline::{match_all, tailor_one, render_one, apply_one}`
 // etc. without changes.
 mod apply;
+mod cluster_tailor;
 mod digest;
 mod discover;
 mod followups;
@@ -41,6 +42,7 @@ mod match_;
 pub mod patterns;
 mod rematch;
 mod render;
+mod responded;
 mod rollback;
 mod run;
 mod tailor;
@@ -60,12 +62,13 @@ pub use match_::{match_all, match_one, MatchReport};
 pub use patterns::{analyze_patterns, PatternReport};
 pub use rematch::{rematch_shortlisted, RematchReport};
 pub use render::{render_all, render_one, RenderedOutcome};
+pub use responded::mark_responded;
 pub use rollback::{rollback_all, rollback_one, RollbackOutcome};
 pub use run::{run_pipeline, ApplyReport, ApplySourceReport, RunFailure, RunReport};
 pub use tailor::{tailor_all, tailor_one, TailoredOutcome};
 
 pub async fn open_pool(root: &Path) -> Result<SqlitePool> {
-    let path = root.join("data").join("careerai.sqlite");
+    let path = careerai_core::paths::database_path(root);
     pool_from_path(&path)
         .await
         .with_context(|| format!("open db at {}", path.display()))

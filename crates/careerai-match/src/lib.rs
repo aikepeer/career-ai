@@ -6,6 +6,7 @@
 //! when it does.
 
 pub mod bullet_score;
+pub mod cluster;
 pub mod eligibility;
 pub mod error;
 pub mod filters;
@@ -24,6 +25,7 @@ pub mod upskill;
 pub mod tests_shared;
 
 pub use bullet_score::{BulletScorer, JaccardBulletScorer};
+pub use cluster::{cluster_jds, Cluster};
 pub use eligibility::{check_eligibility, AuthProfile, EligibilityResult};
 pub use error::{MatchError, Result};
 pub use filters::{classify, Decision};
