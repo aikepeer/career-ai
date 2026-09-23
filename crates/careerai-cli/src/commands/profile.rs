@@ -27,42 +27,10 @@ pub fn run(
         } => import(&paths, force, use_llm, backend_override),
         ProfileCommand::Show => show(),
         ProfileCommand::Validate => validate(),
-        ProfileCommand::CompileVariants { force } => compile_variants_cmd(force),
+        ProfileCommand::CompileVariants { .. } => {
+            anyhow::bail!("compile-variants is dispatched by the async CLI entry point")
+        }
     }
-}
-
-fn compile_variants_cmd(force: bool) -> Result<()> {
-    let out = profile_yaml_path();
-    let text = std::fs::read_to_string(&out).with_context(|| format!("read {}", out.display()))?;
-    let profile = careerai_profile::Profile::from_yaml(&text).context("parse profile")?;
-    let profile_hash = careerai_llm::hashing::canonical_profile_hash(&profile);
-
-    let root = careerai_core::paths::resolve_root_env();
-    let variants_file = root
-        .join("data")
-        .join("cache")
-        .join("variants")
-        .join(format!("{profile_hash}.json"));
-
-    if variants_file.exists() && !force {
-        println!(
-            "Variants cache already exists at: {}",
-            variants_file.display()
-        );
-        println!("Pass --force to re-generate.");
-        return Ok(());
-    }
-
-    println!("Compiling bullet emphasis variants for profile (hash={profile_hash})...");
-    let variants = careerai_tailor::ProfileVariants::from_profile_identity(&profile);
-    variants.save_to_file(&variants_file)?;
-    println!(
-        "Saved {} experience and {} project entry variants to {}",
-        variants.experience.len(),
-        variants.projects.len(),
-        variants_file.display()
-    );
-    Ok(())
 }
 
 fn import(

@@ -37,7 +37,7 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Generate or update configuration file `config/local.yaml`.
+    /// Generate or update `local.yaml` in the resolved XDG config directory.
     Config {
         #[command(subcommand)]
         command: ConfigSubcommand,
@@ -75,6 +75,9 @@ pub(crate) enum Command {
         all: bool,
         #[arg(long)]
         limit: Option<usize>,
+        /// Override the configured strategy for this invocation: local, llm, or hybrid.
+        #[arg(long, value_parser = ["local", "llm", "hybrid"])]
+        strategy: Option<String>,
     },
     /// Render a tailored application to DOCX + PDF via pandoc.
     Render {
@@ -159,6 +162,24 @@ pub(crate) enum Command {
     Interview {
         /// Listing ID to prep for.
         listing_id: String,
+    },
+    /// Mark an application as responded and generate its interview prep sheet.
+    MarkResponded {
+        application_id: String,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        no_prep: bool,
+    },
+    /// Generate an interview prep sheet for an application.
+    Prep {
+        application_id: String,
+        /// Explicit HTTPS employer/news URLs to read (never crawls broadly).
+        #[arg(long = "news-url")]
+        news_urls: Vec<String>,
+        /// Allowlisted non-employer domains for the supplied news URLs.
+        #[arg(long = "news-domain")]
+        news_domains: Vec<String>,
     },
     /// Analyse skill gaps between your profile and shortlisted JDs.
     Upskill,
@@ -257,39 +278,42 @@ pub(crate) fn init_tracing(log_flag: Option<&str>) {
         None => EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
     };
 
-    // Logs and runtime metadata belong in the user state directory, separate
-    // from the project data created under the current working directory.
-    let log_dir = careerai_core::paths::log_dir_env();
-    let _ = std::fs::create_dir_all(&log_dir);
-    let log_file_path = log_dir.join("careerai.log");
+    // Logs and runtime metadata belong in the XDG state directory, separate
+    // from project data. If no user state directory is available, retain
+    // stderr-only logging rather than creating project-local state.
+    let file_layer = careerai_core::paths::log_dir_env().and_then(|log_dir| {
+        std::fs::create_dir_all(&log_dir).ok()?;
+        let log_file_path = log_dir.join("careerai.log");
 
-    // The log may capture listing text and LLM output; keep it owner-only
-    // like the credentials file (mode 0600 from creation, no umask window).
-    let file_layer = {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .mode(0o600)
-                .open(&log_file_path)
+        // The log may capture listing text and LLM output; keep it owner-only
+        // like the credentials file (mode 0600 from creation, no umask window).
+        let file = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .mode(0o600)
+                    .open(&log_file_path)
+            }
+            #[cfg(not(unix))]
+            {
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_file_path)
+            }
         }
-        #[cfg(not(unix))]
-        {
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_file_path)
-        }
-    }
-    .ok()
-    .map(|file| {
-        fmt::layer()
-            .with_writer(file)
-            .with_ansi(false)
-            .with_target(true)
-            .with_filter(filter.clone())
+        .ok()?;
+
+        Some(
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(true)
+                .with_filter(filter.clone()),
+        )
     });
 
     let stderr_layer = fmt::layer()

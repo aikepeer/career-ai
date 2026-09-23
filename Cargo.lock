@@ -396,6 +396,7 @@ dependencies = [
  "careerai-match",
  "careerai-notify",
  "careerai-pipeline",
+ "careerai-prep",
  "careerai-profile",
  "careerai-render",
  "careerai-scheduler",
@@ -424,6 +425,7 @@ dependencies = [
  "anyhow",
  "careerai-notify",
  "config",
+ "home",
  "regex",
  "serde",
  "serde_json",
@@ -550,9 +552,11 @@ name = "careerai-match"
 version = "0.1.3"
 dependencies = [
  "careerai-core",
+ "careerai-db",
  "careerai-notify",
  "careerai-profile",
  "careerai-sources",
+ "chrono",
  "criterion",
  "regex",
  "serde",
@@ -630,6 +634,26 @@ dependencies = [
  "tracing",
  "which 7.0.3",
  "wiremock",
+]
+
+[[package]]
+name = "careerai-prep"
+version = "0.1.3"
+dependencies = [
+ "async-trait",
+ "careerai-core",
+ "careerai-db",
+ "careerai-llm",
+ "careerai-profile",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tera",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

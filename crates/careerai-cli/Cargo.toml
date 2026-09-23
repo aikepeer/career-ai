@@ -25,6 +25,7 @@ careerai-sources = { path = "../careerai-sources" }
 careerai-match = { path = "../careerai-match" }
 careerai-notify = { path = "../careerai-notify" }
 careerai-dashboard = { path = "../careerai-dashboard" }
+careerai-prep = { path = "../careerai-prep" }
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true

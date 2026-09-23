@@ -19,12 +19,15 @@ pub mod inspect;
 pub mod interview;
 pub mod liveness;
 pub mod llm;
+pub mod mark_responded;
 pub mod match_;
 pub mod mcp;
 pub mod negotiate;
 pub mod notify;
 pub mod patterns;
+pub mod prep;
 pub mod profile;
+pub mod profile_compile;
 pub mod profile_llm;
 pub mod render;
 pub mod retry;
@@ -37,7 +40,7 @@ use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigSubcommand {
-    /// Generate exhaustive `config/local.yaml` from candidate profile.
+    /// Generate exhaustive `local.yaml` in the resolved XDG config directory.
     Generate {
         #[arg(long)]
         force: bool,
@@ -135,16 +138,17 @@ pub enum NotifyCommand {
 pub enum SourcesCommand {
     /// Probe the seeded ATS list against the configured `domains:`
     /// keywords and either preview or merge the new companies into
-    /// `config/local.yaml`. Default is preview.
+    /// the resolved XDG config directory. Default is preview.
     Sync {
-        /// Write the merged lists into `config/local.yaml`. Without
-        /// this flag, the diff is printed and no file is touched.
+        /// Write the merged lists into the resolved XDG config directory.
+        /// Without this flag, the diff is printed and no file is touched.
         #[arg(long)]
         apply: bool,
     },
     /// Discover new job portals and freelance platforms via Web Search Agent.
     DiscoverWeb {
-        /// Write discovered job and freelance portals into config/local.yaml
+        /// Write discovered job and freelance portals into the resolved XDG
+        /// config directory.
         #[arg(long)]
         apply: bool,
     },

@@ -22,34 +22,54 @@ pub async fn check_and_create_follow_ups(
 ) -> Result<usize, careerai_db::error::DbError> {
     let stale = queries::list_stale_submissions(pool, DEFAULT_FOLLOW_UP_DAYS).await?;
     let mut created = 0;
-    let mut errors = 0;
 
     for submission in &stale {
-        // R10: find the application by its listing, ordered by created_at
-        // DESC so we follow up on the most recent application. This matches
-        // the order the dashboard's review queue uses.
-        let app: Option<(String,)> = sqlx::query_as(
-            "SELECT id FROM applications WHERE listing_id = ? ORDER BY created_at DESC LIMIT 1",
+        // Only the newest application for a listing may receive a reminder.
+        // The CTE prevents an older submitted attempt from creating a draft
+        // after a newer application was prepared but not submitted.
+        let app: Option<(String, i64)> = sqlx::query_as(
+            "WITH latest_application AS (
+                 SELECT id, state
+                 FROM applications
+                 WHERE listing_id = ?
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             )
+             SELECT a.id, sa.id
+             FROM latest_application a
+             JOIN submission_attempts sa ON sa.application_id = a.id
+             WHERE a.state = 'submitted'
+               AND sa.status = 'submitted'
+               AND sa.submitted_at IS NOT NULL
+               AND julianday(sa.submitted_at) <=
+                   julianday('now', ?)
+             ORDER BY sa.submitted_at DESC, sa.id DESC
+             LIMIT 1",
         )
         .bind(&submission.listing_id)
+        .bind(format!("-{DEFAULT_FOLLOW_UP_DAYS} days"))
         .fetch_optional(pool)
         .await?;
 
-        let Some((application_id,)) = app else {
+        let Some((application_id, submitted_attempt_id)) = app else {
             continue;
         };
 
-        // R10: determine the cadence step — if a pending follow-up already
-        // exists for this application at step 1, this is a second reminder
-        // (step 2). The uniqueness constraint uq_follow_ups_app_step from
-        // migration 0011 prevents duplicate drafts for the same step.
-        let cadence_step: i64 = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(MAX(cadence_step), 0) FROM follow_ups WHERE application_id = ?",
+        // A reminder is associated with one submitted attempt. Existing
+        // rows in any terminal/pending status suppress another step until a
+        // future cadence policy explicitly permits it.
+        let already_scheduled: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                 SELECT 1 FROM follow_ups
+                 WHERE submitted_attempt_id = ? AND cadence_step = 1
+             )",
         )
-        .bind(&application_id)
+        .bind(submitted_attempt_id)
         .fetch_one(pool)
-        .await?
-        .saturating_add(1);
+        .await?;
+        if already_scheduled {
+            continue;
+        }
 
         let scheduled_at = Utc::now().to_rfc3339();
         let body = format!(
@@ -62,50 +82,36 @@ pub async fn check_and_create_follow_ups(
             submission.submitted_at.format("%Y-%m-%d"),
         );
 
-        // R09: propagate create_follow_up errors instead of `let _ =`.
-        // Only increment `created` if the insert actually succeeded. The
-        // uniqueness constraint on (application_id, cadence_step) WHERE
-        // status='pending' makes this idempotent — a concurrent scheduler
-        // that already inserted the same step will get a constraint violation,
-        // which we treat as "already done" rather than an error.
         match queries::create_follow_up(
             pool,
             &application_id,
             &submission.listing_id,
             &scheduled_at,
             Some(&body),
-            cadence_step,
+            1,
+            submitted_attempt_id,
         )
         .await
         {
             Ok(_) => created += 1,
+            Err(e) if is_unique_violation(&e) => {
+                // Another scheduler won the attempt-level claim.
+            }
             Err(e) => {
-                // Check if this is a uniqueness violation — the follow-up
-                // already exists, which is not a real error.
-                if is_unique_violation(&e) {
-                    continue;
-                }
-                tracing::warn!(
+                tracing::error!(
                     target: "follow_ups",
                     application_id = %application_id,
+                    submitted_attempt_id,
                     error = %e,
                     "create_follow_up failed",
                 );
-                errors += 1;
+                return Err(e);
             }
         }
     }
 
     if created > 0 {
         info!(target: "follow_ups", created, "created {} follow-up drafts", created);
-    }
-    if errors > 0 {
-        tracing::warn!(
-            target: "follow_ups",
-            errors,
-            "encountered {} errors creating follow-up drafts",
-            errors,
-        );
     }
 
     Ok(created)
@@ -120,5 +126,171 @@ fn is_unique_violation(err: &careerai_db::error::DbError) -> bool {
             db.message().contains("UNIQUE constraint failed")
         }
         _ => false,
+    }
+}
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use careerai_db::models::NewListing;
+    use careerai_db::pool::pool_in_memory;
+    use careerai_db::queries::insert_or_ignore;
+    use chrono::Duration;
+
+    #[tokio::test]
+    async fn insert_failure_is_returned_to_the_caller() {
+        let pool = pool_in_memory().await.unwrap();
+        let (listing_id, _) = insert_or_ignore(
+            &pool,
+            &NewListing {
+                source: "greenhouse".into(),
+                external_id: "follow-up-error".into(),
+                title: "Rust Engineer".into(),
+                company: "Acme".into(),
+                location: Some("Remote".into()),
+                url: "https://example.com/follow-up-error".into(),
+                description: "Rust systems work".into(),
+                raw_json: None,
+            },
+        )
+        .await
+        .unwrap();
+        let application_id = "app-follow-up-error";
+        sqlx::query(
+            "INSERT INTO applications
+                (id, listing_id, state, profile_hash, prompt_version, llm_model)
+             VALUES (?, ?, 'submitted', 'hash', 'v1', 'test')",
+        )
+        .bind(application_id)
+        .bind(&listing_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let submitted_at = (Utc::now() - Duration::days(8)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO submission_attempts
+                (application_id, attempt_no, status, pre_submit_state, submitted_at, resolved_at)
+             VALUES (?, 1, 'submitted', 'prepared', ?, ?)",
+        )
+        .bind(application_id)
+        .bind(&submitted_at)
+        .bind(&submitted_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let old = (Utc::now() - Duration::days(8)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO events (listing_id, from_state, to_state, created_at)
+             VALUES (?, 'prepared', 'submitted', ?)",
+        )
+        .bind(&listing_id)
+        .bind(&old)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_follow_up
+             BEFORE INSERT ON follow_ups
+             BEGIN SELECT RAISE(ABORT, 'follow-up insert blocked'); END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = check_and_create_follow_ups(&pool).await;
+
+        let error = result.expect_err("insert failure must not be reported as success");
+        assert!(error.to_string().contains("follow-up insert blocked"));
+    }
+    #[tokio::test]
+    async fn latest_unsubmitted_application_blocks_old_attempt_and_repeat_is_idempotent() {
+        let pool = pool_in_memory().await.unwrap();
+        let (listing_id, _) = insert_or_ignore(
+            &pool,
+            &NewListing {
+                source: "greenhouse".into(),
+                external_id: "follow-up-latest".into(),
+                title: "Platform Engineer".into(),
+                company: "Acme".into(),
+                location: Some("Remote".into()),
+                url: "https://example.com/follow-up-latest".into(),
+                description: "Platform systems work".into(),
+                raw_json: None,
+            },
+        )
+        .await
+        .unwrap();
+        let old_app = "app-follow-up-old";
+        let new_app = "app-follow-up-new";
+        let now = Utc::now();
+        let old_created = (now - Duration::days(2)).to_rfc3339();
+        let new_created = (now - Duration::days(1)).to_rfc3339();
+        for (id, state, created_at) in [
+            (old_app, "submitted", old_created.as_str()),
+            (new_app, "tailored", new_created.as_str()),
+        ] {
+            sqlx::query(
+                "INSERT INTO applications
+                    (id, listing_id, state, profile_hash, prompt_version, llm_model,
+                     created_at, updated_at)
+                 VALUES (?, ?, ?, 'hash', 'v1', 'test', ?, ?)",
+            )
+            .bind(id)
+            .bind(&listing_id)
+            .bind(state)
+            .bind(created_at)
+            .bind(created_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let submitted_at = (now - Duration::days(8)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO submission_attempts
+                (application_id, attempt_no, status, pre_submit_state, submitted_at, resolved_at)
+             VALUES (?, 1, 'submitted', 'prepared', ?, ?)",
+        )
+        .bind(old_app)
+        .bind(&submitted_at)
+        .bind(&submitted_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO events (listing_id, from_state, to_state, created_at)
+             VALUES (?, 'prepared', 'submitted', ?)",
+        )
+        .bind(&listing_id)
+        .bind(&submitted_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(check_and_create_follow_ups(&pool).await.unwrap(), 0);
+
+        sqlx::query("UPDATE applications SET state = 'submitted' WHERE id = ?")
+            .bind(new_app)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO submission_attempts
+                (application_id, attempt_no, status, pre_submit_state, submitted_at, resolved_at)
+             VALUES (?, 1, 'submitted', 'prepared', ?, ?)",
+        )
+        .bind(new_app)
+        .bind(&submitted_at)
+        .bind(&submitted_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(check_and_create_follow_ups(&pool).await.unwrap(), 1);
+        assert_eq!(check_and_create_follow_ups(&pool).await.unwrap(), 0);
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM follow_ups")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count.0, 1);
     }
 }

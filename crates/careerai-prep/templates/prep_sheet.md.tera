@@ -1,0 +1,27 @@
+# Interview prep — {{ job_title }} @ {{ company }}
+
+_Generated {{ generated_at }} for application {{ application_id }}._
+
+## JD summary
+
+{{ jd_summary }}
+
+## Likely topics
+
+{% for topic in likely_topics %}- {{ topic }}
+{% endfor %}
+## Behavioral question shortlist
+
+{% for question in behavioral_questions %}- {{ question }}
+{% endfor %}
+## Talking points (resume bullet → JD keywords)
+
+{% for entry in bullet_to_keyword %}**{{ entry.bullet }}**
+  Keywords: {% for keyword in entry.keywords %}`{{ keyword }}`{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endfor %}
+## Company recent news
+
+{% if company_news | length == 0 %}_No approved company-news sources were supplied._
+{% else %}{% for news in company_news %}- {{ news }}
+{% endfor %}{% endif %}

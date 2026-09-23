@@ -41,8 +41,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log.as_deref());
 
-    // App root: `CAREERAI_ROOT` override → current working directory.
-    // Every subcommand reads config/, data/, and profile/ from here.
+    // `CAREERAI_ROOT` keeps an explicit project layout; otherwise runtime
+    // data and profiles resolve below XDG_DATA_HOME/career-ai.
     let cwd = careerai_core::paths::resolve_root_env();
 
     // Parse the global `--llm-backend` flag once so subcommands can
@@ -60,9 +60,15 @@ async fn main() -> Result<()> {
             }
         },
         Command::Init { force } => {
-            careerai_core::init::scaffold(&cwd, force)?;
+            careerai_core::init::scaffold_env(force)?;
         }
-        Command::Profile { command } => commands::profile::run(command, backend_override)?,
+        Command::Profile { command } => match command {
+            ProfileCommand::CompileVariants { force } => {
+                let cfg = load_cfg(&cwd)?;
+                commands::profile_compile::run(&cwd, &cfg, force, backend_override).await?;
+            }
+            other => commands::profile::run(other, backend_override)?,
+        },
         Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
         Command::Match {
             tune,
@@ -79,10 +85,14 @@ async fn main() -> Result<()> {
             listing_id,
             all,
             limit,
+            strategy,
         } => {
             let mut cfg = load_cfg(&cwd)?;
             if let Some(b) = backend_override {
                 cfg.llm.backend = b;
+            }
+            if let Some(strategy) = strategy {
+                cfg.llm.strategy = strategy;
             }
             if all || limit.is_some() {
                 let outcomes = pipeline::tailor_all(&cwd, &cfg, limit).await?;
@@ -186,6 +196,23 @@ async fn main() -> Result<()> {
         Command::Interview { listing_id } => {
             commands::interview::run_interview(&cwd, &listing_id).await?;
         }
+        Command::MarkResponded {
+            application_id,
+            note,
+            no_prep,
+        } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::mark_responded::run(&cwd, &cfg, &application_id, note.as_deref(), no_prep)
+                .await?;
+        }
+        Command::Prep {
+            application_id,
+            news_urls,
+            news_domains,
+        } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::prep::run(&cwd, &cfg, &application_id, &news_urls, &news_domains).await?;
+        }
         Command::Upskill => {
             commands::upskill::run_upskill(&cwd).await?;
         }
@@ -239,7 +266,8 @@ async fn main() -> Result<()> {
                 }
 
                 if apply {
-                    let config_path = cwd.join("config").join("local.yaml");
+                    let config_path =
+                        careerai_core::paths::config_dir_for_root(&cwd).join("local.yaml");
                     let added = agent.apply_to_config(&config_path, &portals)?;
                     println!(
                         "\n✅ Successfully updated {} with {} newly discovered portals!",
@@ -247,7 +275,9 @@ async fn main() -> Result<()> {
                         added
                     );
                 } else {
-                    println!("\n💡 Run `careerai sources discover-web --apply` to append these portals directly into config/local.yaml.");
+                    println!(
+                        "\n💡 Run `careerai sources discover-web --apply` to append these portals directly into the resolved XDG config directory."
+                    );
                 }
             }
         },
@@ -327,7 +357,7 @@ async fn main() -> Result<()> {
             ServiceCommand::Uninstall => service::run_uninstall()?,
         },
         Command::Export { output } => {
-            let db_path = cwd.join("data").join("careerai.sqlite");
+            let db_path = careerai_core::paths::database_path(&cwd);
             let pool = careerai_db::pool::pool_from_path(&db_path)
                 .await
                 .with_context(|| format!("open db at {}", db_path.display()))?;
@@ -354,7 +384,7 @@ async fn main() -> Result<()> {
                 .with_context(|| format!("read export file {input}"))?;
             let export: careerai_db::queries::workspace_io::WorkspaceExport =
                 serde_json::from_str(&json).context("parse export file")?;
-            let db_path = cwd.join("data").join("careerai.sqlite");
+            let db_path = careerai_core::paths::database_path(&cwd);
             let pool = careerai_db::pool::pool_from_path(&db_path)
                 .await
                 .with_context(|| format!("open db at {}", db_path.display()))?;

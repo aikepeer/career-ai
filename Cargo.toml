@@ -16,6 +16,7 @@ members = [
     "crates/careerai-mcp",
     "crates/careerai-notify",
     "crates/careerai-dashboard",
+    "crates/careerai-prep",
     "crates/careerai-hosted",
 ]
 
@@ -46,6 +47,7 @@ config = { version = "0.15", default-features = false, features = ["yaml"] }
 rig-core = { version = "0.10", default-features = false }
 tera = { version = "1", default-features = false }
 which = "7"
+home = "0.5"
 sha2 = "0.10"
 hex = "0.4"
 backon = "1"

@@ -23,9 +23,9 @@ pub struct FollowUp {
     /// R10: cadence step (1 = first reminder, 2 = second, etc.).
     #[sqlx(default)]
     pub cadence_step: i64,
-    /// R10: links this follow-up to the submission attempt it concerns.
+    /// R10: links this follow-up to the submitted attempt it concerns.
     #[sqlx(default)]
-    pub submitted_attempt_id: Option<String>,
+    pub submitted_attempt_id: Option<i64>,
 }
 
 /// Schedule a new follow-up. Returns the inserted row id.
@@ -42,10 +42,12 @@ pub async fn create_follow_up(
     scheduled_at: &str,
     body: Option<&str>,
     cadence_step: i64,
+    submitted_attempt_id: i64,
 ) -> Result<i64> {
     let (id,): (i64,) = sqlx::query_as(
-        "INSERT INTO follow_ups (application_id, listing_id, scheduled_at, body, cadence_step)
-         VALUES (?, ?, ?, ?, ?)
+        "INSERT INTO follow_ups
+            (application_id, listing_id, scheduled_at, body, cadence_step, submitted_attempt_id)
+         VALUES (?, ?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(application_id)
@@ -53,6 +55,7 @@ pub async fn create_follow_up(
     .bind(scheduled_at)
     .bind(body)
     .bind(cadence_step)
+    .bind(submitted_attempt_id)
     .fetch_one(pool)
     .await?;
     Ok(id)
@@ -84,7 +87,7 @@ pub struct FollowUpWithListing {
     #[sqlx(default)]
     pub cadence_step: i64,
     #[sqlx(default)]
-    pub submitted_attempt_id: Option<String>,
+    pub submitted_attempt_id: Option<i64>,
     pub company: String,
     pub title: String,
 }
