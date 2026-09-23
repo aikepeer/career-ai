@@ -213,10 +213,10 @@ body > footer { margin-left: 216px; padding: 16px 38px; color: var(--text-muted)
   body > header { position: relative; inset: auto; width: 100%; height: auto; padding: 16px 18px 0; gap: 12px; overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); }
   .brand-sub { display: none; }
   .brand-container { padding: 0; }
-  .brand { font-size: 20px; }
-  .tab-nav { flex-direction: row; overflow-x: auto; padding: 0 0 10px; gap: 4px; max-width: 100%; }
+  .brand { font-size: 22px; min-width: 80px; }
+  .tab-nav { flex-direction: row; flex-wrap: wrap; overflow-x: visible; padding: 0 0 10px; gap: 4px; max-width: 100%; }
   .tab-nav::before { display: none; }
-  .nav-btn { white-space: nowrap; padding: 9px 12px; flex-shrink: 0; font-size: 11px; }
+  .nav-btn { white-space: nowrap; padding: 9px 12px; flex: 0 1 auto; min-width: 0; font-size: 11px; }
   #tab-btn-config { margin-top: 0; }
   .header-right { position: absolute; right: 18px; top: 12px; width: auto; border: 0; padding: 0; margin: 0; }
   .header-right > .pill, .header-right > .timer-pill { display: none; }
@@ -248,6 +248,13 @@ body > footer { margin-left: 216px; padding: 16px 38px; color: var(--text-muted)
   .usage-summary { grid-template-columns: minmax(0, 1fr); }
   .workspace-details { padding: 12px; }
   .weekly-settings { flex-wrap: wrap; }
+  .config-grid { grid-template-columns: minmax(0, 1fr); }
+  .config-card { min-width: 0; max-width: 100%; overflow: hidden; }
+  .config-card pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #search-insights-section > div { grid-template-columns: minmax(0, 1fr) !important; }
+  #tab-analytics .data-table { width: 100%; table-layout: fixed; }
+  #tab-analytics .data-table th, #tab-analytics .data-table td { padding: 8px 5px; overflow-wrap: anywhere; word-break: break-word; }
+  #tab-analytics > * { max-width: 100%; }
   .mission-panel-head { padding: 20px; }
   .command-dialog { margin-top: 5vh; }
 }

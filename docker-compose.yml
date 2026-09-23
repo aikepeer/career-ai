@@ -18,7 +18,7 @@ services:
       POSTGRES_PASSWORD: careerai
       POSTGRES_DB: careerai
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -40,12 +40,12 @@ services:
       RUST_LOG: info,careerai_hosted=debug
       CAREERAI_HOSTED_BIND: 0.0.0.0:3000
       # Master key for export encryption (32 bytes hex-encoded)
-      MASTER_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      MASTER_KEY: "${MASTER_KEY:?set MASTER_KEY to a 64-character hex value}"
       # Billing (optional — unconfigured = mock adapter)
       STRIPE_API_KEY: ""
       STRIPE_WEBHOOK_SECRET: ""
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     restart: unless-stopped
 
   # Optional: Prometheus for metrics scraping

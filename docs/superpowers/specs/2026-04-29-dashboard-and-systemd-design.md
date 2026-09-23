@@ -274,7 +274,7 @@ ExecStart={{careerai_bin}} daemon
 Restart=on-failure
 RestartSec=10s
 # Optional: keep secrets out of the unit file
-EnvironmentFile=-%h/.config/careerai/env
+EnvironmentFile=-%h/.config/career-ai/env
 # CAREERAI_ROOT is read from the env file above when the operator pins it;
 # we deliberately do NOT hardcode a default here, since users can pick
 # any path on `careerai init`. Falling back to the binary's default
