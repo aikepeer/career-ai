@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::page::Page;
 use futures::StreamExt;
+use tempfile::TempDir;
 
 use careerai_dashboard::{run, ServeOptions};
 use careerai_db::pool::pool_in_memory;
@@ -83,8 +84,15 @@ async fn wait_for_server(port: u16) {
     panic!("server never accepted a connection on port {port}");
 }
 
-async fn launch_browser(width: u32, height: u32) -> (Browser, tokio::task::JoinHandle<()>) {
+async fn launch_browser(
+    width: u32,
+    height: u32,
+) -> (Browser, tokio::task::JoinHandle<()>, TempDir) {
     let exe = chromium_executable().expect("chromium resolved before launch_browser");
+    let profile_dir = tempfile::Builder::new()
+        .prefix("careerai-dashboard-browser-")
+        .tempdir()
+        .expect("browser profile tempdir");
     let config = BrowserConfig::builder()
         .chrome_executable(&exe)
         .no_sandbox()
@@ -96,6 +104,7 @@ async fn launch_browser(width: u32, height: u32) -> (Browser, tokio::task::JoinH
             ..Default::default()
         })
         .arg("--disable-dev-shm-usage")
+        .user_data_dir(profile_dir.path())
         .launch_timeout(Duration::from_secs(45))
         .build()
         .expect("browser config");
@@ -105,7 +114,7 @@ async fn launch_browser(width: u32, height: u32) -> (Browser, tokio::task::JoinH
     // chromiumoxide 0.7 does not model, and exiting the handler kills
     // every subsequent CDP command with ChannelSendError(Canceled).
     let handle = tokio::spawn(async move { while handler.next().await.is_some() {} });
-    (browser, handle)
+    (browser, handle, profile_dir)
 }
 
 /// Poll until `selector` is present in the DOM or the deadline passes.
@@ -191,7 +200,7 @@ async fn generate_config_card_flows_preview_in_real_browser() {
     });
     wait_for_server(port).await;
 
-    let (mut browser, _handler) = launch_browser(1280, 800).await;
+    let (mut browser, _handler, _profile_dir) = launch_browser(1280, 800).await;
     let deadline = Instant::now() + Duration::from_secs(15);
     let page = open_index(&browser, port, deadline).await;
 
@@ -330,7 +339,7 @@ async fn mobile_viewport_renders_config_cards_without_horizontal_overflow() {
     });
     wait_for_server(port).await;
 
-    let (mut browser, _handler) = launch_browser(390, 844).await;
+    let (mut browser, _handler, _profile_dir) = launch_browser(390, 844).await;
     let deadline = Instant::now() + Duration::from_secs(15);
     let page = open_index(&browser, port, deadline).await;
 
@@ -495,7 +504,7 @@ async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
     wait_for_server(port).await;
 
     for (width, height) in [(1440, 1000), (390, 844)] {
-        let (mut browser, _handler) = launch_browser(width, height).await;
+        let (mut browser, _handler, _profile_dir) = launch_browser(width, height).await;
         assert_all_tabs_fit_viewport(&browser, port, width).await;
         browser.close().await.expect("close browser");
     }
@@ -524,7 +533,7 @@ async fn workspace_saved_searches_palette_and_refresh_in_real_browser() {
         let _ = run(opts).await;
     });
     wait_for_server(port).await;
-    let (mut browser, _handler) = launch_browser(1440, 1100).await;
+    let (mut browser, _handler, _profile_dir) = launch_browser(1440, 1100).await;
     let page = open_index(&browser, port, Instant::now() + Duration::from_secs(15)).await;
     wait_for_selector(
         &page,
@@ -684,7 +693,7 @@ async fn test_desktop_explorer(page: &chromiumoxide::Page, pool: &sqlx::SqlitePo
 
 async fn test_mobile_view(port: u16) {
     use chromiumoxide::page::ScreenshotParams;
-    let (mut mobile, _mobile_handler) = launch_browser(390, 844).await;
+    let (mut mobile, _mobile_handler, _profile_dir) = launch_browser(390, 844).await;
     let page = open_index(&mobile, port, Instant::now() + Duration::from_secs(15)).await;
     wait_for_selector(
         &page,

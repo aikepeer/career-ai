@@ -13,6 +13,28 @@
 
 ---
 
+## Delivery status — 2026-09-22
+
+The implementation described below is present in the current working tree. The
+dashboard now has the event/configuration/action/detail data layer, responsive
+dark workspace, command palette and saved-search behavior, runit launch
+support, server-side explorer filtering/pagination, and explicit refresh
+failure handling. Follow-up cards include listing context and persisted
+handling state.
+
+Verification completed:
+
+- `cargo test --release -p careerai-dashboard --lib`
+- `cargo test --release -p careerai-dashboard --test browser_it -- --test-threads=1`
+  (4 tests passed)
+- `cargo test --release --workspace --all-targets --locked --no-fail-fast`
+  (workspace passed; browser tests use isolated temporary profiles)
+
+The remaining operator-only gate is installing/enabling the runit service and
+checking `127.0.0.1:8787` on a target Void host. This plan does not claim that
+privileged deployment step from repository tests.
+
+
 ## Proposed Changes
 
 ### Component 1: `careerai-db` & Backend Data Layer

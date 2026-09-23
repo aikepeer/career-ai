@@ -27,7 +27,8 @@ These are implementation foundations, not a declaration that every workflow is c
 - **P1:** address during the next reliability delivery; these affect correctness, recovery, or user trust.
 - **P2:** address as the associated feature is completed or scaled.
 
-All findings below are **open**. Each should become a bounded implementation task with its own regression evidence.
+Historical findings are tracked below; current status is recorded in the
+reconciliation sections and each remaining item stays explicitly labeled.
 
 | ID | Priority | Finding | Main area |
 | --- | --- | --- | --- |
@@ -213,6 +214,37 @@ All findings below are **open**. Each should become a bounded implementation tas
 **Evidence:** [api_follow_ups](../crates/careerai-dashboard/src/handlers/mod.rs) fills company and title with empty strings and exposes only a 200-character body preview. [Routes](../crates/careerai-dashboard/src/routes.rs) provide listing/checking but no complete edit/snooze/handled flow.
 
 **Proposed fix and acceptance:** join application/listing context and add the full reminder lifecycle described in F05. Each card must identify its job, open the full draft, and support a persisted user decision without implying that a message was sent.
+
+## Verification status — 2026-09-22
+
+The findings below remain the historical review record. Their current
+disposition is:
+
+- **Verified in the current tree:** R03 LinkedIn assist guards; R05 local
+  tailoring strategy; R06 subprocess cleanup; R09 follow-up insert errors;
+  R10 follow-up attempt/cadence uniqueness; R11 analytics separation; R12
+  database errors are propagated; R13 conditional shortlist transitions; R14
+  application/listing association checks; R15 deterministic audit ordering;
+  R17 server-side explorer filtering/pagination; and R18 follow-up listing
+  context and handling lifecycle.
+- **Implemented but not fully closed:** R01 has durable submission-attempt
+  records and claim/recovery paths, but provider idempotency and uncertain
+  remote-result reconciliation still depend on each adapter. R02 has
+  profile/content identity protections, but every recipient-validation case
+  still needs coverage. R04, R07, and R08 have failure, transaction, and
+  rollback handling, but historical remote-side effects cannot be erased.
+  R16 records content provenance, while statistically meaningful experiment
+  outcomes still require real observations.
+- **Still roadmap work:** the F01–F10 feature rows below are proposals unless
+  the current code and an acceptance check explicitly say otherwise.
+
+Verification evidence for this reconciliation includes the dashboard library
+suite, four serial real-browser dashboard tests, scheduler follow-up regression
+tests, and the XDG workspace smoke check. It does not claim live ATS/provider
+submissions or privileged service installation.
+The full release workspace suite passed with
+`cargo test --release --workspace --all-targets --locked --no-fail-fast`.
+
 
 ## New feature roadmap
 

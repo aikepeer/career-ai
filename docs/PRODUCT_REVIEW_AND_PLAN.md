@@ -16,9 +16,22 @@ The current product already has discovery adapters, matching, constrained resume
 - Fix explorer loading/filtering/refresh defects, unchecked eligibility labels, unsafe posting links, and service-worker cache boundaries.
 - Preserve current submission gates and all pre-existing working-tree changes.
 
-Implementation and verification results are recorded below when complete.
+## Delivery verification — 2026-09-22
+
+The workspace changes named in “This delivery” are implemented in the current
+tree. Verification includes the dashboard library suite, four real-browser
+dashboard tests, the scheduler follow-up regression tests, and the XDG
+workspace smoke check. The explorer, refresh, responsive-layout, follow-up
+context, and configuration-preview paths now have regression coverage.
+The full release workspace suite also passed:
+`cargo test --release --workspace --all-targets --locked --no-fail-fast`.
+
+
+Remaining work is intentionally outside this delivery: privileged runit
+installation, live provider submissions, and hosted multi-user operations.
 
 ## Roadmap and validation
+
 
 | Priority / phase | Feature | Why it matters | Acceptance / experiment |
 | --- | --- | --- | --- |
@@ -50,4 +63,7 @@ Suggested measurements (targets to validate, not current results): median time t
 
 ## Review findings and verification
 
-To be completed with code references, dispositions, and checks from this delivery.
+The detailed R01–R18 code references, dispositions, and verification checks
+are maintained in [`FEATURE_PLAN_AND_CODE_REVIEW.md`](FEATURE_PLAN_AND_CODE_REVIEW.md).
+This document keeps the product roadmap and does not treat the remaining
+operator and hosted-access work as delivered.

@@ -1663,7 +1663,7 @@ careerai service uninstall                 disable + remove the systemd unit</pr
         {% endif %}
       </div>
 </div>
-    <div class="panel-header" style="margin-bottom:16px;">
+    <div class="panel-header mission-panel-head head-analytics">
       <h2>📊 Pattern Analytics</h2>
       <p class="panel-sub">Repost detection, funnel velocity, advance rates, and rejection latencies across all sources.</p>
     </div>
@@ -4455,15 +4455,52 @@ function lazyLoadExplorer() {
   if (_explorerLoaded) return;
   return loadExplorerListings();
 }
+function normaliseExplorerResponse(payload) {
+  if (Array.isArray(payload)) {
+    return {items: payload, total: payload.length, offset: 0, limit: payload.length};
+  }
+  if (payload && Array.isArray(payload.items)) return payload;
+  throw new Error('Invalid listings response');
+}
 function loadExplorerListings() {
   if (_explorerRequest) return _explorerRequest;
   _explorerLoaded = true;
   var error = document.getElementById('explorer-load-error');
   if (error) error.hidden = true;
-  _explorerRequest = fetch('/api/v1/explorer')
-    .then(function(response) { if (!response.ok) throw new Error('Listings unavailable'); return response.json(); })
+
+  function readPage(url) {
+    return fetch(url)
+      .then(function(response) {
+        if (!response.ok) throw new Error('Listings unavailable');
+        return response.json();
+      })
+      .then(normaliseExplorerResponse);
+  }
+
+  function readAllPages(first) {
+    var pages = [first];
+    var total = Number.isFinite(first.total) ? first.total : first.items.length;
+    var offset = first.items.length;
+    function next() {
+      if (offset >= total || first.items.length === 0) return Promise.resolve(pages);
+      return readPage('/api/v1/explorer?limit=500&offset=' + offset)
+        .then(function(page) {
+          pages.push(page);
+          offset += page.items.length;
+          if (page.items.length === 0) return pages;
+          return next();
+        });
+    }
+    return next().then(function() {
+      var items = [];
+      pages.forEach(function(page) { items = items.concat(page.items); });
+      return items;
+    });
+  }
+
+  _explorerRequest = readPage('/api/v1/explorer')
+    .then(readAllPages)
     .then(function(items) {
-      if (!Array.isArray(items)) throw new Error('Invalid listings response');
       _allExplorerItems = items;
       var tbody = document.getElementById('explorer-tbody');
       if (!tbody) return;
@@ -4559,7 +4596,10 @@ function renderExplorerRowsChunk(tbody, items) {
 
 function refreshExplorerListings() {
   if (document.getElementById('tab-explorer').classList.contains('active')) {
-    return (_explorerRequest || Promise.resolve()).then(loadExplorerListings);
+    return (_explorerRequest || Promise.resolve()).then(function() {
+      _explorerLoaded = false;
+      return loadExplorerListings();
+    });
   }
 }
 

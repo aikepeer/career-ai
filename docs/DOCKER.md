@@ -1,132 +1,107 @@
 # Docker
 
-`careerai` ships as a single statically-mostly Rust binary. The container
-image is a multi-stage build: a `rust:1.78-bookworm` builder compiles the
-workspace in release mode, and a `debian:bookworm-slim` runtime adds only
-the external rendering tools (`pandoc`, `weasyprint`). No Python or Node.js
-is added as project code — `weasyprint` is the configured PDF engine and
-is installed as a system package, the same way `pandoc` is.
+`careerai-hosted` is the containerized HTTP API. The image is a
+multi-stage build: a `rust:1.78-bookworm` builder compiles the workspace
+in release mode, and a `debian:bookworm-slim` runtime contains only the
+API binary and the packages needed by its healthcheck. Resume rendering
+tools are not part of this hosted image.
+
+The compose stack is intentionally loopback-only by default. It is for
+local smoke deployment and self-hosted experiments, not an internet-facing
+production deployment.
 
 ## Build
 
 ```bash
-docker compose build         # uses ./Dockerfile
+docker compose build api       # uses ./Dockerfile
 # or, without compose:
-docker build -t careerai .
+docker build -t careerai-hosted .
 ```
 
 The builder pins Rust 1.78 (the project MSRV). The repo's
-`rust-toolchain.toml` pins `channel = "stable"`, which would otherwise make
-rustup fetch latest stable inside the builder; the Dockerfile removes it so
-the build uses the image's 1.78.0 toolchain.
+`rust-toolchain.toml` is removed inside the builder stage so rustup does
+not fetch a different toolchain.
 
 ## Run
 
+For a local smoke deployment, generate a process-scoped master key and
+start Postgres plus the hosted API:
+
 ```bash
-docker compose up -d          # daemon + dashboard
-docker compose logs -f
+MASTER_KEY="$(openssl rand -hex 32)" docker compose up -d --build
+curl --fail http://127.0.0.1:3000/v1/health
+curl --fail http://127.0.0.1:3000/v1/ready
+docker compose logs -f api
 docker compose down
 ```
 
-The container's default command is `careerai daemon`. The entrypoint
-(`docker-entrypoint.sh`) starts the daemon as PID 1 and, in the background,
-launches the read-only dashboard bound to `0.0.0.0:3000` so it is reachable
-via the published port. The dashboard is a **separate process** from the
-daemon — see the main README "Dashboard" section.
+The generated key is suitable only for an ephemeral smoke run. Keep the
+same stable key across restarts when encrypted exports must remain
+readable; provide it through a local secret manager or a shell wrapper,
+never by committing it to `.env` or source control.
 
 ## First-time setup
 
-On a fresh volume, generate the default config + profile templates onto the
-bind-mounted host directories:
+The compose stack initializes Postgres automatically. The hosted image
+does not include the local CLI entrypoint, profile bind mounts, or the
+SQLite daemon workflow. Configure the hosted API through its environment
+and database migrations, then verify both health endpoints before using
+authenticated routes.
+
+For monitoring, start the optional Prometheus service:
 
 ```bash
-docker compose run --rm careerai init
+MASTER_KEY="$(openssl rand -hex 32)" docker compose --profile monitoring up -d
 ```
 
-This writes `config/default.yaml`, `config/rules.example.yaml`,
-`config/.env.example`, and `profile/profile.example.yaml` under `./config`
-and `./profile` on the host. Then:
+## State layout
 
-1. Copy `profile/profile.example.yaml` → `profile/profile.yaml` and fill it in
-   (or import a resume: `docker compose run --rm careerai profile import resume.pdf`).
-2. Put overrides in `config/local.yaml` (companies, score threshold, sources).
-3. Set secrets in the environment (see below), then `docker compose up -d`.
+| Service | Persistent state | Purpose |
+|---------|------------------|---------|
+| `postgres` | Docker volume `pgdata` | Hosted API database |
+| `api` | Stateless container | HTTP API and migrations |
 
-## Volume layout
-
-`CAREERAI_ROOT=/data`. All state lives under it. The compose file
-bind-mounts three host directories:
-
-| Container path        | Host mount   | Contents                                            |
-|-----------------------|--------------|-----------------------------------------------------|
-| `/data`               | `./data`     | SQLite DB, LLM cache, logs, render artifacts        |
-| `/data/config`        | `./config`   | `default.yaml`, `local.yaml` overrides, rules       |
-| `/data/profile`       | `./profile`  | `profile.yaml`                                      |
-
-The app nests its own `data/` subdirectory under `CAREERAI_ROOT`, so the
-SQLite database lives at `/data/data/careerai.sqlite` — i.e.
-`./data/data/careerai.sqlite` on the host. The LLM cache is at
-`./data/data/cache/llm/` and render artifacts at `./data/artifacts/`.
+Do not delete `pgdata` while preserving a master key unless the data is
+intentionally disposable. The master key must remain stable for encrypted
+export data.
 
 ## Environment variables
 
-| Variable                              | Default | Purpose                                                          |
-|---------------------------------------|---------|------------------------------------------------------------------|
-| `CAREERAI_ROOT`                       | `/data` | App root: where the DB, cache, config, profile live.             |
-| `ANTHROPIC_API_KEY`                   | unset   | Anthropic API key for the `live-llm-api` LLM backend.             |
-| `CAREERAI_DASHBOARD_TOKEN`            | unset   | When set, every dashboard request must carry this bearer token.  |
-| `CAREERAI_DASHBOARD_ALLOW_NON_LOOPBACK` | `1`   | Set in the image so the dashboard can bind `0.0.0.0` in Docker.   |
-| `CAREERAI_DASHBOARD_PORT`             | `3000`  | Port the background dashboard binds inside the container.        |
+| Variable | Compose value | Purpose |
+|----------|---------------|---------|
+| `DATABASE_URL` | Internal Postgres URL | Hosted API database |
+| `MASTER_KEY` | Required, 64 hex characters | Encryption key for exports |
+| `STRIPE_API_KEY` | Empty | Optional real billing integration |
+| `STRIPE_WEBHOOK_SECRET` | Empty | Optional Stripe webhook verification |
+| `CAREERAI_HOSTED_BIND` | `0.0.0.0:3000` | API bind address inside the container |
+| `RUST_LOG` | `info,careerai_hosted=debug` | Structured log filter |
 
-Pass secrets via the host environment or a sibling `.env` file (compose
-reads it automatically). `docker-compose.yml` forwards
-`ANTHROPIC_API_KEY` and `CAREERAI_DASHBOARD_TOKEN` from the host.
+Compose binds API and Postgres to loopback addresses only. Change the
+published bindings only after adding authentication, TLS, backups, and
+an explicit network threat model.
 
-## Dashboard
-
-The dashboard is read-only and has **no authentication by default**. Inside
-the container it binds `0.0.0.0:3000` (so the published port is reachable),
-which the loopback-only guard would normally refuse —
-`CAREERAI_DASHBOARD_ALLOW_NON_LOOPBACK=1` (baked into the image) permits
-this. **Set `CAREERAI_DASHBOARD_TOKEN`** before exposing port 3000 to any
-non-local network; with it set, every request must send
-`Authorization: Bearer <token>` (or `x-careerai-token: <token>`).
-
-Open `http://localhost:3000` after `docker compose up -d`.
-
-## Using the CLI inside the container
-
-The entrypoint passes any arguments straight to `careerai`, so one-shot
-subcommands work without starting the dashboard:
+## Health and troubleshooting
 
 ```bash
-docker compose run --rm careerai discover --source greenhouse
-docker compose run --rm careerai match
-docker compose run --rm careerai tailor <listing-id>
-docker compose run --rm careerai digest --since 24h
-docker compose exec careerai status        # against the running daemon's DB
+docker compose ps
+docker compose logs --tail=100 api
+curl --fail http://127.0.0.1:3000/v1/health
+curl --fail http://127.0.0.1:3000/v1/ready
 ```
 
-To run the daemon only (no background dashboard), bypass the entrypoint:
+`health` confirms the process is alive. `ready` also checks the database
+dependency. If `ready` fails, inspect the Postgres healthcheck and the API
+logs before retrying.
 
-```bash
-docker compose run --rm --entrypoint careerai careerai daemon
-```
+## Scope notes
 
-To start just the dashboard against an existing volume:
-
-```bash
-docker compose run --rm --service-ports careerai status serve --port 3000 --bind 0.0.0.0
-```
-
-## Notes
-
-- `pandoc` (DOCX + PDF) and `weasyprint` (PDF engine) are installed in the
-  runtime image; both are required for resume rendering.
-- The image does **not** include Chromium. The LinkedIn/Naukri browser
-  submitters (built via the `browser` feature) need a browser at runtime and
-  will not function in this image; ATS HTTP submitters and discovery work
-  normally. Auto-submit stays off by default (dry-run).
-- The container runs as root so it can write to bind-mounted volumes
-  regardless of the host UID. To run as non-root, add `user: "<uid>:<gid>"`
-  in `docker-compose.yml` matching the host user that owns `./data`.
+- This compose file runs `careerai-hosted`, not the local `careerai`
+  daemon or dashboard. Use the systemd/user-service runbook for the local
+  SQLite workflow.
+- The image does not include Chromium. Browser submitters are not part of
+  this hosted smoke stack.
+- Live submission remains disabled unless the separately configured source
+  gates, credentials, and operator confirmation permit it. A healthy
+  container is not evidence that a live ATS submission is authorized.
+- The Prometheus service is optional and should remain loopback-only during
+  local testing.
