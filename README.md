@@ -90,6 +90,13 @@ careerai daemon                                           # long-running schedul
 careerai digest --since 24h
 ```
 
+By default, `careerai init` uses the XDG directories: configuration under
+`$XDG_CONFIG_HOME/career-ai`, profiles, SQLite, and artifacts under
+`$XDG_DATA_HOME/career-ai`, caches under `$XDG_CACHE_HOME/career-ai`, and
+logs/runtime state under `$XDG_STATE_HOME/career-ai`. Standard per-user
+defaults apply when an XDG variable is unset. Set `CAREERAI_ROOT` only when
+an isolated project-root layout is intentional.
+
 The default install ships with the `claude` CLI subprocess backend
 enabled — Claude Code subscribers don't need an API key. To also
 build the rig-core / Anthropic API path (for hosts without Claude
@@ -152,10 +159,10 @@ are the open items:
   server that advertises a known job-search tool name. The bundled
   `linkedin-jobs` MCP and `linkedin-browser` community MCPs are
   opt-in alternatives in `.mcp.json`.
-- **Response tracking (M7, planned)** — `submitted` applications do
-  not yet roll up into a `responded` state automatically. Until M7
-  lands, watch your inbox; `careerai applied --since <window>` shows
-  what was submitted, but not whether the employer replied.
+- **Response tracking** — `submitted` applications do not auto-detect
+  mailbox responses. Operators can record a confirmed response explicitly
+  with `careerai mark-responded <application-id> --note <text>`, while
+  `careerai applied --since <window>` still shows submitted applications.
 - **Semantic matching upgrade (planned)** — current ranking is
   `fastembed` cosine over JD + profile text plus filter-config
   predicates. Roadmap items: per-skill weight tuning from response
@@ -313,7 +320,7 @@ journalctl --user -u careerai -f
 ```
 
 The unit ships with `Restart=on-failure`, `MemoryMax=2G`, `CPUQuota=80%`,
-and `EnvironmentFile=-%h/.config/careerai/env` so you can keep secrets
+and `EnvironmentFile=-%h/.config/career-ai/env` so you can keep secrets
 (API keys, `CAREERAI_ROOT`) out of the unit file. Linux-only;
 see [docs/SERVICE.md](./docs/SERVICE.md) for the full walkthrough,
 troubleshooting, and macOS / Windows notes.

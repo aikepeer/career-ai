@@ -23,7 +23,7 @@ pub async fn api_config_keywords(Json(payload): Json<KeywordToggleRequest>) -> i
     }
 
     let cwd = careerai_core::paths::resolve_root_env();
-    let config_path = cwd.join("config").join("local.yaml");
+    let config_path = careerai_core::paths::config_dir_for_root(&cwd).join("local.yaml");
     match update_keywords_in_config(&config_path, &payload.action, kw) {
         Ok(modified) => (
             StatusCode::OK,

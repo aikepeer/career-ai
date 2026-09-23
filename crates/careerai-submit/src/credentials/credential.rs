@@ -37,8 +37,9 @@ impl Credential {
 }
 
 fn credentials_file_path() -> PathBuf {
-    careerai_core::paths::resolve_root_env()
-        .join("data")
+    careerai_core::paths::database_path(&careerai_core::paths::resolve_root_env())
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
         .join("credentials.json")
 }
 

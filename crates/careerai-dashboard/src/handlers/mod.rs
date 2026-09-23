@@ -178,7 +178,7 @@ pub async fn api_save_config(
     Json(payload): Json<SaveConfigRequest>,
 ) -> impl IntoResponse {
     let cwd = careerai_core::paths::resolve_root_env();
-    let config_path = cwd.join("config").join("local.yaml");
+    let config_path = careerai_core::paths::config_dir_for_root(&cwd).join("local.yaml");
 
     // Persist to the layered config file instead of mutating process env.
     // Env vars are lost on restart, visible to same-user processes via
@@ -220,7 +220,7 @@ pub async fn api_save_config(
 /// - `source`: filter by source (e.g. "greenhouse")
 /// - `state`: filter by listing state
 /// - `remote`: "1" to show only remote listings
-/// - `limit`: page size (default 100, max 500)
+/// - `limit`: page size (default 500, max 500)
 /// - `offset`: pagination offset
 ///
 /// Response: `{ items, total, limit, offset }` so the client can
@@ -229,7 +229,7 @@ pub async fn api_explorer(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<ExplorerQueryParams>,
 ) -> impl IntoResponse {
-    let limit = params.limit.unwrap_or(100).clamp(1, 500);
+    let limit = params.limit.unwrap_or(500).clamp(1, 500);
     let offset = params.offset.unwrap_or(0);
     let filter = details::ExplorerFilter {
         query: params.q.filter(|q| !q.is_empty()),
@@ -298,7 +298,7 @@ pub async fn api_save_threshold(
     Json(payload): Json<SaveThresholdRequest>,
 ) -> impl IntoResponse {
     let cwd = careerai_core::paths::resolve_root_env();
-    let config_path = cwd.join("config").join("local.yaml");
+    let config_path = careerai_core::paths::config_dir_for_root(&cwd).join("local.yaml");
 
     match crate::profile_handler::update_threshold_in_config(&config_path, payload.score_threshold)
     {

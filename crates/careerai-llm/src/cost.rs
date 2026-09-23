@@ -5,7 +5,7 @@
 //! appends them as JSONL to `data/cache/llm/costs.jsonl` so costs survive
 //! restarts. Cost estimation uses simple per-1K-token rates keyed by model
 //! name substring; models without a known rate fall back to $1/$5.
-//!
+
 //! Cache hits (our on-disk [`Cache`]) do not incur provider cost, so the
 //! cache layer strips `cost` before persisting — see [`crate::cache`].
 

@@ -29,6 +29,7 @@ fn export_creates_valid_json_snapshot() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_careerai"))
         .args(["export", "--output", "snapshot.json"])
+        .env("CAREERAI_ROOT", tmp.path())
         .current_dir(tmp.path())
         .output()
         .expect("spawn careerai export");
@@ -64,6 +65,7 @@ fn restore_loads_exported_snapshot() {
     // Export first.
     let export_out = Command::new(env!("CARGO_BIN_EXE_careerai"))
         .args(["export", "--output", "snapshot.json"])
+        .env("CAREERAI_ROOT", tmp.path())
         .current_dir(tmp.path())
         .output()
         .expect("spawn careerai export");
@@ -76,6 +78,7 @@ fn restore_loads_exported_snapshot() {
     // Restore requires --yes.
     let restore_out = Command::new(env!("CARGO_BIN_EXE_careerai"))
         .args(["restore", "--yes", "snapshot.json"])
+        .env("CAREERAI_ROOT", tmp.path())
         .current_dir(tmp.path())
         .output()
         .expect("spawn careerai restore");
@@ -107,6 +110,7 @@ fn restore_refuses_without_yes_flag() {
 
     let restore_out = Command::new(env!("CARGO_BIN_EXE_careerai"))
         .args(["restore", "snapshot.json"])
+        .env("CAREERAI_ROOT", tmp.path())
         .current_dir(tmp.path())
         .output()
         .expect("spawn careerai restore");

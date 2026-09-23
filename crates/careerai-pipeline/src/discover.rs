@@ -330,7 +330,7 @@ pub async fn discover_all(
         sources.retain(|s| source_filter.iter().any(|f| f == s.name()));
     }
     if sources.is_empty() {
-        warn!("no sources enabled — edit config/default.yaml or config/local.yaml");
+        warn!("no sources enabled — edit the resolved XDG config directory");
         return Ok(DiscoveryReport::default());
     }
 

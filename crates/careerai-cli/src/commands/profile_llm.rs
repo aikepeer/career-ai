@@ -74,12 +74,11 @@ pub(super) fn run_with_llm(
         use std::sync::Arc;
 
         let cwd = careerai_core::paths::resolve_root_env();
-        // Fall back to `LlmConfig::default()` ONLY when no `config/`
-        // directory is present (e.g. running `profile import` before
-        // `init`). When config exists, surface load/parse failures so
-        // malformed YAML and similar real errors don't silently hide
-        // behind defaults.
-        let mut llm_cfg = if cwd.join("config").exists() {
+        // Fall back to `LlmConfig::default()` only when no XDG config
+        // directory is present. When config exists, surface load/parse
+        // failures instead of silently hiding malformed YAML.
+        let config_dir = careerai_core::paths::config_dir_for_root(&cwd);
+        let mut llm_cfg = if config_dir.exists() {
             CoreConfig::load(&cwd).context("load config/")?.llm
         } else {
             careerai_core::config::LlmConfig::default()
@@ -88,18 +87,17 @@ pub(super) fn run_with_llm(
             llm_cfg.backend = b;
         }
 
-        // Honor `config.llm.cache_dir` so live profile-extract caches
-        // sit next to tailor caches under `data/cache/llm`. `.gitignore`
-        // already excludes `/data/`.
-        let cache_root: PathBuf = if llm_cfg.cache_dir.is_empty() {
-            PathBuf::from("data").join("cache").join("llm")
+        // Honor `config.llm.cache_dir`; an empty value uses the XDG cache
+        // directory so profile extraction never creates repo-local state.
+        let cache_dir = if llm_cfg.cache_dir.is_empty() {
+            careerai_core::paths::cache_dir_for_root(&cwd).join("llm")
         } else {
-            PathBuf::from(&llm_cfg.cache_dir)
-        };
-        let cache_dir = if cache_root.is_absolute() {
-            cache_root
-        } else {
-            cwd.join(cache_root)
+            let cache_root = PathBuf::from(&llm_cfg.cache_dir);
+            if cache_root.is_absolute() {
+                cache_root
+            } else {
+                cwd.join(cache_root)
+            }
         };
         let cache = Arc::new(careerai_llm::Cache::new(cache_dir));
 

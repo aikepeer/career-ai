@@ -1,7 +1,7 @@
 //! Read the LLM cost JSONL log and aggregate for the dashboard.
 //!
-//! The cost file lives at `<project_root>/data/cache/llm/costs.jsonl`
-//! and is appended to by `CostTracker` in `careerai-llm`.
+//! The cost file lives in the XDG cache directory unless an explicit project
+//! root is configured.
 
 #![allow(clippy::cast_precision_loss)]
 
@@ -12,9 +12,7 @@ use crate::view::LlmCostSummary;
 /// Read `costs.jsonl` and return an aggregate summary. Returns a
 /// zeroed summary if the file does not exist yet (no LLM calls made).
 pub async fn cost_summary(base_dir: &std::path::Path) -> LlmCostSummary {
-    let path: PathBuf = base_dir
-        .join("data")
-        .join("cache")
+    let path: PathBuf = careerai_core::paths::cache_dir_for_root(base_dir)
         .join("llm")
         .join("costs.jsonl");
     read_cost_file(&path).await

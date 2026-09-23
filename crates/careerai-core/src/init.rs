@@ -1,4 +1,5 @@
-//! `careerai init` — scaffold `config/`, `profile/`, and `.env` in a project dir.
+//! `careerai init` — scaffold XDG config/data files, or a legacy project
+//! layout when `CAREERAI_ROOT` is set.
 //!
 //! Writes only files that don't already exist unless `force` is set.
 
@@ -14,24 +15,49 @@ const ENV_EXAMPLE: &str = include_str!("templates/.env.example");
 const PROFILE_EXAMPLE_YAML: &str = include_str!("templates/profile.example.yaml");
 
 pub fn scaffold(root: &Path, force: bool) -> Result<()> {
-    ensure_dir(&root.join("config"))?;
-    ensure_dir(&root.join("profile"))?;
-    ensure_dir(&root.join("artifacts"))?;
+    scaffold_at(&root.join("config"), root, force)?;
+    write_if_absent(&root.join(".env.example"), ENV_EXAMPLE, force)?;
+    Ok(())
+}
 
-    write_if_absent(&root.join("config/default.yaml"), DEFAULT_YAML, force)?;
+/// Scaffold normal runtime files in their XDG locations.
+pub fn scaffold_env(force: bool) -> Result<()> {
+    let data_root = crate::paths::resolve_root_env();
+    let explicit_root = std::env::var("CAREERAI_ROOT")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty());
+    if explicit_root {
+        return scaffold(&data_root, force);
+    }
+
+    let config_root = crate::paths::config_dir_for_root(&data_root);
+    scaffold_at(&config_root, &data_root, force)?;
+    write_if_absent(&config_root.join(".env.example"), ENV_EXAMPLE, force)?;
+    Ok(())
+}
+
+fn scaffold_at(config_root: &Path, data_root: &Path, force: bool) -> Result<()> {
+    ensure_dir(config_root)?;
+    ensure_dir(&data_root.join("profile"))?;
+    ensure_dir(&data_root.join("artifacts"))?;
+
+    write_if_absent(&config_root.join("default.yaml"), DEFAULT_YAML, force)?;
     write_if_absent(
-        &root.join("config/rules.example.yaml"),
+        &config_root.join("rules.example.yaml"),
         RULES_EXAMPLE_YAML,
         force,
     )?;
     write_if_absent(
-        &root.join("profile/profile.example.yaml"),
+        &data_root.join("profile/profile.example.yaml"),
         PROFILE_EXAMPLE_YAML,
         force,
     )?;
-    write_if_absent(&root.join(".env.example"), ENV_EXAMPLE, force)?;
 
-    info!(root = %root.display(), "init: scaffold complete");
+    info!(
+        config_root = %config_root.display(),
+        data_root = %data_root.display(),
+        "init: scaffold complete"
+    );
     Ok(())
 }
 
@@ -66,6 +92,20 @@ mod tests {
         assert!(tmp.path().join(".env.example").is_file());
         assert!(tmp.path().join("artifacts").is_dir());
         assert!(!tmp.path().join("logs").exists());
+    }
+
+    #[test]
+    fn xdg_scaffold_separates_config_and_data_roots() {
+        let config = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+
+        scaffold_at(config.path(), data.path(), false).unwrap();
+
+        assert!(config.path().join("default.yaml").is_file());
+        assert!(config.path().join("rules.example.yaml").is_file());
+        assert!(data.path().join("profile/profile.example.yaml").is_file());
+        assert!(data.path().join("artifacts").is_dir());
+        assert!(!data.path().join("config").exists());
     }
 
     #[test]

@@ -228,12 +228,12 @@ async fn run_subprocess(
     }
 }
 
-/// Open the SQLite pool from `CAREERAI_ROOT`. Best-effort — returns
-/// `None` if the DB is unavailable (the command result still reaches
-/// the caller).
+/// Open the SQLite pool from the explicit root or XDG data directory.
+/// Best-effort — returns `None` if the DB is unavailable (the command result
+/// still reaches the caller).
 async fn open_db_pool() -> Option<sqlx::SqlitePool> {
     let root = careerai_core::paths::resolve_root_env();
-    let path = root.join("data").join("careerai.sqlite");
+    let path = careerai_core::paths::database_path(&root);
     careerai_db::pool_from_path(&path).await.ok()
 }
 

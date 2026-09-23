@@ -21,7 +21,7 @@ pub async fn run(cwd: &Path, apply: bool) -> Result<()> {
     if !apply {
         return Ok(());
     }
-    let local_path = cwd.join("config").join("local.yaml");
+    let local_path = careerai_core::paths::config_dir_for_root(cwd).join("local.yaml");
     let merged = merge_into_local_yaml(&local_path, &report)?;
     write_atomic(&local_path, &merged)?;
     println!();
@@ -105,6 +105,8 @@ fn print_report(report: &SyncReport, apply: bool) {
 
     if !apply {
         println!();
-        println!("  next: rerun with --apply to write changes to config/local.yaml");
+        println!(
+            "  next: rerun with --apply to write changes to the resolved XDG config directory"
+        );
     }
 }

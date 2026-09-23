@@ -69,7 +69,8 @@ pub async fn import_paths_best_effort(paths: &[&Path]) -> Result<Profile> {
 
 async fn try_llm_import(paths: &[&Path]) -> Result<Profile> {
     let cwd = careerai_core::paths::resolve_root_env();
-    let llm_cfg = if cwd.join("config").exists() {
+    let config_dir = careerai_core::paths::config_dir_for_root(&cwd);
+    let llm_cfg = if config_dir.exists() {
         CoreConfig::load(&cwd)
             .map_err(|e| ProfileError::Validation(format!("load config: {e}")))?
             .llm
@@ -77,15 +78,15 @@ async fn try_llm_import(paths: &[&Path]) -> Result<Profile> {
         careerai_core::config::LlmConfig::default()
     };
 
-    let cache_root = if llm_cfg.cache_dir.is_empty() {
-        PathBuf::from("data").join("cache").join("llm")
+    let cache_dir = if llm_cfg.cache_dir.is_empty() {
+        careerai_core::paths::cache_dir_for_root(&cwd).join("llm")
     } else {
-        PathBuf::from(&llm_cfg.cache_dir)
-    };
-    let cache_dir = if cache_root.is_absolute() {
-        cache_root
-    } else {
-        cwd.join(cache_root)
+        let cache_root = PathBuf::from(&llm_cfg.cache_dir);
+        if cache_root.is_absolute() {
+            cache_root
+        } else {
+            cwd.join(cache_root)
+        }
     };
     let cache = Arc::new(Cache::new(cache_dir));
 

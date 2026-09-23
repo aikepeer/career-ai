@@ -32,6 +32,7 @@ fn run_command_exits_zero_and_prints_apply_counts() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_careerai"))
         .arg("run")
+        .env("CAREERAI_ROOT", tmp.path())
         .current_dir(tmp.path())
         .output()
         .expect("spawn careerai run");

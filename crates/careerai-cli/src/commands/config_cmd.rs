@@ -4,10 +4,9 @@ use anyhow::{Context, Result};
 use careerai_profile::schema::Profile;
 
 pub fn run_generate(force: bool) -> Result<()> {
-    let cwd = careerai_core::paths::resolve_root_env();
-    let profile_path = careerai_core::paths::profile_path(&cwd);
-    let local_cfg_path = cwd.join("config").join("local.yaml");
-
+    let data_root = careerai_core::paths::resolve_root_env();
+    let profile_path = careerai_core::paths::profile_path(&data_root);
+    let local_cfg_path = careerai_core::paths::config_dir_for_root(&data_root).join("local.yaml");
     if local_cfg_path.exists() {
         if !force {
             anyhow::bail!(
