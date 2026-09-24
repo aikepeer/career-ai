@@ -493,6 +493,7 @@ async fn cli_run_concurrent_requests_return_busy() {
     let _serial = CLI_RUN_SERIAL.lock().expect("cli-run test mutex poisoned");
     let (server, port) = bootserver().await;
     let url = format!("http://127.0.0.1:{port}/api/v1/cli/run");
+    let _ = &url; // suppress unused-variable on non-unix targets
 
     // Use a slow stub so the first request holds the lock
     #[cfg(unix)]
