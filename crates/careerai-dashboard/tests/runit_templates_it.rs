@@ -1,7 +1,9 @@
 #![allow(clippy::expect_used)]
 
+#[cfg(unix)]
 use std::fs;
 use std::path::Path;
+#[cfg(unix)]
 use std::process::Command;
 
 const RUN_SCRIPT: &str = include_str!("../../../deploy/runit/careerai-dashboard/run");
