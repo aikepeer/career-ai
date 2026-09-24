@@ -250,12 +250,12 @@ async fn generate_config_card_flows_preview_in_real_browser() {
         "config-gen-card must not be nested inside the LLM form"
     );
 
-    let card_deadline = Instant::now() + Duration::from_secs(60);
+    let card_deadline = Instant::now() + Duration::from_secs(15);
     let mut card_text = String::new();
     while Instant::now() < card_deadline {
         let text: String = page
             .evaluate(format!(
-                "document.querySelector('{CARD_SELECTOR}')?.innerText || ''"
+                "document.querySelector('{CARD_SELECTOR}')?.textContent || ''"
             ))
             .await
             .ok()
@@ -304,38 +304,40 @@ async fn generate_config_preview(page: &Page) {
             break;
         }
         if Instant::now() >= deadline {
-            let status = page
-                .find_element(STATUS_MSG)
+            let status: String = page
+                .evaluate(format!(
+                    "document.querySelector('{STATUS_MSG}')?.textContent || ''"
+                ))
                 .await
                 .ok()
-                .and_then(|el| futures::executor::block_on(el.inner_text()).ok().flatten())
+                .and_then(|r| r.into_value().ok())
                 .unwrap_or_default();
             panic!("preview panel never became visible (display={display:?}, status={status:?})");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let status = page
-        .find_element(STATUS_MSG)
+    let status: String = page
+        .evaluate(format!(
+            "document.querySelector('{STATUS_MSG}')?.textContent || ''"
+        ))
         .await
-        .expect("find status msg")
-        .inner_text()
-        .await
-        .expect("status text")
-        .unwrap_or_default();
+        .expect("eval status text")
+        .into_value()
+        .expect("status text value");
     assert!(
         status.contains("Preview ready"),
         "status message after generate: {status:?}"
     );
 
-    let after = page
-        .find_element(AFTER_PREVIEW)
+    let after: String = page
+        .evaluate(format!(
+            "document.querySelector('{AFTER_PREVIEW}')?.textContent || ''"
+        ))
         .await
-        .expect("find config-after")
-        .inner_text()
-        .await
-        .expect("after text")
-        .unwrap_or_default();
+        .expect("eval config-after text")
+        .into_value()
+        .expect("config-after text value");
     assert!(
         !after.trim().is_empty(),
         "config-after preview must contain the generated yaml"
