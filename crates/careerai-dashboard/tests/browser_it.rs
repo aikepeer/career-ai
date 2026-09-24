@@ -234,8 +234,9 @@ async fn generate_config_card_flows_preview_in_real_browser() {
         "config-gen-card must not be nested inside the LLM form"
     );
 
+    let card_deadline = Instant::now() + Duration::from_secs(10);
     let mut card_text = String::new();
-    while Instant::now() < deadline {
+    while Instant::now() < card_deadline {
         if let Ok(el) = page.find_element(CARD_SELECTOR).await {
             if let Ok(Some(text)) = el.inner_text().await {
                 if text.contains("Generate Config from Profile") {
