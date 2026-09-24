@@ -620,12 +620,20 @@ async fn test_desktop_explorer(page: &chromiumoxide::Page, pool: &sqlx::SqlitePo
         Instant::now() + Duration::from_secs(5),
     )
     .await;
-    let destination_focused: bool = page
-        .evaluate("document.activeElement.id === 'tab-btn-explorer'")
-        .await
-        .expect("palette destination focus")
-        .into_value()
-        .expect("bool");
+    let focus_deadline = Instant::now() + Duration::from_secs(5);
+    let mut destination_focused = false;
+    while Instant::now() < focus_deadline {
+        destination_focused = page
+            .evaluate("document.activeElement.id === 'tab-btn-explorer'")
+            .await
+            .ok()
+            .and_then(|r| r.into_value::<bool>().ok())
+            .unwrap_or(false);
+        if destination_focused {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     assert!(
         destination_focused,
         "palette navigation must focus the destination"
