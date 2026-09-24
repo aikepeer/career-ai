@@ -92,8 +92,7 @@ fn parse_results(raw: &str) -> Option<Vec<SummaryResult>> {
     let json = raw
         .strip_prefix("```json")
         .and_then(|text| text.strip_suffix("```"))
-        .map(str::trim)
-        .unwrap_or(raw.trim());
+        .map_or(raw.trim(), str::trim);
     serde_json::from_str(json).ok()
 }
 

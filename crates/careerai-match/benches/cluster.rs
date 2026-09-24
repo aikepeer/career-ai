@@ -23,7 +23,7 @@ fn fixtures() -> Vec<Listing> {
             },
             raw_json: None,
             state: "shortlisted".into(),
-            score: Some(index as f64 / 100.0),
+            score: Some(f64::from(index) / 100.0),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         })
@@ -33,7 +33,7 @@ fn fixtures() -> Vec<Listing> {
 fn cluster_benchmark(c: &mut Criterion) {
     let listings = fixtures();
     c.bench_function("cluster/100-listings", |b| {
-        b.iter(|| black_box(cluster_jds(black_box(&listings), black_box(0.85))))
+        b.iter(|| black_box(cluster_jds(black_box(&listings), black_box(0.85))));
     });
 }
 

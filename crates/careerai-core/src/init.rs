@@ -23,9 +23,7 @@ pub fn scaffold(root: &Path, force: bool) -> Result<()> {
 /// Scaffold normal runtime files in their XDG locations.
 pub fn scaffold_env(force: bool) -> Result<()> {
     let data_root = crate::paths::resolve_root_env();
-    let explicit_root = std::env::var("CAREERAI_ROOT")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty());
+    let explicit_root = std::env::var("CAREERAI_ROOT").is_ok_and(|value| !value.trim().is_empty());
     if explicit_root {
         return scaffold(&data_root, force);
     }

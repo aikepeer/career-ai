@@ -136,8 +136,8 @@ fn parse_sheet(
         .trim();
     let mut sheet: PrepSheet = serde_json::from_str(json)?;
     sheet.application_id = application_id.into();
-    sheet.job_title = listing.title.clone();
-    sheet.company = listing.company.clone();
+    sheet.job_title.clone_from(&listing.title);
+    sheet.company.clone_from(&listing.company);
     if sheet.bullet_to_keyword.is_empty() {
         sheet.bullet_to_keyword = bullets;
     }

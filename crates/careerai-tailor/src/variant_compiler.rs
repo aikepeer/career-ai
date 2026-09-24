@@ -112,18 +112,16 @@ fn parse_response(raw: &str) -> Result<Vec<CompiledBullet>> {
     let json = raw
         .strip_prefix("```json")
         .and_then(|text| text.strip_suffix("```"))
-        .map(str::trim)
-        .unwrap_or(raw);
+        .map_or(raw, str::trim);
     Ok(serde_json::from_str(json)?)
 }
 
 fn parse_path(path: &str) -> Option<(&str, usize, usize)> {
     let (kind, rest) = if let Some(rest) = path.strip_prefix("experience[") {
         ("experience", rest)
-    } else if let Some(rest) = path.strip_prefix("projects[") {
-        ("projects", rest)
     } else {
-        return None;
+        let rest = path.strip_prefix("projects[")?;
+        ("projects", rest)
     };
     let (entry, rest) = rest
         .split_once("] .bullets[")

@@ -4,8 +4,21 @@
 //! derived from the master key and tenant ID. Reauthentication is
 //! required before an export can be initiated.
 
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, KeyInit, OsRng, Payload};
 use aes_gcm::{AeadCore, Aes256Gcm, Nonce};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
+
+fn derive_tenant_key(master_key: &[u8; 32], tenant_id: &str) -> [u8; 32] {
+    let Ok(mut mac) = <HmacSha256 as Mac>::new_from_slice(master_key) else {
+        return [0u8; 32];
+    };
+    mac.update(b"careerai-export-v1:");
+    mac.update(tenant_id.as_bytes());
+    mac.finalize().into_bytes().into()
+}
 use serde::{Deserialize, Serialize};
 
 use crate::auth::session::SessionManager;
@@ -57,10 +70,15 @@ pub fn encrypt_export(
     master_key: &[u8; 32],
     tenant_id: &str,
 ) -> Result<ExportBundle, ExportError> {
-    let cipher = Aes256Gcm::new(master_key.into());
+    let key = derive_tenant_key(master_key, tenant_id);
+    let cipher = Aes256Gcm::new((&key).into());
     let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let payload = Payload {
+        msg: plaintext,
+        aad: tenant_id.as_bytes(),
+    };
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
+        .encrypt(&nonce, payload)
         .map_err(|_| ExportError::EncryptionFailed)?;
 
     Ok(ExportBundle {
@@ -76,13 +94,18 @@ pub fn decrypt_export(
     bundle: &ExportBundle,
     master_key: &[u8; 32],
 ) -> Result<Vec<u8>, ExportError> {
-    let cipher = Aes256Gcm::new(master_key.into());
+    let key = derive_tenant_key(master_key, &bundle.tenant_id);
+    let cipher = Aes256Gcm::new((&key).into());
     let nonce_bytes = hex::decode(&bundle.nonce_hex).map_err(|_| ExportError::DecryptionFailed)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext =
         hex::decode(&bundle.ciphertext_hex).map_err(|_| ExportError::DecryptionFailed)?;
+    let payload = Payload {
+        msg: &ciphertext,
+        aad: bundle.tenant_id.as_bytes(),
+    };
     cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(nonce, payload)
         .map_err(|_| ExportError::DecryptionFailed)
 }
 
@@ -164,5 +187,22 @@ mod tests {
         let key = [42u8; 32];
         let bundle = encrypt_export(b"data", &key, "tenant-42").unwrap();
         assert_eq!(bundle.tenant_id, "tenant-42");
+    }
+
+    #[test]
+    fn tampered_tenant_id_fails_decryption() {
+        let key = [42u8; 32];
+        let mut bundle = encrypt_export(b"data", &key, "tenant-42").unwrap();
+        bundle.tenant_id = "tenant-99".to_string();
+        assert!(decrypt_export(&bundle, &key).is_err());
+    }
+
+    #[test]
+    fn cross_tenant_decryption_fails() {
+        let key = [42u8; 32];
+        let bundle1 = encrypt_export(b"secret-1", &key, "tenant-1").unwrap();
+        let mut bundle2 = bundle1.clone();
+        bundle2.tenant_id = "tenant-2".to_string();
+        assert!(decrypt_export(&bundle2, &key).is_err());
     }
 }

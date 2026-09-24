@@ -132,9 +132,7 @@ pub fn state_dir_env() -> PathBuf {
 /// Select config files for a resolved root. The default XDG data root
 /// loads config from `XDG_CONFIG_HOME/career-ai`.
 pub fn config_dir_for_root(root: &Path) -> PathBuf {
-    let explicit_root = std::env::var("CAREERAI_ROOT")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty());
+    let explicit_root = std::env::var("CAREERAI_ROOT").is_ok_and(|value| !value.trim().is_empty());
     if explicit_root || root.join("config").is_dir() || !is_xdg_data_root(root) {
         root.join("config")
     } else {
@@ -144,9 +142,7 @@ pub fn config_dir_for_root(root: &Path) -> PathBuf {
 
 /// Resolve the SQLite database path for either a project root or XDG data root.
 pub fn database_path(root: &Path) -> PathBuf {
-    let explicit_root = std::env::var("CAREERAI_ROOT")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty());
+    let explicit_root = std::env::var("CAREERAI_ROOT").is_ok_and(|value| !value.trim().is_empty());
     if explicit_root || root.join("config").is_dir() || root.join("data").is_dir() {
         root.join("data").join("careerai.sqlite")
     } else {
@@ -156,9 +152,7 @@ pub fn database_path(root: &Path) -> PathBuf {
 
 /// Resolve the cache location for either a project root or XDG data root.
 pub fn cache_dir_for_root(root: &Path) -> PathBuf {
-    let explicit_root = std::env::var("CAREERAI_ROOT")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty());
+    let explicit_root = std::env::var("CAREERAI_ROOT").is_ok_and(|value| !value.trim().is_empty());
     if explicit_root
         || root.join("config").is_dir()
         || root.join("data").is_dir()

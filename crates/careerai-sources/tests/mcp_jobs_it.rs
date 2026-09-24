@@ -184,6 +184,10 @@ fn main() -> ExitCode {
             }
         }
     } else {
+        if std::env::args().any(|a| a == "--list") {
+            println!("mcp_jobs_integration: test");
+            return ExitCode::SUCCESS;
+        }
         match run_tests() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {

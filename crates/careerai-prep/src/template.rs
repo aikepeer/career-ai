@@ -14,6 +14,7 @@ pub fn render_sheet(sheet: &PrepSheet) -> Result<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::types::BulletKeyword;

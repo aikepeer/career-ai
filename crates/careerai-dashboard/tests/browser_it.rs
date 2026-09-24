@@ -234,14 +234,18 @@ async fn generate_config_card_flows_preview_in_real_browser() {
         "config-gen-card must not be nested inside the LLM form"
     );
 
-    let card_text = page
-        .find_element(CARD_SELECTOR)
-        .await
-        .expect("find config-gen-card")
-        .inner_text()
-        .await
-        .expect("card text")
-        .unwrap_or_default();
+    let mut card_text = String::new();
+    while Instant::now() < deadline {
+        if let Ok(el) = page.find_element(CARD_SELECTOR).await {
+            if let Ok(Some(text)) = el.inner_text().await {
+                if text.contains("Generate Config from Profile") {
+                    card_text = text;
+                    break;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     assert!(
         card_text.contains("Generate Config from Profile"),
         "card text: {card_text:?}"

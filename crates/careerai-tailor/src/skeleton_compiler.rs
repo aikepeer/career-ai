@@ -107,8 +107,7 @@ fn validate_candidate(candidate: &CandidateSkeleton) -> Result<()> {
 fn strip_json_fence(raw: &str) -> &str {
     raw.strip_prefix("```json")
         .and_then(|value| value.strip_suffix("```"))
-        .map(str::trim)
-        .unwrap_or(raw)
+        .map_or(raw, str::trim)
 }
 
 #[cfg(test)]

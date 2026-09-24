@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 const RUN_SCRIPT: &str = include_str!("../../../deploy/runit/careerai-dashboard/run");
@@ -69,25 +69,32 @@ fn write_executable(path: &Path, body: &str) {
 }
 
 #[cfg(unix)]
-fn service_fixture(name: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("careerai-runit-{name}-{}-{nanos}", std::process::id()));
+fn service_fixture(name: &str) -> tempfile::TempDir {
+    let tmp = tempfile::Builder::new()
+        .prefix(&format!("careerai-runit-{name}-"))
+        .tempdir()
+        .expect("create tempdir");
+    let root = tmp.path();
     write_executable(&root.join("bin/chpst"), FAKE_CHPST);
-    let recorder = "#!/usr/bin/env bash\nprintf '%s %s\\n' \"${0##*/}\" \"$*\" >>\"$RUNIT_TRACE\"\n";
+    let recorder =
+        "#!/usr/bin/env bash\nprintf '%s %s\\n' \"${0##*/}\" \"$*\" >>\"$RUNIT_TRACE\"\n";
     write_executable(&root.join("bin/svlogd"), recorder);
     write_executable(&root.join("bin/careerai"), recorder);
-    root
+    tmp
 }
 
 #[cfg(unix)]
 fn run_service_script(root: &Path, script: &Path, cwd: &Path) -> (std::process::Output, String) {
-    let path = format!("{}:{}", root.join("bin").display(), std::env::var("PATH").unwrap_or_default());
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let trace = root.join("trace");
     let mut cmd = Command::new(script);
-    cmd.current_dir(cwd).env("PATH", path).env("RUNIT_TRACE", &trace);
+    cmd.current_dir(cwd)
+        .env("PATH", path)
+        .env("RUNIT_TRACE", &trace);
     for var in [
         "CAREERAI_ROOT",
         "CAREERAI_USER",
@@ -106,23 +113,28 @@ fn run_service_script(root: &Path, script: &Path, cwd: &Path) -> (std::process::
 #[cfg(unix)]
 #[test]
 fn dashboard_log_script_reads_service_envdir() {
-    let root = service_fixture("log");
+    let fixture = service_fixture("log");
+    let root = fixture.path();
     let service = root.join("careerai-dashboard");
     write_executable(&service.join("log/run"), LOG_SCRIPT);
     fs::create_dir_all(service.join("env")).expect("create envdir");
     fs::write(service.join("env/CAREERAI_LOG_USER"), "svc-logger\n").expect("write envdir value");
 
-    let (output, trace) = run_service_script(&root, &service.join("log/run"), &service.join("log"));
+    let (output, trace) = run_service_script(root, &service.join("log/run"), &service.join("log"));
 
-    assert!(output.status.success(), "log/run failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "log/run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(trace, "chpst -u svc-logger\nsvlogd ./main\n");
-    fs::remove_dir_all(root).expect("remove fixture");
 }
 
 #[cfg(unix)]
 #[test]
 fn dashboard_run_script_reads_service_envdir() {
-    let root = service_fixture("run");
+    let fixture = service_fixture("run");
+    let root = fixture.path();
     let service = root.join("careerai-dashboard");
     write_executable(&service.join("run"), RUN_SCRIPT);
     let app_root = root.join("app");
@@ -131,14 +143,23 @@ fn dashboard_run_script_reads_service_envdir() {
     for (key, value) in [
         ("CAREERAI_ROOT", app_root.display().to_string()),
         ("CAREERAI_USER", "svc-user".to_owned()),
-        ("CAREERAI_BIN", root.join("bin/careerai").display().to_string()),
+        (
+            "CAREERAI_BIN",
+            root.join("bin/careerai").display().to_string(),
+        ),
     ] {
         fs::write(service.join("env").join(key), format!("{value}\n")).expect("write envdir value");
     }
 
-    let (output, trace) = run_service_script(&root, &service.join("run"), &service);
+    let (output, trace) = run_service_script(root, &service.join("run"), &service);
 
-    assert!(output.status.success(), "run failed: {}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(trace, "chpst -u svc-user\ncareerai status serve --port 8787\n");
-    fs::remove_dir_all(root).expect("remove fixture");
+    assert!(
+        output.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        trace,
+        "chpst -u svc-user\ncareerai status serve --port 8787\n"
+    );
 }
