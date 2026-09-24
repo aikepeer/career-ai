@@ -15,7 +15,14 @@
 //! When no binary is found the tests skip with a hint instead of
 //! failing, so machines without a browser (and CI) stay green.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    // `BROWSER_SERIAL` is a std mutex held across `.await`s by design —
+    // it serializes CPU-heavy Chromium instances on constrained CI
+    // runners. Deliberate, documented, test-only.
+    clippy::await_holding_lock
+)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -34,6 +41,12 @@ const GENERATE_BUTTON: &str = ".config-gen-card button";
 const PREVIEW_PANEL: &str = "#config-diff-panel";
 const STATUS_MSG: &str = "#config-gen-status-msg";
 const AFTER_PREVIEW: &str = "#config-after";
+
+/// Headless Chromium is CPU-heavy; running several instances at once on a
+/// constrained CI runner starves each other's renderer and produces
+/// spurious empty-text/timeout failures. Serialize the browser tests in
+/// this file so at most one Chromium instance runs at a time.
+static BROWSER_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn chromium_executable() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("CAREERAI_CHROMIUM") {
@@ -180,6 +193,7 @@ async fn open_config_tab(page: &Page, deadline: Instant) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn generate_config_card_flows_preview_in_real_browser() {
+    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
     let Some(_exe) = chromium_executable() else {
         eprintln!(
             "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
@@ -234,16 +248,20 @@ async fn generate_config_card_flows_preview_in_real_browser() {
         "config-gen-card must not be nested inside the LLM form"
     );
 
-    let card_deadline = Instant::now() + Duration::from_secs(10);
+    let card_deadline = Instant::now() + Duration::from_secs(20);
     let mut card_text = String::new();
     while Instant::now() < card_deadline {
-        if let Ok(el) = page.find_element(CARD_SELECTOR).await {
-            if let Ok(Some(text)) = el.inner_text().await {
-                if text.contains("Generate Config from Profile") {
-                    card_text = text;
-                    break;
-                }
-            }
+        let text: String = page
+            .evaluate(format!(
+                "document.querySelector('{CARD_SELECTOR}')?.innerText || ''"
+            ))
+            .await
+            .ok()
+            .and_then(|r| r.into_value::<String>().ok())
+            .unwrap_or_default();
+        if text.contains("Generate Config from Profile") {
+            card_text = text;
+            break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -324,6 +342,7 @@ async fn generate_config_preview(page: &Page) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mobile_viewport_renders_config_cards_without_horizontal_overflow() {
+    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
     let Some(_exe) = chromium_executable() else {
         eprintln!(
             "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
@@ -488,6 +507,7 @@ async fn assert_all_tabs_fit_viewport(browser: &Browser, port: u16, width: u32) 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
+    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
     let Some(_exe) = chromium_executable() else {
         eprintln!(
             "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
@@ -521,6 +541,7 @@ async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workspace_saved_searches_palette_and_refresh_in_real_browser() {
     use chromiumoxide::page::ScreenshotParams;
+    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
     if chromium_executable().is_none() {
         eprintln!("SKIP: set CAREERAI_CHROMIUM for workspace browser coverage");
         return;
