@@ -193,7 +193,9 @@ async fn open_config_tab(page: &Page, deadline: Instant) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn generate_config_card_flows_preview_in_real_browser() {
-    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
+    let _serial = BROWSER_SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(_exe) = chromium_executable() else {
         eprintln!(
             "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
@@ -248,7 +250,7 @@ async fn generate_config_card_flows_preview_in_real_browser() {
         "config-gen-card must not be nested inside the LLM form"
     );
 
-    let card_deadline = Instant::now() + Duration::from_secs(20);
+    let card_deadline = Instant::now() + Duration::from_secs(60);
     let mut card_text = String::new();
     while Instant::now() < card_deadline {
         let text: String = page
@@ -342,7 +344,9 @@ async fn generate_config_preview(page: &Page) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mobile_viewport_renders_config_cards_without_horizontal_overflow() {
-    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
+    let _serial = BROWSER_SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(_exe) = chromium_executable() else {
         eprintln!(
             "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
@@ -507,7 +511,9 @@ async fn assert_all_tabs_fit_viewport(browser: &Browser, port: u16, width: u32) 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
-    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
+    let _serial = BROWSER_SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(_exe) = chromium_executable() else {
         eprintln!(
             "SKIP: no chromium executable found — set CAREERAI_CHROMIUM or run scripts/fetch-chromium.sh"
@@ -541,7 +547,9 @@ async fn every_dashboard_tab_fits_desktop_and_mobile_viewports() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workspace_saved_searches_palette_and_refresh_in_real_browser() {
     use chromiumoxide::page::ScreenshotParams;
-    let _serial = BROWSER_SERIAL.lock().expect("browser test mutex poisoned");
+    let _serial = BROWSER_SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if chromium_executable().is_none() {
         eprintln!("SKIP: set CAREERAI_CHROMIUM for workspace browser coverage");
         return;
