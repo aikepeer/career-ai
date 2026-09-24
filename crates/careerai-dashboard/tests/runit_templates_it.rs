@@ -29,9 +29,12 @@ fn dashboard_runit_run_script_starts_loopback_dashboard() {
     assert!(RUN_SCRIPT.contains("chpst -u"));
     assert!(!RUN_SCRIPT.contains("CAREERAI_DASHBOARD_ALLOW_NON_LOOPBACK=1"));
 
-    let script_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/runit/careerai-dashboard/run");
-    assert_executable(&script_path);
+    #[cfg(unix)]
+    {
+        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../deploy/runit/careerai-dashboard/run");
+        assert_executable(&script_path);
+    }
 }
 
 #[test]
@@ -41,9 +44,12 @@ fn dashboard_runit_log_script_uses_svlogd() {
     assert!(LOG_SCRIPT.contains("svlogd"));
     assert!(LOG_SCRIPT.contains("chpst -u"));
 
-    let log_script_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/runit/careerai-dashboard/log/run");
-    assert_executable(&log_script_path);
+    #[cfg(unix)]
+    {
+        let log_script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../deploy/runit/careerai-dashboard/log/run");
+        assert_executable(&log_script_path);
+    }
 }
 
 // runsv never reads a service's env/ directory, so values an operator puts
