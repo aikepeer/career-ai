@@ -127,6 +127,14 @@ async fn run_subprocess(
     // — when the timeout fired, the `output()` future was dropped but the
     // child process kept running, leaking a tailor/render subprocess that
     // could hold the pipeline lock for the full 10-minute window.
+    //
+    // `current_dir` requires the directory to already exist — on a fresh
+    // install (or a fresh CI sandbox) the XDG data root has never been
+    // created, so every dashboard-spawned command would otherwise fail
+    // with ENOENT before the child even runs. Best-effort create it; a
+    // real permission/IO problem still surfaces through the spawn error
+    // below.
+    let _ = std::fs::create_dir_all(cli_root);
     let mut child = match tokio::process::Command::new(exe)
         .args(argv)
         .current_dir(cli_root)
@@ -263,5 +271,29 @@ mod tests {
         let a = pipeline_lock();
         let b = pipeline_lock();
         assert!(std::ptr::eq(a, b));
+    }
+
+    /// Regression: `run_subprocess` must create `cli_root` before
+    /// spawning, since `Command::current_dir` fails with ENOENT if the
+    /// directory doesn't exist yet. On a fresh install (or CI sandbox)
+    /// the XDG data root has never been created, so this would fail
+    /// every dashboard CLI command on first use.
+    #[tokio::test]
+    async fn run_subprocess_creates_missing_cli_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing_root = tmp.path().join("nested/does/not/exist");
+        assert!(!missing_root.exists());
+
+        let outcome = run_subprocess(
+            std::path::Path::new("/bin/true"),
+            &[],
+            &missing_root,
+            "test-root",
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(missing_root.is_dir(), "cli_root must be created");
+        assert_eq!(outcome.http_status, StatusCode::OK);
     }
 }
