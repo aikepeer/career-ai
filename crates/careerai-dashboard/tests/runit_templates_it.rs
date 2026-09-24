@@ -2,6 +2,7 @@
 
 #[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::path::Path;
 #[cfg(unix)]
 use std::process::Command;
@@ -31,8 +32,8 @@ fn dashboard_runit_run_script_starts_loopback_dashboard() {
 
     #[cfg(unix)]
     {
-        let script_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../deploy/runit/careerai-dashboard/run");
+        let script_path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/runit/careerai-dashboard/run");
         assert_executable(&script_path);
     }
 }
@@ -56,6 +57,7 @@ fn dashboard_runit_log_script_uses_svlogd() {
 // there must be loaded by the scripts themselves. These tests run the real
 // scripts against fake chpst/svlogd/careerai binaries that record their calls.
 
+#[cfg(unix)]
 const FAKE_CHPST: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 while [ "$#" -gt 0 ]; do
