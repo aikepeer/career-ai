@@ -140,14 +140,18 @@ fn build_sources(cfg: &CoreConfig) -> Vec<Arc<dyn Source>> {
 /// matches `name` (caller should treat this as a no-op, not an error).
 fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
     match name {
-        "greenhouse" => {
-            cfg.sources.greenhouse.companies.first().map(|company| {
-                Arc::new(GreenhouseSource::new(company.clone())) as Arc<dyn Source>
-            })
-        }
-        "lever" => cfg.sources.lever.companies.first().map(|company| {
-            Arc::new(LeverSource::new(company.clone())) as Arc<dyn Source>
-        }),
+        "greenhouse" => cfg
+            .sources
+            .greenhouse
+            .companies
+            .first()
+            .map(|company| Arc::new(GreenhouseSource::new(company.clone())) as Arc<dyn Source>),
+        "lever" => cfg
+            .sources
+            .lever
+            .companies
+            .first()
+            .map(|company| Arc::new(LeverSource::new(company.clone())) as Arc<dyn Source>),
         "ashby" => cfg.sources.ashby.companies.first().map(|company| {
             Arc::new(careerai_sources::AshbySource::new(company.clone())) as Arc<dyn Source>
         }),
@@ -158,9 +162,7 @@ fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
             }
             Some(Arc::new(s))
         }
-        "remoteok" if cfg.sources.remoteok.enabled => {
-            Some(Arc::new(RemoteOkSource::new()))
-        }
+        "remoteok" if cfg.sources.remoteok.enabled => Some(Arc::new(RemoteOkSource::new())),
         "naukri" if cfg.sources.naukri.enabled => {
             let mut s = NaukriSource::new();
             if !cfg.sources.naukri.keywords.is_empty() {
@@ -174,15 +176,13 @@ fn build_one_source(cfg: &CoreConfig, name: &str) -> Option<Arc<dyn Source>> {
             }
             Some(Arc::new(s))
         }
-        "indeed_rss" if cfg.sources.indeed_rss.enabled => {
-            Some(Arc::new(IndeedRssSource::new(cfg.sources.indeed_rss.clone())))
-        }
+        "indeed_rss" if cfg.sources.indeed_rss.enabled => Some(Arc::new(IndeedRssSource::new(
+            cfg.sources.indeed_rss.clone(),
+        ))),
         #[cfg(feature = "browser")]
-        "linkedin_browser" if cfg.sources.linkedin_browser.enabled => {
-            Some(Arc::new(careerai_sources::LinkedinBrowserSource::new(
-                cfg.sources.linkedin_browser.clone(),
-            )))
-        }
+        "linkedin_browser" if cfg.sources.linkedin_browser.enabled => Some(Arc::new(
+            careerai_sources::LinkedinBrowserSource::new(cfg.sources.linkedin_browser.clone()),
+        )),
         #[cfg(not(feature = "browser"))]
         "linkedin_browser" if cfg.sources.linkedin_browser.enabled => {
             tracing::warn!(
