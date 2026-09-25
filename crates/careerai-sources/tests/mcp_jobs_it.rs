@@ -13,7 +13,11 @@
 //! banner to stdout before any code runs, corrupting JSON-RPC frames
 //! the child must emit.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::unused_async_trait_impl
+)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -180,6 +184,10 @@ fn main() -> ExitCode {
             }
         }
     } else {
+        if std::env::args().any(|a| a == "--list") {
+            println!("mcp_jobs_integration: test");
+            return ExitCode::SUCCESS;
+        }
         match run_tests() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {

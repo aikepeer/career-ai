@@ -25,7 +25,7 @@ Restart=on-failure
 RestartSec=10s
 # Optional env file (no error if missing); use this to keep secrets out
 # of the unit file. Add lines like ANTHROPIC_API_KEY=... or CAREERAI_ROOT=...
-EnvironmentFile=-%h/.config/careerai/env
+EnvironmentFile=-%h/.config/career-ai/env
 # Resource caps so a runaway daemon does not eat the laptop.
 MemoryMax=2G
 CPUQuota=80%
@@ -47,11 +47,11 @@ pub fn run_install(force: bool) -> Result<()> {
     require_linux("install")?;
     let unit_path = unit_path()?;
     let bin = current_bin()?;
-    // Pin the daemon's WorkingDirectory to the project root the user is
-    // installing from. Without this, `systemd --user` starts the
-    // service in the manager's default cwd and the CLI's
-    // current_dir()-based config/data resolution reads the wrong tree.
-    let cwd = std::env::current_dir().context("resolve current_dir")?;
+    // Pin the daemon's WorkingDirectory to the app root (same resolution
+    // the CLI uses). Without this, `systemd --user` starts the service
+    // in the manager's default cwd and config/data resolution would read
+    // the wrong tree.
+    let cwd = careerai_core::paths::resolve_root_env();
     let body = render_unit(&bin, &cwd);
 
     if let Some(parent) = unit_path.parent() {
@@ -276,7 +276,7 @@ mod tests {
         assert!(body.contains("MemoryMax=2G"), "missing MemoryMax: {body}");
         assert!(body.contains("CPUQuota=80%"), "missing CPUQuota: {body}");
         assert!(
-            body.contains("EnvironmentFile=-%h/.config/careerai/env"),
+            body.contains("EnvironmentFile=-%h/.config/career-ai/env"),
             "missing EnvironmentFile: {body}"
         );
         assert!(

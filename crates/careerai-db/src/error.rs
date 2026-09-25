@@ -13,6 +13,12 @@ pub enum DbError {
 
     #[error("listing not found: {0}")]
     NotFound(String),
+
+    /// R14: the supplied IDs do not refer to the same application/listing
+    /// pair, or a conditional update matched zero rows because the
+    /// expected state no longer holds.
+    #[error("conflict: {0}")]
+    Conflict(String),
 }
 
 pub type Result<T> = std::result::Result<T, DbError>;

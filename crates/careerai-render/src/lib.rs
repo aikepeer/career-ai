@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod artifacts;
+pub mod ats;
 pub mod config;
 pub mod error;
 pub mod pandoc;
@@ -83,22 +84,31 @@ pub async fn render_application(
     let resume_md = templates::render_resume(view, personal_name)?;
     tokio::fs::write(&layout.resume_md, resume_md.as_bytes()).await?;
 
+    // Resume HTML (executive format matching original layout).
+    let resume_html = templates::render_resume_html(view, personal_name, None)?;
+    tokio::fs::write(&layout.resume_html, resume_html.as_bytes()).await?;
+
     // Cover letter markdown.
     let cover_md = templates::render_cover_letter(letter, personal_name, listing_company, &today)?;
     tokio::fs::write(&layout.cover_md, cover_md.as_bytes()).await?;
 
-    // Pandoc conversions run in parallel — three independent subprocess
-    // spawns, each ~500ms wall-clock. Sequential would be ~1.5s.
-    tokio::try_join!(
+    // Conversions run in parallel.
+    let (docx_res, pdf_res, cover_res) = tokio::join!(
         pandoc::md_to_docx_with_bin(&pandoc_bin, &layout.resume_md, &layout.resume_docx, cfg),
-        pandoc::md_to_pdf_with_bin(&pandoc_bin, &layout.resume_md, &layout.resume_pdf, cfg),
+        pandoc::html_to_pdf(&layout.resume_html, &layout.resume_pdf, cfg),
         pandoc::md_to_docx_with_bin(&pandoc_bin, &layout.cover_md, &layout.cover_docx, cfg),
-    )?;
+    );
+    docx_res?;
+    cover_res?;
+    if let Err(e) = pdf_res {
+        tracing::warn!(target = "render", error = %e, "PDF compilation failed or engine missing; DOCX artifacts preserved");
+    }
 
     let bytes = stat_all(&layout).await?;
 
     if !cfg.keep_intermediate_markdown {
         let _ = tokio::fs::remove_file(&layout.resume_md).await;
+        let _ = tokio::fs::remove_file(&layout.resume_html).await;
         let _ = tokio::fs::remove_file(&layout.cover_md).await;
     }
 
@@ -116,13 +126,15 @@ async fn stat_all(layout: &ArtifactLayout) -> Result<BTreeMap<PathBuf, u64>> {
     let mut out = BTreeMap::new();
     for p in [
         &layout.resume_md,
+        &layout.resume_html,
         &layout.resume_docx,
         &layout.resume_pdf,
         &layout.cover_md,
         &layout.cover_docx,
     ] {
-        let meta = tokio::fs::metadata(p).await?;
-        out.insert(p.clone(), meta.len());
+        if let Ok(meta) = tokio::fs::metadata(p).await {
+            out.insert(p.clone(), meta.len());
+        }
     }
     Ok(out)
 }

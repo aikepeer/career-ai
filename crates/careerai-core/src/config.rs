@@ -1,5 +1,6 @@
-//! Layered config loader: embedded defaults → `config/default.yaml` →
-//! `config/local.yaml` → `CAREERAI_*` env vars. Loaded once at startup.
+//! Layered config loader: embedded defaults → XDG config
+//! (`$XDG_CONFIG_HOME/career-ai/default.yaml` and `local.yaml`) →
+//! `CAREERAI_*` env vars. Explicit `CAREERAI_ROOT` keeps project-local config.
 //!
 //! Section configs are split into submodules under `config/` to keep
 //! each file under the project's 300-LOC cap. The umbrella [`CoreConfig`]
@@ -11,6 +12,7 @@ use std::path::Path;
 use config::{Config, ConfigError, Environment, File, FileFormat};
 use serde::{Deserialize, Serialize};
 
+mod cluster;
 mod dashboard;
 mod llm;
 mod match_;
@@ -21,6 +23,7 @@ mod sources;
 mod submit;
 #[cfg(test)]
 mod tests;
+pub use cluster::ClusterConfig;
 
 pub use dashboard::DashboardConfig;
 pub use render::RenderConfig;
@@ -50,6 +53,8 @@ pub struct CoreConfig {
     #[serde(rename = "match")]
     pub matching: MatchConfig,
     #[serde(default)]
+    pub cluster: ClusterConfig,
+    #[serde(default)]
     pub rates: RatesConfig,
     #[serde(default)]
     pub submit: SubmitConfig,
@@ -74,12 +79,14 @@ pub struct CoreConfig {
 }
 
 impl CoreConfig {
-    /// Load with the standard layering relative to `root`. Missing
-    /// `default.yaml` and `local.yaml` are tolerated; embedded defaults fill
-    /// any gap.
+    /// Load layered configuration from the resolved XDG config directory.
+    ///
+    /// An explicit project root remains supported for isolated workspaces;
+    /// normal invocations read `XDG_CONFIG_HOME/career-ai`.
     pub fn load(root: &Path) -> Result<Self, ConfigError> {
-        let default_path = root.join("config").join("default.yaml");
-        let local_path = root.join("config").join("local.yaml");
+        let config_dir = crate::paths::config_dir_for_root(root);
+        let default_path = config_dir.join("default.yaml");
+        let local_path = config_dir.join("local.yaml");
 
         let mut builder =
             Config::builder().add_source(File::from_str(EMBEDDED_DEFAULTS, FileFormat::Yaml));

@@ -90,6 +90,13 @@ careerai daemon                                           # long-running schedul
 careerai digest --since 24h
 ```
 
+By default, `careerai init` uses the XDG directories: configuration under
+`$XDG_CONFIG_HOME/career-ai`, profiles, SQLite, and artifacts under
+`$XDG_DATA_HOME/career-ai`, caches under `$XDG_CACHE_HOME/career-ai`, and
+logs/runtime state under `$XDG_STATE_HOME/career-ai`. Standard per-user
+defaults apply when an XDG variable is unset. Set `CAREERAI_ROOT` only when
+an isolated project-root layout is intentional.
+
 The default install ships with the `claude` CLI subprocess backend
 enabled — Claude Code subscribers don't need an API key. To also
 build the rig-core / Anthropic API path (for hosts without Claude
@@ -120,7 +127,7 @@ careerai sources sync                                # preview ~80 known-good Gr
                                                      # your `domains:` keywords
 careerai sources sync --apply                        # merge into config/local.yaml (preserves
                                                      # other user keys; manual additions kept)
-careerai discover --source greenhouse,lever,ashby,remotive,remoteok
+careerai discover --source greenhouse,lever,ashby,remotive,remoteok,freehire
 careerai match                                       # filter + rank against profile
 careerai shortlist show --limit 20                   # pick a listing-id
 careerai tailor <listing-id>                         # constrained-diff resume + cover letter
@@ -128,6 +135,11 @@ careerai render <application-id>                     # DOCX + PDF via pandoc
 careerai apply <application-id>                      # DRY-RUN; see /career:apply walkthrough
 careerai applied --limit 20                          # confirm recent rows + cadence
 careerai digest --since 24h                          # whole-pipeline rollup
+careerai salary "Acme Robotics" [--city Berlin]     # benchmark vs your salary_data.json
+careerai salary "Acme Robotics" --gap             # target comp vs market index
+careerai salary --list-all | --validate           # inspect / validate your salary data
+careerai followups [--days 10]                    # quiet applications due a follow-up
+careerai liveness [--source greenhouse]           # drop dead postings before tailoring
 ```
 
 Live submission is gated three ways: dry-run is the default, you
@@ -147,10 +159,10 @@ are the open items:
   server that advertises a known job-search tool name. The bundled
   `linkedin-jobs` MCP and `linkedin-browser` community MCPs are
   opt-in alternatives in `.mcp.json`.
-- **Response tracking (M7, planned)** — `submitted` applications do
-  not yet roll up into a `responded` state automatically. Until M7
-  lands, watch your inbox; `careerai applied --since <window>` shows
-  what was submitted, but not whether the employer replied.
+- **Response tracking** — `submitted` applications do not auto-detect
+  mailbox responses. Operators can record a confirmed response explicitly
+  with `careerai mark-responded <application-id> --note <text>`, while
+  `careerai applied --since <window>` still shows submitted applications.
 - **Semantic matching upgrade (planned)** — current ranking is
   `fastembed` cosine over JD + profile text plus filter-config
   predicates. Roadmap items: per-skill weight tuning from response
@@ -173,7 +185,7 @@ are the open items:
    ┌──── Source trait ────┐ pipeline state machine ┌── Submitter trait ──┐
    │ greenhouse · lever · │ discovered → shortlist │ ats-http · linkedin │
    │ remotive · remoteok ·│ → tailored → rendered →│ · naukri            │
-   │ naukri               │ → submitted → responded│   (dry-run default) │
+   │ freehire · naukri    │ → submitted → responded│   (dry-run default) │
    └──────────────────────┘                        └─────────────────────┘
                                    │
                   SQLite · keyring · governor rate-limits
@@ -224,6 +236,7 @@ and key entry points:
 | `lever`             | enabled   | Public ATS API, one entry per company slug.                                                                 |
 | `remotive`          | enabled   | Public job feed.                                                                                            |
 | `remoteok`          | enabled   | Public job feed.                                                                                            |
+| `freehire`          | enabled   | Public aggregator REST API (no auth) — tech-first facets, best-effort SLA.                                 |
 | `naukri`            | disabled  | Undocumented `jobapi/v3/search`; opt-in.                                                                    |
 | `linkedin_browser`  | disabled  | Native browser-driven discovery. Violates LinkedIn UA §8.2 — opt-in only. Requires `--features browser` and a `li_at` cookie stored in the OS keychain. |
 | `mcp_jobs`          | disabled  | Generic MCP-server adapter for community job-search MCPs. Per-server opt-in.                                |
@@ -307,7 +320,7 @@ journalctl --user -u careerai -f
 ```
 
 The unit ships with `Restart=on-failure`, `MemoryMax=2G`, `CPUQuota=80%`,
-and `EnvironmentFile=-%h/.config/careerai/env` so you can keep secrets
+and `EnvironmentFile=-%h/.config/career-ai/env` so you can keep secrets
 (API keys, `CAREERAI_ROOT`) out of the unit file. Linux-only;
 see [docs/SERVICE.md](./docs/SERVICE.md) for the full walkthrough,
 troubleshooting, and macOS / Windows notes.

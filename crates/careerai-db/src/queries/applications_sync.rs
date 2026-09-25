@@ -73,13 +73,35 @@ pub async fn transition_application_and_listing(
     let mut tx = pool.begin().await?;
     let now = Utc::now();
 
-    // Application state.
-    let app_res = sqlx::query("UPDATE applications SET state = ?, updated_at = ? WHERE id = ?")
-        .bind(application_state)
-        .bind(now)
-        .bind(application_id)
-        .execute(&mut *tx)
-        .await?;
+    // R14: fetch the application row first and verify its listing_id
+    // matches the supplied listing_id. This prevents a mismatched caller
+    // from advancing an unrelated listing. The application update is
+    // scoped by both id AND listing_id so a stale ID pair can never
+    // mutate a row it does not own.
+    let app_row: Option<(String,)> =
+        sqlx::query_as("SELECT listing_id FROM applications WHERE id = ?")
+            .bind(application_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let actual_listing_id = app_row
+        .ok_or_else(|| DbError::NotFound(application_id.to_string()))?
+        .0;
+    if actual_listing_id != listing_id {
+        return Err(DbError::Conflict(format!(
+            "application {application_id} belongs to listing {actual_listing_id}, not {listing_id}"
+        )));
+    }
+
+    // Application state — scoped by id + listing_id.
+    let app_res = sqlx::query(
+        "UPDATE applications SET state = ?, updated_at = ? WHERE id = ? AND listing_id = ?",
+    )
+    .bind(application_state)
+    .bind(now)
+    .bind(application_id)
+    .bind(listing_id)
+    .execute(&mut *tx)
+    .await?;
     if app_res.rows_affected() == 0 {
         return Err(DbError::NotFound(application_id.to_string()));
     }

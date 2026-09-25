@@ -1,0 +1,24 @@
+{
+  "messages": [
+    {
+      "id": null,
+      "role": "user",
+      "created": 1787605504,
+      "content": [{"type": "text", "text": "input"}],
+      "metadata": {"userVisible": true}
+    },
+    {
+      "id": "resp_fixture",
+      "role": "assistant",
+      "created": 1787605506,
+      "content": [{"type": "text", "text": "GOOSE_OK"}],
+      "metadata": {"userVisible": true}
+    }
+  ],
+  "metadata": {
+    "total_tokens": 2993,
+    "input_tokens": 2988,
+    "output_tokens": 5,
+    "status": "completed"
+  }
+}

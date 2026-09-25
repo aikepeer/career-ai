@@ -13,6 +13,16 @@ use careerai_sources::RawListing;
 /// without touching the rank/pipeline layer.
 pub trait Scorer: Send + Sync {
     fn score(&self, profile_text: &str, listing: &RawListing) -> f32;
+
+    /// Score a whole batch. Implementations may pre-tokenize the profile
+    /// once (the profile is typically much larger than any single listing);
+    /// the default delegates to [`Scorer::score`] per listing.
+    fn score_many(&self, profile_text: &str, listings: &[RawListing]) -> Vec<f32> {
+        listings
+            .iter()
+            .map(|listing| self.score(profile_text, listing))
+            .collect()
+    }
 }
 
 /// Flatten a structured [`Profile`] into the one big blob we hand to the
@@ -24,13 +34,7 @@ pub fn flatten_profile(p: &Profile) -> String {
     out.push('\n');
     out.push_str(&p.summary);
     out.push('\n');
-    for s in p
-        .skills
-        .languages
-        .iter()
-        .chain(&p.skills.frameworks)
-        .chain(&p.skills.tools)
-    {
+    for s in p.skills.all_skill_names() {
         out.push_str(s);
         out.push(' ');
     }
@@ -61,21 +65,38 @@ pub fn flatten_profile(p: &Profile) -> String {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct JaccardScorer;
 
+impl JaccardScorer {
+    fn score_with_tokens(profile_tokens: &HashSet<String>, listing: &RawListing) -> f32 {
+        let title_score = jaccard(profile_tokens, &tokenize(&listing.title));
+        let body_score = jaccard(profile_tokens, &tokenize(&listing.description));
+        // Title is a strong signal (curated by the poster), weight 2x.
+        (2.0 * title_score + body_score) / 3.0
+    }
+}
+
 impl Scorer for JaccardScorer {
     fn score(&self, profile_text: &str, listing: &RawListing) -> f32 {
         let profile_tokens = tokenize(profile_text);
         if profile_tokens.is_empty() {
             return 0.0;
         }
-        let title_score = jaccard(&profile_tokens, &tokenize(&listing.title));
-        let body_score = jaccard(&profile_tokens, &tokenize(&listing.description));
-        // Title is a strong signal (curated by the poster), weight 2x.
-        (2.0 * title_score + body_score) / 3.0
+        Self::score_with_tokens(&profile_tokens, listing)
+    }
+
+    fn score_many(&self, profile_text: &str, listings: &[RawListing]) -> Vec<f32> {
+        let profile_tokens = tokenize(profile_text);
+        if profile_tokens.is_empty() {
+            return vec![0.0; listings.len()];
+        }
+        listings
+            .iter()
+            .map(|listing| Self::score_with_tokens(&profile_tokens, listing))
+            .collect()
     }
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
+pub(crate) fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
@@ -90,7 +111,7 @@ fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
     }
 }
 
-fn tokenize(text: &str) -> HashSet<String> {
+pub(crate) fn tokenize(text: &str) -> HashSet<String> {
     text.split(|c: char| !c.is_alphanumeric() && c != '+' && c != '#')
         .filter_map(|t| {
             let lower = t.trim().to_lowercase();
@@ -101,6 +122,50 @@ fn tokenize(text: &str) -> HashSet<String> {
             }
         })
         .collect()
+}
+
+/// F02: Structured match breakdown — the matched and missing keywords
+/// that explain *why* a listing got its score. Used by the pipeline to
+/// persist match reasons for explainable match cards.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MatchBreakdown {
+    /// Profile tokens that appear in the listing title or description.
+    pub matched_keywords: Vec<String>,
+    /// Configured domain keywords that are missing from the listing.
+    pub missing_keywords: Vec<String>,
+}
+
+/// Compute the match breakdown for a listing against a profile.
+/// `domain_keywords` are the configured keywords from `cfg.domains` —
+/// any that are absent from the listing are reported as missing.
+#[must_use]
+pub fn match_breakdown(
+    profile_text: &str,
+    listing: &RawListing,
+    domain_keywords: &[String],
+) -> MatchBreakdown {
+    let profile_tokens = tokenize(profile_text);
+    let listing_text = format!("{} {}", listing.title, listing.description);
+    let listing_tokens = tokenize(&listing_text);
+
+    let matched_keywords: Vec<String> = profile_tokens
+        .intersection(&listing_tokens)
+        .cloned()
+        .collect();
+
+    let missing_keywords: Vec<String> = domain_keywords
+        .iter()
+        .filter(|kw| {
+            let kw_lc = kw.to_lowercase();
+            !listing_text.to_lowercase().contains(&kw_lc)
+        })
+        .cloned()
+        .collect();
+
+    MatchBreakdown {
+        matched_keywords,
+        missing_keywords,
+    }
 }
 
 /// Deliberately small stopword list — we want domain tokens (rust, ros,

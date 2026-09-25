@@ -1,5 +1,7 @@
 //! Naukri source driver: HTTP client, discovery, URL absolutization.
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use reqwest::Client;
 
@@ -99,6 +101,7 @@ impl Source for NaukriSource {
         let resp = self
             .http
             .get(&url)
+            .timeout(Duration::from_secs(30))
             .query(&[
                 ("keywords", kw_joined.as_str()),
                 ("location", self.location.as_str()),

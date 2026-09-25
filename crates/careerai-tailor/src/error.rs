@@ -37,6 +37,9 @@ pub enum TailorError {
     #[error("cover letter too long: {words} words (cap {cap})")]
     CoverLetterTooLong { words: usize, cap: usize },
 
+    #[error("cover letter too long: {chars} chars (cap {cap})")]
+    CoverLetterCharsTooLong { chars: usize, cap: usize },
+
     #[error("bad bullet path: {0}")]
     BadPath(String),
 

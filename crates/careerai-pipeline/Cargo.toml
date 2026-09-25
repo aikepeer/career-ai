@@ -18,14 +18,17 @@ careerai-tailor = { path = "../careerai-tailor" }
 careerai-render = { path = "../careerai-render" }
 careerai-submit = { path = "../careerai-submit" }
 careerai-notify = { path = "../careerai-notify" }
+reqwest.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
 tracing.workspace = true
 
 [features]
-default = ["live-llm-cli"]
+default = ["live-llm-cli", "browser"]
 # Granular pass-through into careerai-llm.
 live-llm-cli = ["careerai-llm/live-llm-cli"]
 live-llm-api = ["careerai-llm/live-llm-api"]
@@ -43,6 +46,8 @@ async-trait.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true }
+which.workspace = true
+wiremock = "0.6"
 
 [lints]
 workspace = true

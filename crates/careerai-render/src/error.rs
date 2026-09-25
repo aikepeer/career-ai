@@ -17,6 +17,8 @@ pub enum RenderError {
     TimedOut { seconds: u64 },
     #[error("which: {0}")]
     Which(#[from] which::Error),
+    #[error("ATS text-layer check failed at {stage}: {detail}")]
+    Ats { stage: &'static str, detail: String },
 }
 
 pub type Result<T> = std::result::Result<T, RenderError>;

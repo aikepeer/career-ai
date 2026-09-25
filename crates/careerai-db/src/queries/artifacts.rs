@@ -46,6 +46,16 @@ pub async fn list_artifacts(pool: &SqlitePool, application_id: &str) -> Result<V
     Ok(rows)
 }
 
+/// All artifact file paths ever registered by the render pipeline.
+/// Used by the dashboard download endpoint to serve only files the
+/// pipeline itself produced (never `credentials.json` or config).
+pub async fn all_artifact_paths(pool: &SqlitePool) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT path FROM artifacts")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|(p,)| p).collect())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

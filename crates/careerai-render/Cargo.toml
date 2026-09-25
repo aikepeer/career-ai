@@ -19,6 +19,8 @@ tracing.workspace = true
 tera = { workspace = true }
 uuid = { workspace = true }
 which = { workspace = true }
+pdf-extract = "0.12"
+regex = "1"
 
 [dev-dependencies]
 tempfile.workspace = true

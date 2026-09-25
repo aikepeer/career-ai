@@ -141,11 +141,11 @@ These are NOT bad ideas. They are *future* ideas. Current state is "operator nee
 **One-time setup (~30 min):**
 
 1. `cargo install --path crates/careerai-cli` to put `careerai` on PATH.
-2. `careerai init` to scaffold `~/.config/careerai/{config,profile,data,artifacts}`.
-3. `cp tests/fixtures/profile.yaml ~/.config/careerai/profile/profile.yaml`, edit with real info.
+2. `careerai init` to scaffold `$XDG_CONFIG_HOME/career-ai` and `$XDG_DATA_HOME/career-ai` (using standard per-user defaults when unset).
+3. `cp tests/fixtures/profile.yaml $XDG_DATA_HOME/career-ai/profile/profile.yaml`, edit with real info.
 4. `careerai cookies refresh` to capture `li_at` into the OS keychain. Walk-through prompt.
 5. Set `ANTHROPIC_API_KEY` via `keyring` or env.
-6. Edit `~/.config/careerai/config/local.yaml`: enable Greenhouse companies you target, set `must_include_skills`, set `submit.auto_submit=true`, set `submit.per_source.{greenhouse,lever,ashby,naukri}.enabled=true`. Leave `submit.per_source.linkedin.enabled=false` initially OR `submit.linkedin.interactive_only=true` (default).
+6. Edit `$XDG_CONFIG_HOME/career-ai/config/local.yaml`: enable Greenhouse companies you target, set `must_include_skills`, set `submit.auto_submit=true`, set `submit.per_source.{greenhouse,lever,ashby,naukri}.enabled=true`. Leave `submit.per_source.linkedin.enabled=false` initially OR `submit.linkedin.interactive_only=true` (default).
 7. `careerai daemon` in a tmux session OR `systemctl --user enable --now careerai.service`.
 
 **Daily (~5 min):**

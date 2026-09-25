@@ -71,7 +71,7 @@ pub(crate) fn parse_feed(xml: &str) -> Vec<RawListing> {
                     continue;
                 }
                 let Some(field) = current_field else { continue };
-                match t.xml_content() {
+                match t.xml_content(quick_xml::XmlVersion::Explicit1_0) {
                     Ok(s) => push_field(&mut current, field, &s),
                     Err(e) => warn!(
                         field = %field, error = %e,
@@ -84,7 +84,7 @@ pub(crate) fn parse_feed(xml: &str) -> Vec<RawListing> {
                     continue;
                 }
                 let Some(field) = current_field else { continue };
-                match t.xml_content() {
+                match t.xml_content(quick_xml::XmlVersion::Explicit1_0) {
                     Ok(s) => push_field(&mut current, field, &s),
                     Err(e) => warn!(
                         field = %field, error = %e,

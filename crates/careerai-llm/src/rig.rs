@@ -8,6 +8,7 @@
 //! * [`response`] — Anthropic and OpenAI JSON response parsers.
 //! * [`error`] — retry classifier and error-mapping helpers.
 
+mod bodies;
 mod driver;
 mod error;
 mod response;

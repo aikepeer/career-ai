@@ -8,7 +8,10 @@ use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 
 use crate::error::Result;
-use crate::view::{FunnelColumn, KpiStrip, ListingCard, PipelineSnapshot, StateCounts};
+use crate::view::{
+    ContentDomainEntry, ContentLibraryView, FunnelColumn, KpiStrip, ListingCard, PipelineSnapshot,
+    StateCounts,
+};
 
 const FUNNEL_STATES: &[ListingState] = &[
     ListingState::Discovered,
@@ -22,10 +25,17 @@ const FUNNEL_STATES: &[ListingState] = &[
 pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
     let kpi = kpi_strip(pool).await?;
     let columns = funnel_columns(pool).await?;
+    let tailored = count_state(pool, ListingState::Tailored).await?;
+    let rendered = count_state(pool, ListingState::Rendered).await?;
+    let submitted = count_state(pool, ListingState::Submitted).await?;
+    let responded = count_state(pool, ListingState::Responded).await?;
+    let total_tailored = tailored + rendered + submitted + responded;
     let state_counts = StateCounts {
         shortlisted: count_state(pool, ListingState::Shortlisted).await?,
-        tailored: count_state(pool, ListingState::Tailored).await?,
-        rendered: count_state(pool, ListingState::Rendered).await?,
+        tailored,
+        rendered,
+        drafted: count_state(pool, ListingState::Drafted).await?,
+        total_tailored,
     };
     let source_lag_hours = source_lag(pool).await?;
     Ok(PipelineSnapshot {
@@ -39,9 +49,6 @@ pub async fn snapshot(pool: &SqlitePool) -> Result<PipelineSnapshot> {
 }
 
 async fn kpi_strip(pool: &SqlitePool) -> Result<KpiStrip> {
-    // Counts every listing created today regardless of current state, so
-    // automation that quickly advances rows past `discovered` doesn't
-    // hide them from the daily-throughput KPI.
     let today_discovered = count_today_any_state(pool).await?;
     let shortlisted_active = count_state(pool, ListingState::Shortlisted).await?;
     let submitted = count_state(pool, ListingState::Submitted).await?;
@@ -123,9 +130,10 @@ async fn count_today_any_state(pool: &SqlitePool) -> Result<u64> {
 
 async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<ListingCard>> {
     let rows = sqlx::query(
-        "SELECT title, company, score, url, created_at \
+        "SELECT id, title, company, score, url, created_at \
          FROM listings WHERE state = ? \
-         ORDER BY score DESC NULLS LAST, created_at DESC",
+         ORDER BY score DESC NULLS LAST, created_at DESC \
+         LIMIT 50",
     )
     .bind(state.as_str())
     .fetch_all(pool)
@@ -133,6 +141,9 @@ async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<List
     .map_err(careerai_db::error::DbError::from)?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
+        let id: String = row
+            .try_get("id")
+            .map_err(careerai_db::error::DbError::from)?;
         let title: String = row
             .try_get("title")
             .map_err(careerai_db::error::DbError::from)?;
@@ -146,6 +157,7 @@ async fn top_listings(pool: &SqlitePool, state: ListingState) -> Result<Vec<List
             .map_err(careerai_db::error::DbError::from)?;
         let posted_at: Option<DateTime<Utc>> = row.try_get("created_at").ok();
         out.push(ListingCard {
+            id,
             title,
             company,
             score,
@@ -184,4 +196,25 @@ fn today_start() -> DateTime<Utc> {
         Some(naive) => DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc),
         None => now,
     }
+}
+
+/// Fetch content library stats (cover letters + bullets indexed by
+/// domain) for the dashboard.
+pub async fn content_library_summary(pool: &SqlitePool) -> Result<ContentLibraryView> {
+    let stats = careerai_db::queries::library_stats(pool).await?;
+    let domains = stats
+        .domains
+        .into_iter()
+        .map(|d| ContentDomainEntry {
+            domain: d.domain,
+            role: d.role,
+            bullets: d.bullets,
+            cover_letters: d.cover_letters,
+        })
+        .collect();
+    Ok(ContentLibraryView {
+        bullet_count: stats.bullet_count,
+        cover_letter_count: stats.cover_letter_count,
+        domains,
+    })
 }

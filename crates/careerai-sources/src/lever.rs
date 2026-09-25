@@ -3,6 +3,8 @@
 //! Endpoint: `GET {base}/v0/postings/{company}?mode=json`
 //! Docs: <https://help.lever.co/hc/en-us/articles/360046309631>
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
@@ -48,7 +50,12 @@ impl Source for LeverSource {
             self.base_url.trim_end_matches('/'),
             self.company,
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             return Err(SourceError::HttpStatus {
                 status: resp.status().as_u16(),

@@ -16,6 +16,8 @@ members = [
     "crates/careerai-mcp",
     "crates/careerai-notify",
     "crates/careerai-dashboard",
+    "crates/careerai-prep",
+    "crates/careerai-hosted",
 ]
 
 [workspace.package]
@@ -35,16 +37,17 @@ serde_yaml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 clap = { version = "4", features = ["derive", "env"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros", "migrate", "chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
-validator = { version = "0.20", features = ["derive"] }
+validator = { version = "0.20", default-features = false }
 uuid = { version = "1", features = ["v7", "serde"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
 rig-core = { version = "0.10", default-features = false }
 tera = { version = "1", default-features = false }
 which = "7"
+home = "0.5"
 sha2 = "0.10"
 hex = "0.4"
 backon = "1"
@@ -61,12 +64,12 @@ scraper = "0.26"
 base64 = "0.22"
 rmcp = { version = "1.5", default-features = false, features = ["server", "macros", "transport-io", "schemars", "client", "transport-child-process"] }
 schemars = "1"
-quick-xml = { version = "0.38", features = ["serialize"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
 
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 1
+codegen-units = 4
 strip = "symbols"
 
 # cargo-dist — prebuilt binaries on GitHub Releases. Run `cargo dist init`
@@ -103,3 +106,4 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 must_use_candidate = "allow"
 doc_markdown = "allow"
+assert_is_empty = "allow"

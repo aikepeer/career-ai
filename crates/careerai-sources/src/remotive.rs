@@ -3,6 +3,8 @@
 //! Endpoint: `GET {base}/api/remote-jobs[?category=<slug>]`
 //! Docs: <https://remotive.com/api-documentation>
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
@@ -57,7 +59,7 @@ impl Source for RemotiveSource {
     async fn discover(&self) -> Result<Vec<RawListing>, SourceError> {
         let base = self.base_url.trim_end_matches('/');
         let url = format!("{base}/api/remote-jobs");
-        let mut req = self.http.get(&url);
+        let mut req = self.http.get(&url).timeout(Duration::from_secs(30));
         if let Some(c) = &self.category {
             req = req.query(&[("category", c)]);
         }
@@ -77,7 +79,7 @@ impl Source for RemotiveSource {
                 external_id: j.id.to_string(),
                 title: j.title,
                 company: j.company_name,
-                location: Some(j.candidate_required_location),
+                location: Some(j.candidate_required_location).filter(|s| !s.is_empty()),
                 url: j.url,
                 description: html_to_text(&j.description),
                 raw_json: None,

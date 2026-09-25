@@ -44,6 +44,7 @@ fn fixture_profile() -> Profile {
             languages: vec!["Rust".into(), "Python".into()],
             frameworks: vec!["Tokio".into()],
             tools: vec!["SQLite".into()],
+            ..Default::default()
         },
         experience: vec![
             Experience {
@@ -74,12 +75,14 @@ fn fixture_profile() -> Profile {
             institution: "Analytical Engine University".into(),
             start: "2012".into(),
             end: "2016".into(),
+            ..Default::default()
         }],
         projects: vec![Project {
             name: "openLLM".into(),
             url: "https://example.com/openllm".into(),
             bullets: vec!["Tokenizer in Rust supporting 5 languages.".into()],
         }],
+        ..Default::default()
     }
 }
 
@@ -120,6 +123,9 @@ fn write_fixtures(root: &Path) {
 
 #[tokio::test]
 async fn tailor_then_render_end_to_end() {
+    let _prev_live = std::env::var("CAREERAI_LLM_LIVE").ok();
+    std::env::remove_var("CAREERAI_LLM_LIVE");
+
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     scaffold_project(root);

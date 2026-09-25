@@ -9,20 +9,43 @@
 //! defined here and re-exported so `main.rs` can reference them in the
 //! top-level `Command` enum without ballooning its line count.
 
+pub mod analyze_profile;
 pub mod apply;
+pub mod config_cmd;
 pub mod discover;
+pub mod email;
+pub mod followups;
 pub mod inspect;
+pub mod interview;
+pub mod liveness;
 pub mod llm;
+pub mod mark_responded;
 pub mod match_;
 pub mod mcp;
+pub mod negotiate;
 pub mod notify;
+pub mod patterns;
+pub mod prep;
 pub mod profile;
+pub mod profile_compile;
 pub mod profile_llm;
 pub mod render;
+pub mod retry;
+pub mod run;
 pub mod shortlist;
 pub mod tailor;
+pub mod upskill;
 
 use clap::Subcommand;
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigSubcommand {
+    /// Generate exhaustive `local.yaml` in the resolved XDG config directory.
+    Generate {
+        #[arg(long)]
+        force: bool,
+    },
+}
 
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
@@ -47,6 +70,12 @@ pub enum ProfileCommand {
     Show,
     /// Validate `profile/profile.yaml` against the schema.
     Validate,
+    /// Pre-compute and cache bullet emphasis variants (Phase 2 LLM reduction).
+    CompileVariants {
+        /// Force re-generation even if cache exists.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -60,15 +89,16 @@ pub enum ShortlistCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum StatusCommand {
-    /// Start the read-only dashboard HTTP server. Defaults to
+    /// Start the dashboard HTTP server. Defaults to
     /// 127.0.0.1:8787 with a 60s meta-refresh.
     Serve {
         /// Port to bind. Overrides `dashboard.port` in config.
         #[arg(long)]
         port: Option<u16>,
-        /// Bind address. Hidden — defaults to 127.0.0.1. Setting any
-        /// other value triggers a stderr warning since the surface has
-        /// no auth.
+        /// Bind address. Hidden — defaults to 127.0.0.1. A non-loopback
+        /// value is refused unless
+        /// `CAREERAI_DASHBOARD_ALLOW_NON_LOOPBACK=1` is set, because the
+        /// surface has no authentication and mutating endpoints.
         #[arg(long, hide = true)]
         bind: Option<std::net::IpAddr>,
     },
@@ -108,10 +138,17 @@ pub enum NotifyCommand {
 pub enum SourcesCommand {
     /// Probe the seeded ATS list against the configured `domains:`
     /// keywords and either preview or merge the new companies into
-    /// `config/local.yaml`. Default is preview.
+    /// the resolved XDG config directory. Default is preview.
     Sync {
-        /// Write the merged lists into `config/local.yaml`. Without
-        /// this flag, the diff is printed and no file is touched.
+        /// Write the merged lists into the resolved XDG config directory.
+        /// Without this flag, the diff is printed and no file is touched.
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Discover new job portals and freelance platforms via Web Search Agent.
+    DiscoverWeb {
+        /// Write discovered job and freelance portals into the resolved XDG
+        /// config directory.
         #[arg(long)]
         apply: bool,
     },

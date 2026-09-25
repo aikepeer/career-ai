@@ -11,8 +11,9 @@ pub async fn run_test(cfg: &CoreConfig) -> Result<()> {
     let count = pipe.channel_count();
     if count == 0 {
         println!(
-            "no notify channels are configured. Edit config/local.yaml and \
-             add a slack / telegram / email / ntfy block under `notify.channels`."
+            "no notify channels are configured. Edit the resolved XDG \
+             config directory's local.yaml and add a slack / telegram / \
+             email / ntfy block under `notify.channels`."
         );
         std::process::exit(2);
     }

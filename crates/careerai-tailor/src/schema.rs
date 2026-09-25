@@ -13,11 +13,14 @@ use crate::error::{Result, TailorError};
 /// Parse raw LLM output and run all 9 validator rules against the
 /// profile. On success the returned `DiffDoc` is safe to hand to
 /// `diff::apply`.
-pub fn parse_and_validate(raw: &str, profile: &Profile) -> Result<DiffDoc> {
+///
+/// `jd_text` is the job description text (title + company + description)
+/// used to extend the guardrail allowlist with JD-derived vocabulary.
+pub fn parse_and_validate(raw: &str, profile: &Profile, jd_text: &str) -> Result<DiffDoc> {
     let stripped = strip_json_fences(raw.trim());
-    let doc: DiffDoc = serde_json::from_str(stripped)
+    let mut doc: DiffDoc = serde_json::from_str(stripped)
         .map_err(|e| TailorError::Schema(format!("json parse: {e}; raw_len={}", raw.len())))?;
-    diff::validate(&doc, profile)?;
+    diff::validate_and_sanitize(&mut doc, profile, jd_text)?;
     Ok(doc)
 }
 
@@ -106,6 +109,7 @@ mod tests {
                 url: String::new(),
                 bullets: vec!["pb0".into()],
             }],
+            ..Default::default()
         }
     }
 
@@ -121,31 +125,31 @@ mod tests {
 
     #[test]
     fn accepts_bare_json() {
-        parse_and_validate(VALID_JSON, &fixture_profile()).unwrap();
+        parse_and_validate(VALID_JSON, &fixture_profile(), "").unwrap();
     }
 
     #[test]
     fn accepts_json_fence_wrapped() {
         let wrapped = format!("```json\n{VALID_JSON}\n```");
-        parse_and_validate(&wrapped, &fixture_profile()).unwrap();
+        parse_and_validate(&wrapped, &fixture_profile(), "").unwrap();
     }
 
     #[test]
     fn accepts_bare_fence_wrapped() {
         let wrapped = format!("```\n{VALID_JSON}\n```");
-        parse_and_validate(&wrapped, &fixture_profile()).unwrap();
+        parse_and_validate(&wrapped, &fixture_profile(), "").unwrap();
     }
 
     #[test]
     fn accepts_leading_trailing_whitespace() {
         let wrapped = format!("   \n{VALID_JSON}\n   ");
-        parse_and_validate(&wrapped, &fixture_profile()).unwrap();
+        parse_and_validate(&wrapped, &fixture_profile(), "").unwrap();
     }
 
     #[test]
     fn rejects_invalid_json_surfaces_schema() {
         let bad = r"{not json";
-        let err = parse_and_validate(bad, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(bad, &fixture_profile(), "").unwrap_err();
         assert!(
             matches!(err, TailorError::Schema(ref s) if s.contains("json parse")),
             "got {err:?}"
@@ -162,7 +166,28 @@ mod tests {
             "cover_letter":"short",
             "extra_key":"nope"
         }"#;
-        let err = parse_and_validate(raw, &fixture_profile()).unwrap_err();
+        let err = parse_and_validate(raw, &fixture_profile(), "").unwrap_err();
         assert!(matches!(err, TailorError::Schema(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn accepts_jd_proper_noun_in_reword() {
+        // Regression: reworded bullets that use JD terminology (e.g.
+        // "Fleet" from "fleet management") must pass validation when the
+        // JD text is provided. Without this, every "tailor top N" run
+        // failed because the guardrail rejected JD-derived proper nouns.
+        let profile = fixture_profile();
+        let jd_text = "Senior Software Engineer, Android Automotive at Waymo. \
+                       Build fleet management systems for autonomous vehicles.";
+        let raw = r#"{
+            "prompt_version":"tailor.v1",
+            "summary":{"op":"keep"},
+            "ops":[
+                {"path":"experience[0].bullets[0]","op":"reword","new_text":"Fleet Management: Architected fleet telemetry for Waymo vehicles."},
+                {"path":"projects[0].bullets[0]","op":"keep"}
+            ],
+            "cover_letter":"short"
+        }"#;
+        parse_and_validate(raw, &profile, jd_text).unwrap();
     }
 }

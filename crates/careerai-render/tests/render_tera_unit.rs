@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use careerai_profile::schema::{Education, Links, Personal, Skills};
-use careerai_render::templates::{render_cover_letter, render_resume};
+use careerai_render::templates::{render_cover_letter, render_resume, render_resume_html};
 use careerai_tailor::model::{CoverLetter, ExperienceView, ProjectView, ResumeView};
 
 fn fixture_view() -> ResumeView {
@@ -27,6 +27,7 @@ fn fixture_view() -> ResumeView {
             languages: vec!["Rust".into(), "Python".into(), "Go".into()],
             frameworks: vec!["Tokio".into(), "Actix".into()],
             tools: vec!["Docker".into(), "Kubernetes".into(), "Postgres".into()],
+            ..Default::default()
         },
         experience: vec![
             ExperienceView {
@@ -59,12 +60,14 @@ fn fixture_view() -> ResumeView {
                 institution: "State University".into(),
                 start: "2015".into(),
                 end: "2019".into(),
+                ..Default::default()
             },
             Education {
                 degree: "Advanced Algorithms Cert".into(),
                 institution: "MOOC Academy".into(),
                 start: "2020".into(),
                 end: "2020".into(),
+                ..Default::default()
             },
         ],
         projects: vec![ProjectView {
@@ -120,4 +123,50 @@ fn cover_letter_contains_key_substrings() {
     assert!(md.contains("Dear Hiring Team,"));
     assert!(md.contains("I am excited to apply for this role."));
     assert!(md.contains("Best,\nJane Doe"));
+}
+
+#[test]
+fn resume_html_contains_core_structure() {
+    let view = fixture_view();
+    let html = render_resume_html(
+        &view,
+        &view.personal.name,
+        Some("Senior Embedded Architect"),
+    )
+    .unwrap();
+    assert!(html.contains("Jane Doe"));
+    assert!(html.contains("Senior Embedded Architect"));
+    assert!(html.contains("Profile Summary"));
+    assert!(html.contains("Experience"));
+    assert!(html.contains("Technical Skills"));
+    assert!(html.contains("Education"));
+}
+
+#[test]
+fn resume_html_uses_experience_title_when_headline_is_none() {
+    let view = fixture_view();
+    let html = render_resume_html(&view, &view.personal.name, None).unwrap();
+    assert!(html.contains("Jane Doe"));
+    assert!(html.contains(r#"<div class="candidate-title">Senior Engineer</div>"#));
+    assert!(html.contains(
+        r#"<div class="summary-text">Backend engineer focused on distributed systems.</div>"#
+    ));
+}
+
+#[test]
+fn resume_renders_honors_and_achievements() {
+    let mut view = fixture_view();
+    view.education[0].achievements = vec![
+        "Secured All India 33rd rank in HackerEarth Deep Learning Challenge".into(),
+        "Capgemini Best Performance Award".into(),
+    ];
+    let md = render_resume(&view, &view.personal.name).unwrap();
+    assert!(md.contains("## Honors & Achievements"));
+    assert!(md.contains("Secured All India 33rd rank in HackerEarth Deep Learning Challenge"));
+    assert!(md.contains("Capgemini Best Performance Award"));
+
+    let html = render_resume_html(&view, &view.personal.name, None).unwrap();
+    assert!(html.contains("Honors & Achievements"));
+    assert!(html.contains("Secured All India 33rd rank in HackerEarth Deep Learning Challenge"));
+    assert!(html.contains("Capgemini Best Performance Award"));
 }

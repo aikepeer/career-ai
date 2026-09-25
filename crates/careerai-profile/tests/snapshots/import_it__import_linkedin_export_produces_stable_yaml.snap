@@ -15,8 +15,6 @@ skills:
     - Rust
     - Python
     - Tokio
-  frameworks: []
-  tools: []
 experience:
   - title: Senior Engineer
     company: Acme Robotics

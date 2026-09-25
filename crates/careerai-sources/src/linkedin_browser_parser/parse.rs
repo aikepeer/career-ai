@@ -9,7 +9,8 @@ use crate::util::html_to_text;
 pub const LISTING_SOURCE: &str = "linkedin";
 
 /// Public LinkedIn jobs search base URL.
-pub const SEARCH_BASE: &str = "https://www.linkedin.com/jobs/search/";
+pub const SEARCH_BASE: &str =
+    "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search";
 
 /// Whitelist for `f_E=` experience-level filter values.
 pub const KNOWN_EXPERIENCE_LEVELS: &[(&str, &str)] = &[
@@ -102,6 +103,15 @@ fn extract_listing_id(url: &str, card: &ElementRef<'_>) -> Option<String> {
             }
         }
     }
+    if let Some(el) = first_match(card, "[data-entity-urn]") {
+        if let Some(urn) = el.value().attr("data-entity-urn") {
+            if let Some(id) = urn.rsplit(':').next() {
+                if !id.is_empty() {
+                    return Some(id.to_string());
+                }
+            }
+        }
+    }
     if let Ok(inner_sel) = Selector::parse("[data-job-id]") {
         if let Some(el) = card.select(&inner_sel).next() {
             if let Some(id) = el.value().attr("data-job-id") {
@@ -112,9 +122,10 @@ fn extract_listing_id(url: &str, card: &ElementRef<'_>) -> Option<String> {
         }
     }
     if let Some(after) = url.split("/jobs/view/").nth(1) {
-        let id: String = after.chars().take_while(char::is_ascii_digit).collect();
-        if !id.is_empty() {
-            return Some(id);
+        let clean = after.split('?').next().unwrap_or(after);
+        let digits: String = clean.chars().filter(char::is_ascii_digit).collect();
+        if !digits.is_empty() {
+            return Some(digits);
         }
     }
     None

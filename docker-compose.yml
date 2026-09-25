@@ -1,0 +1,65 @@
+# Docker Compose for careerai-hosted beta environment.
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f api
+#
+# Requires a .env file with:
+#   DATABASE_URL=postgres://careerai:careerai@postgres:5432/careerai
+#   MASTER_KEY=<32-byte hex key>
+#   STRIPE_API_KEY=<optional, enables real billing>
+#   STRIPE_WEBHOOK_SECRET=<optional>
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: careerai
+      POSTGRES_PASSWORD: careerai
+      POSTGRES_DB: careerai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careerai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://careerai:careerai@postgres:5432/careerai
+      RUST_LOG: info,careerai_hosted=debug
+      CAREERAI_HOSTED_BIND: 0.0.0.0:3000
+      # Master key for export encryption (32 bytes hex-encoded)
+      MASTER_KEY: "${MASTER_KEY:?set MASTER_KEY to a 64-character hex value}"
+      # Billing (optional — unconfigured = mock adapter)
+      STRIPE_API_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  # Optional: Prometheus for metrics scraping
+  prometheus:
+    image: prom/prometheus:latest
+    depends_on:
+      - api
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  pgdata:

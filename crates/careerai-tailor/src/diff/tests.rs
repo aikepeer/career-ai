@@ -19,6 +19,7 @@ fn fixture_profile() -> Profile {
             languages: vec!["Rust".into(), "Python".into()],
             frameworks: vec!["Tokio".into(), "Kubernetes".into()],
             tools: vec!["SQLite".into()],
+            ..Default::default()
         },
         experience: vec![
             Experience {
@@ -47,6 +48,7 @@ fn fixture_profile() -> Profile {
             url: "https://example.com/openllm".into(),
             bullets: vec!["Tokenizer in Rust supporting 5 languages.".into()],
         }],
+        ..Default::default()
     }
 }
 
@@ -82,7 +84,7 @@ fn rejects_path_outside_profile() {
     let mut ops = full_coverage_ops();
     ops.push(keep("experience[0].bullets[2]"));
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(matches!(err, TailorError::Schema(ref s) if s.contains("missing bullet")));
 }
 
@@ -98,7 +100,7 @@ fn rejects_invented_employer() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
         "got {err:?}"
@@ -117,7 +119,7 @@ fn rejects_fabricated_number() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented number"),
         "got {err:?}"
@@ -136,7 +138,7 @@ fn rejects_cross_entry_move() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("crosses entries")),
         "got {err:?}"
@@ -153,7 +155,7 @@ fn rejects_empty_experience_after_drops() {
         kind: OpKind::Drop,
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("emptied by drops")),
         "got {err:?}"
@@ -170,7 +172,7 @@ fn rejects_missing_coverage() {
         keep("projects[0].bullets[0]"),
     ];
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("not covered")),
         "got {err:?}"
@@ -183,7 +185,7 @@ fn rejects_duplicate_op_paths() {
     let mut ops = full_coverage_ops();
     ops.push(keep("experience[0].bullets[0]"));
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("duplicate op path")),
         "got {err:?}"
@@ -205,8 +207,8 @@ fn accepts_valid_reorder_and_keep() {
         keep("projects[0].bullets[0]"),
     ];
     let doc = minimal_doc(ops);
-    validate(&doc, &profile).unwrap();
-    let view = apply(doc, profile).unwrap();
+    validate(&doc, &profile, "").unwrap();
+    let view = apply(doc, profile, "").unwrap();
     // Moved bullet[1] to front of experience[0].
     assert_eq!(view.experience[0].bullets.len(), 2);
     assert!(view.experience[0].bullets[0].contains("Led team"));
@@ -225,7 +227,7 @@ fn accepts_skill_injection_from_profile_skills() {
         },
     };
     let doc = minimal_doc(ops);
-    validate(&doc, &profile).unwrap();
+    validate(&doc, &profile, "").unwrap();
 }
 
 #[test]
@@ -242,7 +244,7 @@ fn bullet_length_cap_enforced() {
         kind: OpKind::Reword { new_text: ok_text },
     };
     let doc = minimal_doc(ops);
-    validate(&doc, &profile).unwrap();
+    validate(&doc, &profile, "").unwrap();
 
     // Over cap: 281 chars.
     let long_text: String = "a".repeat(MAX_BULLET_CHARS + 1);
@@ -254,7 +256,7 @@ fn bullet_length_cap_enforced() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "bullet over 280 chars"),
         "got {err:?}"
@@ -273,7 +275,7 @@ fn rejects_empty_reword_new_text() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("reword new_text is empty")),
         "got {err:?}"
@@ -291,7 +293,7 @@ fn rejects_move_before_target_equals_source() {
         },
     };
     let doc = minimal_doc(ops);
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
         matches!(err, TailorError::Schema(ref s) if s.contains("move_before target equals source")),
         "got {err:?}"
@@ -310,9 +312,9 @@ fn rejects_cover_letter_over_char_cap_even_with_low_word_count() {
         ops: full_coverage_ops(),
         cover_letter: huge,
     };
-    let err = validate(&doc, &profile).unwrap_err();
+    let err = validate(&doc, &profile, "").unwrap_err();
     assert!(
-        matches!(err, TailorError::CoverLetterTooLong { .. }),
+        matches!(err, TailorError::CoverLetterCharsTooLong { .. }),
         "got {err:?}"
     );
 }
@@ -341,4 +343,62 @@ fn bullet_path_parse_rejects_garbage() {
         let err = BulletPath::parse(s).unwrap_err();
         assert!(matches!(err, TailorError::BadPath(_)));
     }
+}
+
+#[test]
+fn apply_keeps_jd_vocabulary_allowance_from_parse() {
+    // Regression: parse_and_validate() allows JD-derived proper nouns
+    // in rewords (jd_text), but diff::apply() re-validates defensively.
+    // If apply() re-validates with an EMPTY jd_text, every reword that
+    // aligned with JD terminology passes parse but fails apply — the
+    // whole `tailor --limit N` path breaks. The allowance must be
+    // carried through.
+    let profile = fixture_profile();
+    let jd_text = "Senior Software Engineer, Android Automotive at Waymo. \
+                   Build fleet management systems for autonomous vehicles.";
+    let doc = DiffDoc {
+        prompt_version: "tailor.v1".into(),
+        summary: Some(SummaryOp::Keep),
+        ops: vec![
+            DiffOp {
+                path: "experience[0].bullets[0]".into(),
+                kind: OpKind::Reword {
+                    new_text: "Fleet Management: Architected fleet telemetry for Waymo vehicles."
+                        .into(),
+                },
+            },
+            keep("experience[0].bullets[1]"),
+            keep("experience[1].bullets[0]"),
+            keep("projects[0].bullets[0]"),
+        ],
+        cover_letter: "short".into(),
+    };
+    // Sanity: parse-time validation accepts it with the JD text.
+    validate(&doc, &profile, jd_text).unwrap();
+    // The fix: apply() must accept it too (not re-reject with "").
+    apply(doc, profile.clone(), jd_text).unwrap();
+
+    // And the guardrail still bites without the JD allowance.
+    let doc2 = DiffDoc {
+        prompt_version: "tailor.v1".into(),
+        summary: Some(SummaryOp::Keep),
+        ops: vec![
+            DiffOp {
+                path: "experience[0].bullets[0]".into(),
+                kind: OpKind::Reword {
+                    new_text: "Fleet Management: Architected fleet telemetry for Waymo vehicles."
+                        .into(),
+                },
+            },
+            keep("experience[0].bullets[1]"),
+            keep("experience[1].bullets[0]"),
+            keep("projects[0].bullets[0]"),
+        ],
+        cover_letter: "short".into(),
+    };
+    let err = apply(doc2, profile, "").unwrap_err();
+    assert!(
+        matches!(err, TailorError::InventedContent { .. }),
+        "expected invented-content rejection without JD allowance, got {err:?}"
+    );
 }

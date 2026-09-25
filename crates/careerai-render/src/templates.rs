@@ -16,7 +16,10 @@ pub(crate) const RESUME_TEMPLATE: &str = include_str!("../../../templates/resume
 pub(crate) const COVER_LETTER_TEMPLATE: &str =
     include_str!("../../../templates/cover_letter.md.tera");
 
+pub(crate) const RESUME_HTML_TEMPLATE: &str = include_str!("../../../templates/resume.html.tera");
+
 const RESUME_NAME: &str = "resume.md.tera";
+const RESUME_HTML_NAME: &str = "resume.html.tera";
 const COVER_LETTER_NAME: &str = "cover_letter.md.tera";
 
 /// Escape characters that have special meaning in Markdown tables, code,
@@ -74,17 +77,50 @@ fn joinlines_filter(
     tera::to_value(items.join("\n")).map_err(tera::Error::from)
 }
 
+/// Strip trailing punctuation (., : ; !) from markdown headings to satisfy MD026.
+fn clean_heading_filter(
+    value: &Value,
+    _args: &HashMap<String, Value>,
+) -> std::result::Result<Value, tera::Error> {
+    let s = match value {
+        Value::String(s) => s.trim_end_matches(['.', ':', ';', '!', ',']).to_string(),
+        other => other.to_string(),
+    };
+    tera::to_value(s).map_err(tera::Error::from)
+}
+
+/// Format bullet points with bold leading category label (e.g. `Impact & Scale: ...` -> `<strong>Impact & Scale:</strong> ...`).
+fn format_bullet_filter(
+    value: &Value,
+    _args: &HashMap<String, Value>,
+) -> std::result::Result<Value, tera::Error> {
+    let s = match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    if let Some((label, rest)) = s.split_once(':') {
+        if label.len() <= 40 && !label.contains('.') {
+            let formatted = format!("<strong>{label}:</strong>{rest}");
+            return tera::to_value(formatted).map_err(tera::Error::from);
+        }
+    }
+    tera::to_value(s).map_err(tera::Error::from)
+}
+
 fn build_engine() -> Result<Tera> {
     let mut tera = Tera::default();
     tera.autoescape_on(vec![]);
     tera.register_filter("escape_md", escape_md_filter);
     tera.register_filter("joinlines", joinlines_filter);
+    tera.register_filter("clean_heading", clean_heading_filter);
+    tera.register_filter("format_bullet", format_bullet_filter);
     tera.add_raw_template(RESUME_NAME, RESUME_TEMPLATE)?;
+    tera.add_raw_template(RESUME_HTML_NAME, RESUME_HTML_TEMPLATE)?;
     tera.add_raw_template(COVER_LETTER_NAME, COVER_LETTER_TEMPLATE)?;
     Ok(tera)
 }
 
-/// Process-wide Tera instance. Parsing both templates + registering
+/// Process-wide Tera instance. Parsing all templates + registering
 /// filters costs ~30ms on first use; cache it so subsequent renders
 /// pay only the render cost (single-digit ms).
 fn engine() -> Result<&'static Tera> {
@@ -108,6 +144,24 @@ pub fn render_resume(view: &ResumeView, personal_name: &str) -> Result<String> {
     Ok(tera.render(RESUME_NAME, &ctx)?)
 }
 
+pub fn render_resume_html(
+    view: &ResumeView,
+    personal_name: &str,
+    candidate_headline: Option<&str>,
+) -> Result<String> {
+    let tera = engine()?;
+    let mut ctx = {
+        let json = serde_json::to_value(view)
+            .map_err(|e| tera::Error::msg(format!("serialize ResumeView: {e}")))?;
+        Context::from_value(json)?
+    };
+    ctx.insert("personal_name", personal_name);
+    if let Some(headline) = candidate_headline {
+        ctx.insert("candidate_headline", headline);
+    }
+    Ok(tera.render(RESUME_HTML_NAME, &ctx)?)
+}
+
 pub fn render_cover_letter(
     letter: &CoverLetter,
     personal_name: &str,
@@ -116,11 +170,75 @@ pub fn render_cover_letter(
 ) -> Result<String> {
     let tera = engine()?;
     let mut ctx = Context::new();
-    ctx.insert("body", &letter.body);
+    let clean_body = sanitize_cover_letter_body(&letter.body);
+    ctx.insert("body", &clean_body);
     ctx.insert("personal_name", personal_name);
     ctx.insert("listing_company", listing_company);
     ctx.insert("date", date);
     Ok(tera.render(COVER_LETTER_NAME, &ctx)?)
+}
+
+fn sanitize_cover_letter_body(body: &str) -> String {
+    let mut lines: Vec<&str> = body.lines().collect();
+    while let Some(first) = lines.first() {
+        let trimmed = first.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("Dear ")
+            || trimmed.starts_with("To the ")
+            || trimmed.starts_with("Hi ")
+            || trimmed.starts_with("Hello ")
+        {
+            lines.remove(0);
+        } else {
+            break;
+        }
+    }
+    // Strip signature block from the back: closing word + optional name.
+    loop {
+        // Remove trailing blanks.
+        while let Some(last) = lines.last() {
+            if last.trim().is_empty() {
+                lines.pop();
+            } else {
+                break;
+            }
+        }
+        if lines.is_empty() {
+            break;
+        }
+        let Some(last_ref) = lines.last() else { break };
+        let last = last_ref.trim().to_string();
+        let is_closing = last.eq_ignore_ascii_case("sincerely,")
+            || last.eq_ignore_ascii_case("sincerely")
+            || last.eq_ignore_ascii_case("best regards,")
+            || last.eq_ignore_ascii_case("best,")
+            || last.eq_ignore_ascii_case("regards,")
+            || last.starts_with("Warm regards")
+            || last.starts_with("Thank you");
+        if is_closing {
+            lines.pop();
+            continue;
+        }
+        // Check if the *second*-to-last line is a closing — if so,
+        // the last line is the signer's name and both should be stripped.
+        if lines.len() >= 2 {
+            let second = lines[lines.len() - 2].trim().to_string();
+            let second_is_closing = second.eq_ignore_ascii_case("sincerely,")
+                || second.eq_ignore_ascii_case("sincerely")
+                || second.eq_ignore_ascii_case("best regards,")
+                || second.eq_ignore_ascii_case("best,")
+                || second.eq_ignore_ascii_case("regards,")
+                || second.starts_with("Warm regards")
+                || second.starts_with("Thank you");
+            if second_is_closing {
+                lines.pop(); // name
+                lines.pop(); // closing
+                continue;
+            }
+        }
+        break;
+    }
+    lines.join("\n").trim().to_string()
 }
 
 #[cfg(test)]
@@ -148,6 +266,7 @@ mod tests {
                 languages: vec!["Rust".into(), "Python".into()],
                 frameworks: vec!["Tokio".into()],
                 tools: vec!["Docker".into()],
+                ..Default::default()
             },
             experience: vec![ExperienceView {
                 title: "Senior Engineer".into(),
@@ -162,6 +281,7 @@ mod tests {
                 institution: "State U".into(),
                 start: "2015".into(),
                 end: "2019".into(),
+                ..Default::default()
             }],
             projects: vec![ProjectView {
                 name: "careerai".into(),
@@ -230,5 +350,13 @@ mod tests {
         let v = tera::to_value(vec!["a", "b", "c"]).unwrap();
         let got = joinlines_filter(&v, &args).unwrap();
         assert_eq!(got.as_str().unwrap(), "a\nb\nc");
+    }
+
+    #[test]
+    fn sanitize_cover_letter_body_strips_duplicate_headers_and_footers() {
+        let raw =
+            "Dear Hiring Team,\n\nI am writing to express my interest.\n\nSincerely,\nJane Doe";
+        let cleaned = sanitize_cover_letter_body(raw);
+        assert_eq!(cleaned, "I am writing to express my interest.");
     }
 }

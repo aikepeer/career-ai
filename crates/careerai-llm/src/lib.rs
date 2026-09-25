@@ -31,11 +31,14 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "live-llm-cli")]
+pub mod agent_cli;
 #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
 pub mod backend;
 pub mod cache;
+pub mod cost;
 #[cfg(feature = "live-llm-cli")]
-pub mod claude_cli;
+pub use agent_cli as claude_cli;
 pub mod error;
 pub mod hashing;
 pub mod mock;
@@ -45,20 +48,47 @@ pub mod rig;
 pub mod trait_def;
 pub mod types;
 
+#[cfg(feature = "live-llm-cli")]
+pub use crate::agent_cli::{AgentCliError, AgentCliLlm, ClaudeCliError, ClaudeCliLlm};
 #[cfg(any(feature = "live-llm-cli", feature = "live-llm-api"))]
 pub use crate::backend::{Backend, BackendError, BackendProbe};
 pub use crate::cache::{Cache, CacheKey};
-#[cfg(feature = "live-llm-cli")]
-pub use crate::claude_cli::{ClaudeCliError, ClaudeCliLlm};
+pub use crate::cost::{estimate_cost, CostRecord, CostTracker};
 pub use crate::error::{LlmError, Result};
 pub use crate::hashing::{canonical_profile_hash, compose_key, jd_hash};
 pub use crate::mock::MockLlm;
-pub use crate::retry::llm_backoff;
+pub use crate::retry::{llm_backoff, llm_backoff_with_retries};
 #[cfg(feature = "live-llm-api")]
 pub use crate::rig::{Provider, RigLlm};
 pub use crate::trait_def::Llm;
 pub use crate::types::{LlmRequest, LlmResponse};
 
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // Re-export the BackendChoice from core so callers don't need a separate
 // import path.
 pub use careerai_core::config::BackendChoice;
+
+/// Normalize configured provider timeouts so zero cannot create an
+/// immediately-expired request.
+#[must_use]
+pub(crate) const fn normalized_timeout_seconds(seconds: u64) -> u64 {
+    if seconds > 1 {
+        seconds
+    } else {
+        1
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::normalized_timeout_seconds;
+
+    #[test]
+    fn zero_timeout_is_clamped_consistently() {
+        assert_eq!(normalized_timeout_seconds(0), 1);
+        assert_eq!(normalized_timeout_seconds(1), 1);
+        assert_eq!(normalized_timeout_seconds(90), 90);
+    }
+}

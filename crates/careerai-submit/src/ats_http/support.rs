@@ -94,3 +94,106 @@ pub(crate) fn sanitize_external_id(s: &str) -> String {
     }
     out
 }
+
+use std::time::Duration;
+
+use reqwest::Client;
+
+use crate::error::SubmitError;
+
+const RESUME_KINDS: &[&str] = &["resume_pdf", "resume_docx"];
+const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Locate the resume artifact path in a submit context.
+pub(super) fn resume_artifact_path<'a>(ctx: &'a SubmitContext<'_>) -> Result<&'a str> {
+    ctx.artifacts
+        .iter()
+        .find(|a| RESUME_KINDS.contains(&a.kind.as_str()))
+        .map(|a| a.path.as_str())
+        .ok_or_else(|| {
+            SubmitError::MissingData("no resume artifact (resume_pdf or resume_docx)".into())
+        })
+}
+
+/// Read the resume artifact bytes + filename from disk.
+pub(super) async fn read_resume(ctx: &SubmitContext<'_>) -> Result<(Vec<u8>, String)> {
+    let path = resume_artifact_path(ctx)?;
+    let bytes = tokio::fs::read(path).await.map_err(SubmitError::Io)?;
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("resume")
+        .to_string();
+    Ok((bytes, filename))
+}
+
+/// Split a full name into `(first, last)`. A missing last name is `""`.
+pub(super) fn split_name(full: &str) -> (&str, &str) {
+    let trimmed = full.trim();
+    match trimmed.split_once(' ') {
+        Some((first, rest)) => (first, rest.trim()),
+        None => (trimmed, ""),
+    }
+}
+
+/// Tail of a response body for bounded error reporting.
+pub(super) fn body_tail(bytes: &[u8], max: usize) -> String {
+    let start = bytes.len().saturating_sub(max);
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
+/// Shared reqwest client. Per-request timeouts are applied at each call
+/// site so a hung ATS can't stall a tick.
+pub(super) fn http_client() -> Client {
+    Client::builder()
+        .user_agent("careerai/0.1 (+https://github.com/justdoGIT/career-ai)")
+        .build()
+        .unwrap_or_default()
+}
+
+/// POST a JSON body and return the response text, or an error carrying the
+/// status and a bounded tail of the body.
+pub(super) async fn post_json(
+    client: &Client,
+    url: &str,
+    body: serde_json::Value,
+) -> Result<String> {
+    let resp = client
+        .post(url)
+        .json(&body)
+        .timeout(HTTP_TIMEOUT)
+        .send()
+        .await?;
+    let status = resp.status();
+    let bytes = resp.bytes().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(SubmitError::HttpStatus {
+            status: status.as_u16(),
+            body_tail: body_tail(&bytes, 1024),
+        });
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// POST a multipart form and return the response text.
+pub(super) async fn post_multipart(
+    client: &Client,
+    url: &str,
+    form: reqwest::multipart::Form,
+    referer: Option<&str>,
+) -> Result<String> {
+    let mut req = client.post(url).multipart(form).timeout(HTTP_TIMEOUT);
+    if let Some(r) = referer {
+        req = req.header(reqwest::header::REFERER, r);
+    }
+    let resp = req.send().await?;
+    let status = resp.status();
+    let bytes = resp.bytes().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(SubmitError::HttpStatus {
+            status: status.as_u16(),
+            body_tail: body_tail(&bytes, 1024),
+        });
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}

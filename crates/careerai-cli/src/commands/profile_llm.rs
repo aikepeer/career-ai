@@ -14,9 +14,21 @@ use careerai_core::config::CoreConfig;
 /// network round-trip? Checks `ANTHROPIC_API_KEY` first, then the
 /// keyring (service "career-ai", username "anthropic/api_key"). Used
 /// to default `--use-llm`.
-fn anthropic_key_reachable() -> bool {
-    if std::env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty()) {
-        return true;
+fn api_key_reachable() -> bool {
+    const ENV_KEY_NAMES: &[&str] = &[
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "GROK_API_KEY",
+        "XAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "CAREERAI_LLM_API_KEY",
+        "CLAUDE_WEB_API_KEY",
+    ];
+    for &var_name in ENV_KEY_NAMES {
+        if std::env::var(var_name).is_ok_and(|v| !v.is_empty()) {
+            return true;
+        }
     }
     if let Ok(entry) = keyring::Entry::new("career-ai", "anthropic/api_key") {
         if let Ok(v) = entry.get_password() {
@@ -28,25 +40,24 @@ fn anthropic_key_reachable() -> bool {
     false
 }
 
-/// Cheap heuristic: would `Backend::resolve(Auto, ...)` likely succeed
-/// on this host? Returns `true` if either:
-///
-///   * the `claude` binary is on PATH (auth NOT verified — caller is
-///     expected to handle `Backend::resolve`'s failure gracefully when
-///     the session is logged out), or
-///   * an Anthropic API key is reachable (env or keyring).
-///
-/// This is intentionally NOT an auth probe (which costs ~5s on cold
-/// start). It is used by `--use-llm` auto-detection to decide whether
-/// to even ATTEMPT the LLM path. The actual reachability check
-/// happens inside `run_with_llm`, which falls back to the heuristic
-/// parser when `Backend::resolve` errors and surfaces a hint to run
-/// `claude login` or set `ANTHROPIC_API_KEY`.
-pub(super) fn backend_maybe_available() -> bool {
-    if which::which("claude").is_ok() {
+pub(super) fn backend_maybe_available(
+    backend_override: Option<&careerai_core::config::BackendChoice>,
+) -> bool {
+    if let Some(b) = backend_override {
+        if *b != careerai_core::config::BackendChoice::Auto {
+            return true;
+        }
+    }
+    if std::env::var("CAREERAI_LLM_BACKEND").is_ok() {
         return true;
     }
-    anthropic_key_reachable()
+    if which::which("claude").is_ok()
+        || which::which("agy").is_ok()
+        || which::which("goose").is_ok()
+    {
+        return true;
+    }
+    api_key_reachable()
 }
 
 /// Parse PDF/DOCX inputs through an LLM extractor; LinkedIn ZIPs go
@@ -62,13 +73,12 @@ pub(super) fn run_with_llm(
     {
         use std::sync::Arc;
 
-        let cwd = std::env::current_dir()?;
-        // Fall back to `LlmConfig::default()` ONLY when no `config/`
-        // directory is present (e.g. running `profile import` before
-        // `init`). When config exists, surface load/parse failures so
-        // malformed YAML and similar real errors don't silently hide
-        // behind defaults.
-        let mut llm_cfg = if cwd.join("config").exists() {
+        let cwd = careerai_core::paths::resolve_root_env();
+        // Fall back to `LlmConfig::default()` only when no XDG config
+        // directory is present. When config exists, surface load/parse
+        // failures instead of silently hiding malformed YAML.
+        let config_dir = careerai_core::paths::config_dir_for_root(&cwd);
+        let mut llm_cfg = if config_dir.exists() {
             CoreConfig::load(&cwd).context("load config/")?.llm
         } else {
             careerai_core::config::LlmConfig::default()
@@ -77,18 +87,17 @@ pub(super) fn run_with_llm(
             llm_cfg.backend = b;
         }
 
-        // Honor `config.llm.cache_dir` so live profile-extract caches
-        // sit next to tailor caches under `data/cache/llm`. `.gitignore`
-        // already excludes `/data/`.
-        let cache_root: PathBuf = if llm_cfg.cache_dir.is_empty() {
-            PathBuf::from("data").join("cache").join("llm")
+        // Honor `config.llm.cache_dir`; an empty value uses the XDG cache
+        // directory so profile extraction never creates repo-local state.
+        let cache_dir = if llm_cfg.cache_dir.is_empty() {
+            careerai_core::paths::cache_dir_for_root(&cwd).join("llm")
         } else {
-            PathBuf::from(&llm_cfg.cache_dir)
-        };
-        let cache_dir = if cache_root.is_absolute() {
-            cache_root
-        } else {
-            cwd.join(cache_root)
+            let cache_root = PathBuf::from(&llm_cfg.cache_dir);
+            if cache_root.is_absolute() {
+                cache_root
+            } else {
+                cwd.join(cache_root)
+            }
         };
         let cache = Arc::new(careerai_llm::Cache::new(cache_dir));
 
@@ -105,7 +114,7 @@ pub(super) fn run_with_llm(
 
         let backend = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(careerai_llm::Backend::resolve(
-                llm_cfg.backend,
+                llm_cfg.backend.clone(),
                 &llm_cfg,
                 cache,
             ))

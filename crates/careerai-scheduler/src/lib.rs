@@ -26,6 +26,7 @@ mod shutdown;
 mod tests;
 
 pub use error::SchedulerError;
+pub mod follow_ups;
 
 use std::path::{Path, PathBuf};
 #[cfg(feature = "test-hooks")]
@@ -37,7 +38,7 @@ use tokio::sync::Mutex;
 use tokio_cron_scheduler::JobScheduler;
 use tracing::{error, info, info_span, warn, Instrument};
 
-use crate::cron::{build_submit_job, build_tick_job, effective_cadence};
+use crate::cron::{build_follow_up_job, build_submit_job, build_tick_job, effective_cadence};
 use crate::error::SHUTDOWN_DRAIN;
 
 /// Long-running daemon scaffolding around `tokio-cron-scheduler`.
@@ -101,6 +102,7 @@ impl Scheduler {
         Self::from_config_inner(root, cfg, Some(counter)).await
     }
 
+    #[allow(clippy::too_many_lines)] // follow-up cron registration adds ~15 lines
     async fn from_config_inner(
         root: &Path,
         cfg: &CoreConfig,
@@ -203,6 +205,40 @@ impl Scheduler {
                 }
             } else {
                 info!("submit cron disabled — set scheduler.submit_cadence to enable periodic dry-run apply sweeps");
+            }
+
+            // Register the follow-up cron exactly once if configured.
+            // When unset the daemon does not poll for stale submissions —
+            // operators can still trigger a check manually via the
+            // dashboard's "Check Now" button.
+            if let Some(follow_up_cron) = cfg.scheduler.follow_up_cadence.as_deref() {
+                let built = build_follow_up_job(
+                    follow_up_cron,
+                    Arc::clone(&root),
+                    #[cfg(feature = "test-hooks")]
+                    tick_counter.clone(),
+                );
+                match built {
+                    Ok(job) => match inner.add(job).await {
+                        Ok(uuid) => info!(
+                            cron = %follow_up_cron,
+                            job = %uuid,
+                            "registered follow-up cron job",
+                        ),
+                        Err(e) => error!(
+                            cron = %follow_up_cron,
+                            error = %e,
+                            "failed to add follow-up cron job; skipping",
+                        ),
+                    },
+                    Err(e) => error!(
+                        cron = %follow_up_cron,
+                        error = %e,
+                        "invalid follow_up_cadence cron expression; skipping",
+                    ),
+                }
+            } else {
+                info!("follow-up cron disabled — set scheduler.follow_up_cadence to enable periodic follow-up checks");
             }
 
             Ok(Self { inner })

@@ -2,6 +2,8 @@
 //! resource reading). Kept separate from the `#[tool_router]` impl block so
 //! this file can focus on the resource/lifecycle surface.
 
+#![allow(clippy::unused_async_trait_impl)]
+
 use rmcp::model::{
     Implementation, ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
     ProtocolVersion, ReadResourceRequestParams, ReadResourceResult, ServerCapabilities, ServerInfo,

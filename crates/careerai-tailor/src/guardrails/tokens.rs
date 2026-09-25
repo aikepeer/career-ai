@@ -57,6 +57,14 @@ pub(crate) struct ProfileTokenSets {
     pub(crate) summary_proper_nouns: HashSet<String>,
     pub(crate) year_tokens: HashSet<String>,
     pub(crate) number_tokens: HashSet<String>,
+    /// Proper-noun tokens extracted from the job description (title +
+    /// company + description). When tailoring for a specific JD, it is
+    /// legitimate to reuse JD terminology in reworded bullets — the LLM
+    /// is *asked* to align the resume with the JD. Without this set,
+    /// every reword that used a JD-specific noun (e.g. "Fleet" from
+    /// "fleet management") was rejected as "invented proper noun",
+    /// causing 100% of `tailor --limit N` runs to fail.
+    pub(crate) jd_proper_nouns: HashSet<String>,
 }
 
 fn split_words_lowercase(s: &str) -> impl Iterator<Item = String> + '_ {
@@ -86,13 +94,7 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
     }
 
     let mut skill_tokens = HashSet::new();
-    for s in profile
-        .skills
-        .languages
-        .iter()
-        .chain(profile.skills.frameworks.iter())
-        .chain(profile.skills.tools.iter())
-    {
+    for s in profile.skills.all_skill_names() {
         for w in split_words_lowercase(s) {
             skill_tokens.insert(w);
         }
@@ -138,31 +140,9 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
     // since `at`/`t` are both shorter than 3 chars. The proper-noun
     // regex keeps `&`, `+`, `#`, `.` as connectors so `AT&T` survives.
     //
-    // The other allowlists cover the rest:
-    //  * `skill_tokens`    — every skill / language / framework / tool
-    //  * `original_proper_nouns` (per-bullet, computed at check-time)
-    //  * `COMMON_ENGLISH_CAPS` — the curated whitelist
-    let mut allowed_text = String::new();
-    allowed_text.push_str(&profile.summary);
-    allowed_text.push(' ');
-    for exp in &profile.experience {
-        allowed_text.push_str(&exp.company);
-        allowed_text.push(' ');
-        allowed_text.push_str(&exp.title);
-        allowed_text.push(' ');
-        allowed_text.push_str(&exp.location);
-        allowed_text.push(' ');
-    }
-    for ed in &profile.education {
-        allowed_text.push_str(&ed.institution);
-        allowed_text.push(' ');
-        allowed_text.push_str(&ed.degree);
-        allowed_text.push(' ');
-    }
-    for p in &profile.projects {
-        allowed_text.push_str(&p.name);
-        allowed_text.push(' ');
-    }
+    // Structured fields to harvest words and proper nouns from
+    let allowed_text = build_allowed_text(profile, &mut skill_tokens);
+
     let mut summary_proper_nouns: HashSet<String> = HashSet::new();
     for m in proper_noun_regex().find_iter(&allowed_text) {
         for raw in m.as_str().split_whitespace() {
@@ -173,6 +153,23 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
             summary_proper_nouns.insert(strip_for_match(&lower));
         }
     }
+    // Also add all words from the profile summary and education projects/achievements
+    // so legitimate summary and candidate background words are recognized.
+    for w in split_words_lowercase(&profile.summary) {
+        summary_proper_nouns.insert(strip_for_match(&w));
+    }
+    for ed in &profile.education {
+        for proj in &ed.projects {
+            for w in split_words_lowercase(proj) {
+                summary_proper_nouns.insert(strip_for_match(&w));
+            }
+        }
+        for ach in &ed.achievements {
+            for w in split_words_lowercase(ach) {
+                summary_proper_nouns.insert(strip_for_match(&w));
+            }
+        }
+    }
 
     ProfileTokenSets {
         employer_tokens,
@@ -181,7 +178,82 @@ pub(crate) fn build_token_sets(profile: &Profile) -> ProfileTokenSets {
         summary_proper_nouns,
         year_tokens,
         number_tokens,
+        jd_proper_nouns: HashSet::new(),
     }
+}
+
+/// Build the flat "allowed text" string from the profile's structured
+/// identifier fields (summary, name, target roles, company, title, location,
+/// project names, education). Bullet text is deliberately excluded to
+/// prevent cross-bullet proper-noun leaks — a token mentioned only in
+/// employer A's bullet must not be reusable in employer B's reword.
+fn build_allowed_text(profile: &Profile, skill_tokens: &mut HashSet<String>) -> String {
+    let mut text = String::new();
+    text.push_str(&profile.summary);
+    text.push(' ');
+    text.push_str(&profile.personal.name);
+    text.push(' ');
+    for role in &profile.target_roles {
+        text.push_str(role);
+        text.push(' ');
+        for w in split_words_lowercase(role) {
+            skill_tokens.insert(w);
+        }
+    }
+    for exp in &profile.experience {
+        text.push_str(&exp.company);
+        text.push(' ');
+        text.push_str(&exp.title);
+        text.push(' ');
+        text.push_str(&exp.location);
+        text.push(' ');
+    }
+    for ed in &profile.education {
+        text.push_str(&ed.institution);
+        text.push(' ');
+        text.push_str(&ed.degree);
+        text.push(' ');
+        for proj in &ed.projects {
+            text.push_str(proj);
+            text.push(' ');
+        }
+        for ach in &ed.achievements {
+            text.push_str(ach);
+            text.push(' ');
+        }
+    }
+    for p in &profile.projects {
+        text.push_str(&p.name);
+        text.push(' ');
+    }
+    text
+}
+
+/// Build a set of proper-noun tokens from the job description text
+/// (listing title + company + description). Call this after
+/// `build_token_sets` and merge the result via
+/// `sets.jd_proper_nouns = build_jd_token_sets(jd_text)`.
+pub fn build_jd_token_sets(jd_text: &str) -> HashSet<String> {
+    let mut tokens = HashSet::new();
+    for m in proper_noun_regex().find_iter(jd_text) {
+        for raw in m.as_str().split_whitespace() {
+            let lower = raw.to_lowercase();
+            if lower.len() < 3 {
+                continue;
+            }
+            tokens.insert(strip_for_match(&lower));
+        }
+    }
+    // Also add every word ≥ 3 chars so rewords can freely reuse JD
+    // vocabulary (not just proper nouns). The JD is trusted text
+    // provided by the job board, not LLM-generated content.
+    for w in jd_text.split(|c: char| !c.is_alphanumeric()) {
+        let lower = w.to_lowercase();
+        if lower.len() >= 3 {
+            tokens.insert(strip_for_match(&lower));
+        }
+    }
+    tokens
 }
 
 /// Flatten profile into a single space-separated string for regex scans.

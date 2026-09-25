@@ -41,3 +41,35 @@ projects:
     url: "https://..."
     bullets:
       - "What it does; impact; stack used."
+
+# Target-role archetypes (career-ops): named role profiles with a level
+# and a fit class (primary = dream role, secondary = good fit,
+# adjacent = stretch). Used as north-star framing in tailoring.
+archetypes:
+  - name: "AI/ML Engineer"
+    level: "Senior/Staff"
+    fit: "primary"
+  - name: "Embedded Robotics Engineer"
+    level: "Senior"
+    fit: "secondary"
+
+# Career narrative (career-ops): the profile's best material, surfaced
+# to the tailor LLM and used by `careerai salary --gap`.
+narrative:
+  headline: "ML engineer turned AI product builder"
+  exit_story: "Shipped RAG products end-to-end; now focused on applied AI at scale."
+  superpowers:
+    - "End-to-end ML pipelines"
+    - "Fast prototyping"
+  proof_points:
+    - name: "Project Alpha"
+      url: "https://..."
+      hero_metric: "Reduced inference latency 40%"
+
+# Compensation targets (career-ops): target range, walk-away minimum,
+# and location flexibility. Optional; used by `careerai salary --gap`.
+compensation:
+  target_range: "$150K-200K"
+  currency: "USD"
+  minimum: "$120K"
+  location_flexibility: "Remote preferred, 1 week/month on-site possible"

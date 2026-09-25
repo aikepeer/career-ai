@@ -16,7 +16,10 @@ impl Decision {
     }
 }
 
-/// Returns `true` if the listing satisfies the `must_include_skills` hard filter.
+/// Returns `true` if the listing contains **at least one** of the configured
+/// `must_include_skills` (case-insensitive substring match anywhere in the
+/// title or description), or if no skills are configured. Empty config means
+/// no hard filter.
 pub fn apply_must_include_filter(listing: &RawListing, cfg: &MatchConfig) -> bool {
     if cfg.must_include_skills.is_empty() {
         return true;
@@ -42,6 +45,26 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
     {
         return Decision::Reject("excluded title");
     }
+    // AIHawk-style `title_blacklist`: supplements rules.yaml exclusions.
+    if cfg
+        .matching
+        .title_blacklist
+        .iter()
+        .any(|t| title_lc.contains(&t.to_lowercase()))
+    {
+        return Decision::Reject("blacklisted title");
+    }
+    // AIHawk-style `company_blacklist`: never shortlist these companies.
+    let company_lc = listing.company.to_lowercase();
+    if !company_lc.is_empty()
+        && cfg
+            .matching
+            .company_blacklist
+            .iter()
+            .any(|c| company_lc.contains(&c.to_lowercase()))
+    {
+        return Decision::Reject("blacklisted company");
+    }
 
     if !cfg.user.locations.is_empty() {
         let locations_lc: Vec<String> = cfg
@@ -52,6 +75,18 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
             .collect();
         if !location_ok(listing, &locations_lc) {
             return Decision::Reject("location not in allowlist");
+        }
+    }
+    // AIHawk-style `location_blacklist`: applied on top of the allowlist.
+    if let Some(loc) = &listing.location {
+        let loc_lc = loc.to_lowercase();
+        if cfg
+            .matching
+            .location_blacklist
+            .iter()
+            .any(|l| loc_lc.contains(&l.to_lowercase()))
+        {
+            return Decision::Reject("blacklisted location");
         }
     }
 
@@ -67,7 +102,7 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
         && !rules
             .require_any_keyword_in_jd
             .iter()
-            .any(|k| desc_lc.contains(k.as_str()))
+            .any(|k| contains_keyword_boundary(&desc_lc, k.as_str()))
     {
         return Decision::Reject("no required JD keyword");
     }
@@ -79,10 +114,10 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
             .flat_map(|d| &d.keywords_any)
             .map(|k| k.to_lowercase())
             .collect();
-        if !domain_kws_lc
-            .iter()
-            .any(|k| title_lc.contains(k.as_str()) || desc_lc.contains(k.as_str()))
-        {
+        if !domain_kws_lc.iter().any(|k| {
+            contains_keyword_boundary(&title_lc, k.as_str())
+                || contains_keyword_boundary(&desc_lc, k.as_str())
+        }) {
             return Decision::Reject("no configured domain keyword in title or JD");
         }
     }
@@ -90,15 +125,55 @@ pub fn classify(listing: &RawListing, cfg: &CoreConfig, rules: &FilterRules) -> 
     Decision::Keep
 }
 
+/// Check if `haystack` contains `needle` with word boundaries (non-alphanumeric
+/// characters or start/end of string). This prevents short keywords like "C",
+/// "AI", "ML", "Go" from false-matching within unrelated words like "company",
+/// "detail", "email", "html", "algorithm".
+pub fn contains_keyword_boundary(haystack: &str, needle: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    let mut search_from = 0;
+    while let Some(rel_pos) = haystack[search_from..].find(needle) {
+        let start = search_from + rel_pos;
+        let end = start + needle.len();
+
+        let left_ok = start == 0
+            || haystack[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|c| !c.is_alphanumeric());
+
+        let right_ok = end >= haystack.len()
+            || haystack[end..]
+                .chars()
+                .next()
+                .is_some_and(|c| !c.is_alphanumeric());
+
+        if left_ok && right_ok {
+            return true;
+        }
+
+        search_from = start + needle.chars().next().map_or(1, char::len_utf8);
+    }
+    false
+}
+
 fn location_ok(listing: &RawListing, allowlist_lc: &[String]) -> bool {
     if allowlist_lc.is_empty() {
         return true;
     }
+    // An empty-string entry is a sentinel meaning "allow listings with no
+    // location". Without filtering it out here, `loc.contains("")` would be
+    // `true` for every string and silently disable location filtering.
+    let allow_missing = allowlist_lc.iter().any(String::is_empty);
     let Some(loc) = listing.location.as_deref() else {
-        return allowlist_lc.iter().any(String::is_empty);
+        return allow_missing;
     };
     let loc_lc = loc.to_lowercase();
     allowlist_lc
         .iter()
+        .filter(|allowed| !allowed.is_empty())
         .any(|allowed| loc_lc.contains(allowed.as_str()))
 }

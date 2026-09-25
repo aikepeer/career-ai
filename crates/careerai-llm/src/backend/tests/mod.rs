@@ -19,11 +19,7 @@ use crate::cache::Cache;
 mod auth_tests;
 mod build_tests;
 
-/// Serialize tests that mutate `CAREERAI_CLAUDE_BIN` /
-/// `CAREERAI_SKIP_CLI_PROBE` / `ANTHROPIC_API_KEY`. These vars are
-/// process-global; without the lock, parallel cargo-test threads race
-/// their set/remove pairs and produce intermittent failures.
-pub(super) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) use crate::ENV_LOCK;
 
 pub(super) fn cfg() -> LlmConfig {
     LlmConfig::default()

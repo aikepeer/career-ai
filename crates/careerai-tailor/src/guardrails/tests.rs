@@ -15,6 +15,7 @@ fn fixture() -> Profile {
             languages: vec!["Rust".into(), "Python".into(), "C#".into()],
             frameworks: vec!["Kubernetes".into(), "Tokio".into()],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "SWE".into(),
@@ -29,12 +30,14 @@ fn fixture() -> Profile {
             institution: "Waterloo".into(),
             start: "2014".into(),
             end: "2018".into(),
+            ..Default::default()
         }],
         projects: vec![Project {
             name: "OpenLLM".into(),
             url: String::new(),
             bullets: vec!["tokenizer in Rust".into()],
         }],
+        ..Default::default()
     }
 }
 
@@ -42,6 +45,65 @@ fn fixture() -> Profile {
 fn accepts_employer_from_profile() {
     let p = fixture();
     forbid_invented_entities("Shipped at Acme Robotics.", "", &p, "x").unwrap();
+}
+
+#[test]
+fn accepts_common_english_adjective_lead() {
+    // Sentence-start resume adjectives ("Experienced", "Skilled", ...)
+    // are normal English, not invented proper nouns. Regression:
+    // agy-backed tailoring of the live profile failed here — the model
+    // reworded the summary to lead with "Experienced in embedded
+    // Linux..." and the guardrail rejected the word as an invented
+    // proper noun.
+    let p = fixture();
+    for lead in ["Experienced", "Skilled", "Proficient", "Seasoned"] {
+        forbid_invented_entities(
+            &format!("{lead} in building resilient cloud infrastructure."),
+            "",
+            &p,
+            "x",
+        )
+        .unwrap_or_else(|e| {
+            panic!("sentence-start {lead} must not be an invented proper noun: {e:?}")
+        });
+    }
+}
+
+#[test]
+fn accepts_sentence_start_capitalization_of_bullet_word() {
+    // A reword may capitalize a word that appears (lowercase) in the
+    // original bullet — "curated" → "Curated" at sentence start.
+    // Regression: live tailoring rejected a faithful reword because the
+    // original-bullet carve-out only covered already-Capitalized runs.
+    let p = fixture();
+    forbid_invented_entities(
+        "Curated signed Yocto images for TI AM665x platforms.",
+        "built HMI tooling; curated signed Yocto images for TI AM665x",
+        &p,
+        "experience[1].bullets[0]",
+    )
+    .unwrap();
+}
+
+#[test]
+fn still_rejects_invented_noun_even_when_bullet_word_capitalized() {
+    // Control for `accepts_sentence_start_capitalization_of_bullet_word`:
+    // capitalizing a word from the bullet is fine, but a genuinely new
+    // Capitalized noun must still be rejected.
+    let p = fixture();
+    let err = forbid_invented_entities(
+        "Curated signed Yocto images for AcmeCorp cloud.",
+        "built HMI tooling; curated signed Yocto images for TI AM665x",
+        &p,
+        "experience[1].bullets[0]",
+    )
+    .unwrap_err();
+    match err {
+        TailorError::InventedContent {
+            offending_token, ..
+        } => assert_eq!(offending_token, "AcmeCorp"),
+        other => panic!("expected InventedContent, got {other:?}"),
+    }
 }
 
 #[test]
@@ -164,6 +226,7 @@ fn accepts_proper_noun_from_same_bullet_original() {
             languages: vec!["C".into()],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -175,6 +238,7 @@ fn accepts_proper_noun_from_same_bullet_original() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     forbid_invented_entities(
@@ -199,6 +263,7 @@ fn rejects_proper_noun_only_in_other_bullet() {
             languages: vec!["C".into()],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -210,6 +275,7 @@ fn rejects_proper_noun_only_in_other_bullet() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     let err = forbid_invented_entities(
@@ -239,6 +305,7 @@ fn accepts_proper_noun_from_summary() {
             languages: vec!["C".into()],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -250,6 +317,7 @@ fn accepts_proper_noun_from_summary() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     forbid_invented_entities(
@@ -274,6 +342,7 @@ fn accepts_punctuated_employer_name_from_company_field() {
             languages: vec![],
             frameworks: vec![],
             tools: vec![],
+            ..Default::default()
         },
         experience: vec![Experience {
             title: "Engineer".into(),
@@ -285,6 +354,7 @@ fn accepts_punctuated_employer_name_from_company_field() {
         }],
         education: vec![],
         projects: vec![],
+        ..Default::default()
     };
 
     forbid_invented_entities(
@@ -349,4 +419,116 @@ fn still_rejects_proper_noun_absent_from_both_profile_and_original() {
         matches!(err, TailorError::InventedContent { reason, .. } if reason == "invented proper noun"),
         "got {err:?}"
     );
+}
+
+#[test]
+fn accepts_jd_proper_noun_via_jd_token_sets() {
+    // Regression: the "tailor top 20" dashboard button failed 100% of
+    // runs because reworded bullets used JD terminology (e.g. "Fleet"
+    // from "fleet management") that was not in the profile. The fix
+    // adds JD-derived tokens to the guardrail allowlist.
+    let p = fixture();
+    let sets = build_token_sets(&p);
+    let jd_text = "Senior Software Engineer, Android Automotive at Waymo. \
+                   Build fleet management systems for autonomous vehicles.";
+    let mut sets = sets;
+    sets.jd_proper_nouns = build_jd_token_sets(jd_text);
+    forbid_invented_entities_with(
+        "Fleet Management: Architected fleet telemetry for Waymo vehicles.",
+        "shipped 35% throughput win",
+        &sets,
+        "x",
+    )
+    .unwrap();
+}
+
+#[test]
+fn still_rejects_invented_noun_not_in_jd_or_profile() {
+    let p = fixture();
+    let sets = build_token_sets(&p);
+    let jd_text = "Senior Software Engineer at Waymo. Build fleet systems.";
+    let mut sets = sets;
+    sets.jd_proper_nouns = build_jd_token_sets(jd_text);
+    let err = forbid_invented_entities_with(
+        "Built the Google Cloud platform.",
+        "shipped 35% throughput win",
+        &sets,
+        "x",
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, TailorError::InventedContent { reason, ref offending_token, .. }
+            if reason == "invented proper noun"
+            && (offending_token.contains("Google") || offending_token.contains("Cloud"))),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn accepts_theme_labels_and_technical_headings() {
+    let p = fixture();
+    let bullets = [
+        "System Architecture: Designed high availability edge telemetry systems.",
+        "Reliability & Diagnostics: Resolved complex hardware bring-up and timing faults.",
+        "High-Throughput Streaming: Optimized low-latency media acquisition pipelines.",
+        "OTA Upgrades: Architected rollback-safe firmware deployment infrastructure.",
+        "Edge Sensing Telemetry: Developed real-time sensor processing pipelines.",
+        "Resource Optimization: Optimized system-level resource utilization on Qualcomm chips.",
+    ];
+    for b in bullets {
+        forbid_invented_entities(b, "shipped 35% throughput win", &p, "x")
+            .unwrap_or_else(|e| panic!("theme label should be accepted in {b:?}: {e:?}"));
+    }
+}
+
+#[test]
+fn accepts_morphological_derivation_from_original_bullet() {
+    let p = fixture();
+    forbid_invented_entities(
+        "Resource Optimization: Streamlined memory footprint and throughput.",
+        "Qualcomm Depth: Optimized system-level resource utilization on QNX.",
+        &p,
+        "experience[0].bullets[1]",
+    )
+    .unwrap();
+}
+
+#[test]
+fn accepts_target_roles_and_summary_tokens() {
+    let mut p = fixture();
+    p.target_roles = vec![
+        "AI Solution Architect".into(),
+        "Principal Embedded Consultant".into(),
+    ];
+    p.summary = "Senior Embedded Architect specializing in edge sensing and robotics.".into();
+    forbid_invented_entities(
+        "AI Solution Architect: Consulted on embedded robotics deployments.",
+        "shipped 35% throughput win",
+        &p,
+        "x",
+    )
+    .unwrap();
+}
+
+#[test]
+fn accepts_technical_acronyms_and_codecs() {
+    let p = fixture();
+    let bullets = [
+        "SoC Architecture: Optimized CPU and GPU memory bandwidth on embedded targets.",
+        "Custom Linux BSPs: Developed custom BSPs for NXP i.MX platforms.",
+        "POSIX Compliance: Engineered real-time telemetry pipelines adhering to POSIX standards.",
+        "Video Pipelines: Optimized V4L2 and GStreamer H.264 video decoding on ARMv8 SoC.",
+        "Security Hardening: Integrated HSM and Cryptographic modules for Root-of-Trust.",
+        "Kernel Subsystem: Triaged and Isolated complex bootloader panics.",
+        "Cloud & Edge Infra: Modernized continuous deployment pipelines.",
+    ];
+    for b in bullets {
+        forbid_invented_entities(
+            b,
+            "Qualcomm Depth: Optimized system-level resource utilization on QNX.",
+            &p,
+            "x",
+        )
+        .unwrap_or_else(|e| panic!("technical vocabulary should be accepted in {b:?}: {e:?}"));
+    }
 }

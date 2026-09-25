@@ -18,13 +18,16 @@ fn pick_default_model_prefers_tailor() {
     let mut c = cfg();
     c.tailor_model = "anthropic/claude-sonnet-4-6".into();
     c.parse_resume_model = "anthropic/claude-haiku".into();
-    assert_eq!(pick_default_model(&c), "claude-sonnet-4-6");
+    assert_eq!(
+        pick_default_model(&c, crate::rig::Provider::Anthropic),
+        "claude-sonnet-4-6"
+    );
 }
 
 #[test]
-fn pick_default_model_falls_back_to_sonnet() {
+fn pick_default_model_falls_back_to_empty() {
     let c = cfg();
-    assert_eq!(pick_default_model(&c), "sonnet");
+    assert_eq!(pick_default_model(&c, crate::rig::Provider::Anthropic), "");
 }
 
 #[test]
@@ -37,6 +40,60 @@ fn strip_namespace() {
         strip_provider_prefix("claude-sonnet-4-6"),
         "claude-sonnet-4-6"
     );
+}
+
+/// A config-file key (`llm.api_key`, e.g. written by the dashboard)
+/// must make `Auto` resolve to the API backend even when no env/keyring
+/// key is present. Regression test: `resolve_auto` previously consulted
+/// only `api_key_source()` (env/keyring), so a config key silently
+/// produced `NoneAvailable`.
+#[cfg(feature = "live-llm-api")]
+#[tokio::test]
+async fn auto_resolves_config_api_key_without_env() {
+    // Clear env sources so only `cfg.api_key` can satisfy the API branch.
+    const KEY_VARS: [&str; 8] = [
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "GROK_API_KEY",
+        "XAI_API_KEY",
+        "CAREERAI_LLM_API_KEY",
+        "CLAUDE_WEB_API_KEY",
+    ];
+
+    let _guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Force the CLI branch to fail so `resolve_auto` reaches the API branch.
+    std::env::set_var(
+        "CAREERAI_CLAUDE_BIN",
+        "/nonexistent/path/that/does/not/resolve",
+    );
+    let prev: Vec<(String, Option<String>)> = KEY_VARS
+        .iter()
+        .map(|k| ((*k).to_string(), std::env::var(k).ok()))
+        .collect();
+    for k in KEY_VARS {
+        std::env::remove_var(k);
+    }
+
+    let mut c = cfg();
+    c.backend = BackendChoice::Auto;
+    c.api_key = Some("sk-test-config-key".into());
+    let res = Backend::resolve(BackendChoice::Auto, &c, cache()).await;
+
+    std::env::remove_var("CAREERAI_CLAUDE_BIN");
+    for (k, v) in prev {
+        if let Some(v) = v {
+            std::env::set_var(k, v);
+        }
+    }
+
+    match res {
+        Ok(Backend::Api(_)) => {}
+        other => panic!("expected Ok(Backend::Api) from config key, got {other:?}"),
+    }
 }
 
 #[cfg(feature = "live-llm-api")]

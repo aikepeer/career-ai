@@ -1,0 +1,60 @@
+[package]
+name = "careerai-hosted"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hosted multi-tenant API surface for career-ai (PRs 2-7: auth, RLS, entitlements, jobs, audit, actions, vertical slice, artifacts)"
+
+[dependencies]
+careerai-core = { path = "../careerai-core" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-match = { path = "../careerai-match" }
+careerai-tailor = { path = "../careerai-tailor" }
+careerai-render = { path = "../careerai-render" }
+careerai-llm = { path = "../careerai-llm" }
+careerai-sources = { path = "../careerai-sources" }
+careerai-db = { path = "../careerai-db" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+tracing.workspace = true
+tokio.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+# Axum for the hosted API server
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "matched-path", "original-uri", "query", "tower-log", "tokio"] }
+tower = "0.5"
+tower-http = { version = "0.6", default-features = false, features = ["cors", "trace"] }
+# Separate sqlx with postgres (workspace dep has only sqlite)
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "chrono", "uuid"] }
+# HMAC for TOTP (RFC 6238)
+hmac = "0.12"
+# SHA-1 for TOTP HMAC
+sha1 = "0.10"
+# Constant-time comparison for tokens
+constant_time_eq = "0.3"
+# Async trait for billing adapter
+async-trait = "0.1"
+# Random token generation
+rand = "0.8"
+# Unicode NFC normalization for canonical JSON
+unicode-normalization = "0.1"
+# AES-256-GCM for encrypted exports
+aes-gcm = "0.10"
+# ZIP archive for careerai-export/v1 format
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Tracing subscriber for the API server binary
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+
+[lints]
+workspace = true

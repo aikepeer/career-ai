@@ -53,7 +53,7 @@ impl CareerAiServer {
         &self,
         uri: &str,
     ) -> Result<ReadResourceResult, McpServerError> {
-        let path = self.root().join("profile").join("profile.yaml");
+        let path = careerai_core::paths::profile_path(self.root());
         let text = tokio::fs::read_to_string(&path).await.map_err(|e| {
             McpServerError::ResourceMissing {
                 uri: uri.to_string(),

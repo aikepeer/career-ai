@@ -14,19 +14,20 @@ use super::types::{ExtractError, ExtractOptions, LlmCaller};
 #[must_use]
 pub fn strip_code_fences(text: &str) -> String {
     let t = text.trim();
-    let inner = if let Some(stripped) = t.strip_prefix("```json") {
-        stripped
-    } else if let Some(stripped) = t.strip_prefix("```") {
-        stripped
+    let unboxed = if let Some(first_brace) = t.find('{') {
+        if let Some(last_brace) = t.rfind('}') {
+            if last_brace >= first_brace {
+                &t[first_brace..=last_brace]
+            } else {
+                t
+            }
+        } else {
+            t
+        }
     } else {
-        return t.to_string();
+        t
     };
-    let inner = inner.trim_start_matches('\n');
-    if let Some(stripped) = inner.strip_suffix("```") {
-        stripped.trim_end_matches('\n').to_string()
-    } else {
-        inner.to_string()
-    }
+    unboxed.trim().to_string()
 }
 
 /// Parse the LLM response text into a [`Profile`] and validate.

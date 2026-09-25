@@ -86,7 +86,10 @@ pub(crate) fn merge_company_list(
             out.push(hit.slug.clone());
         }
     }
-    out.sort();
+    // Sort case-insensitively *before* dedup so case-variant duplicates are
+    // adjacent and removed. A byte-value sort leaves e.g. "ANTHROPIC" and
+    // "anthropic" non-adjacent, so both would survive `dedup_by`.
+    out.sort_by_key(|s| s.to_ascii_lowercase());
     out.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     out
 }

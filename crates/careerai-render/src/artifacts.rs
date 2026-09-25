@@ -10,6 +10,7 @@ use crate::config::RenderConfig;
 pub struct ArtifactLayout {
     pub root: PathBuf,
     pub resume_md: PathBuf,
+    pub resume_html: PathBuf,
     pub resume_docx: PathBuf,
     pub resume_pdf: PathBuf,
     pub cover_md: PathBuf,
@@ -20,6 +21,7 @@ pub fn layout_for(cfg: &RenderConfig, app_id: &str) -> ArtifactLayout {
     let root = cfg.artifacts_dir.join(app_id);
     ArtifactLayout {
         resume_md: root.join("resume.md"),
+        resume_html: root.join("resume.html"),
         resume_docx: root.join("resume.docx"),
         resume_pdf: root.join("resume.pdf"),
         cover_md: root.join("cover_letter.md"),

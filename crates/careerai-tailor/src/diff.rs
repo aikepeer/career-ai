@@ -26,4 +26,4 @@ pub use apply::apply;
 pub use schema::DiffDoc;
 #[cfg(test)]
 pub(crate) use schema::{BulletPath, DiffOp, OpKind, SummaryOp};
-pub use validate::validate;
+pub use validate::{validate, validate_and_sanitize};

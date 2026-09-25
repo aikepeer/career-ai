@@ -22,7 +22,7 @@ impl Default for ExtractOptions {
             model: DEFAULT_MODEL.to_string(),
             prompt_version: DEFAULT_PROMPT_VERSION.to_string(),
             temperature: 0.0,
-            max_tokens: 4096,
+            max_tokens: 16384,
             cache_schema: true,
         }
     }

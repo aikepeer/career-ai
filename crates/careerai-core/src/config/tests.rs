@@ -59,10 +59,15 @@ fn naukri_validated_passes_through_none() {
 fn embedded_defaults_parse() {
     let tmp = tempfile::tempdir().unwrap();
     let cfg = CoreConfig::load(tmp.path()).unwrap();
-    assert!(!cfg.user.locations.is_empty());
-    assert!(cfg.user.locations.iter().any(|l| l.contains("Remote")));
+    // No location hard-filter by default: the old 7-string allowlist
+    // (Remote/Delhi/Gurgaon/Noida/...) rejected ~90% of discovered
+    // listings before scoring. Relevance is decided by score only.
+    assert!(cfg.user.locations.is_empty());
     assert!(!cfg.domains.is_empty());
+    // Jaccard scores on realistic profile/JD pairs land in ~0.003–0.04,
+    // so the shipping default sits at the observed floor, not mid-range.
     assert!(cfg.matching.score_threshold > 0.0);
+    assert!(cfg.matching.score_threshold <= 0.01);
 }
 
 #[test]
@@ -122,4 +127,38 @@ action_timeout_seconds: 45
     assert!(!cfg.headless);
     assert_eq!(cfg.max_per_day, 5);
     assert_eq!(cfg.min_seconds_between, 90);
+}
+#[test]
+fn llm_budget_defaults_to_unlimited() {
+    let cfg = LlmConfig::default();
+    assert!(cfg.max_daily_cost_usd.is_none(), "no spend cap by default");
+    assert!(cfg.max_daily_calls.is_none(), "no call cap by default");
+}
+
+#[test]
+fn llm_budget_round_trips() {
+    let yaml = "max_daily_cost_usd: 1.50\nmax_daily_calls: 200\n";
+    let cfg: LlmConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(cfg.max_daily_cost_usd, Some(1.50));
+    assert_eq!(cfg.max_daily_calls, Some(200));
+}
+
+#[test]
+fn tailoring_reduction_defaults_are_safe_and_configurable() {
+    let cfg: LlmConfig = serde_yaml::from_str(
+        "variant_count: 4\nskeleton_count: 6\nskeleton_confidence_threshold: 0.7\nbatch_size: 8",
+    )
+    .unwrap();
+    assert_eq!(cfg.variant_count, 4);
+    assert_eq!(cfg.skeleton_count, 6);
+    assert!((cfg.skeleton_confidence_threshold - 0.7).abs() < f32::EPSILON);
+    assert_eq!(cfg.batch_size, 8);
+}
+
+#[test]
+fn cluster_config_defaults_to_disabled_and_conservative_threshold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = CoreConfig::load(tmp.path()).unwrap();
+    assert!(!cfg.cluster.enabled);
+    assert!((cfg.cluster.threshold - 0.85).abs() < f32::EPSILON);
 }

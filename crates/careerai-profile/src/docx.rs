@@ -36,17 +36,40 @@ fn extract_from_archive<R: Read + std::io::Seek>(
 
 fn xml_to_text(xml: &str) -> std::result::Result<String, quick_xml::Error> {
     let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
 
     let mut out = String::new();
     let mut in_text = false;
+    // quick-xml >= 0.39 splits entity references out of text events, and
+    // `trim_text` would trim each split fragment independently, eating the
+    // whitespace between an entity and its neighbours. Instead we accumulate
+    // the whole <w:t> run raw and trim it once at the end of the run.
+    let mut run = String::new();
 
     loop {
         match reader.read_event()? {
-            Event::Start(e) if local_name(e.name().as_ref()) == b"t" => in_text = true,
-            Event::End(e) if local_name(e.name().as_ref()) == b"t" => in_text = false,
+            Event::Start(e) if local_name(e.name().as_ref()) == b"t" => {
+                in_text = true;
+                run.clear();
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"t" => {
+                in_text = false;
+                out.push_str(run.trim());
+            }
             Event::Text(e) if in_text => {
-                out.push_str(&e.unescape()?);
+                run.push_str(&e.decode()?);
+            }
+            Event::GeneralRef(e) if in_text => {
+                // `&amp;` / `&#38;` / `&lt;` etc. arrive as separate events.
+                if let Some(ch) = e.resolve_char_ref()? {
+                    run.push(ch);
+                } else if let Some(resolved) = quick_xml::escape::resolve_xml_entity(&e.decode()?) {
+                    run.push_str(resolved);
+                } else {
+                    // Unknown entity: emit verbatim (lenient, like browsers).
+                    run.push('&');
+                    run.push_str(&e.decode()?);
+                    run.push(';');
+                }
             }
             Event::Empty(e) | Event::Start(e) if local_name(e.name().as_ref()) == b"br" => {
                 out.push('\n');
@@ -103,5 +126,14 @@ mod tests {
         let xml = "<root><t>A &amp; B</t></root>";
         let text = xml_to_text(xml).unwrap();
         assert!(text.contains("A & B"));
+    }
+
+    #[test]
+    fn unescapes_numeric_and_named_references() {
+        // quick-xml >= 0.39 delivers `&#38;`, `&lt;`, `&gt;` as separate
+        // GeneralRef events; all must resolve inside <w:t> runs.
+        let xml = "<root><t>R&amp;D &lt;2&gt; &#65;&#x42; &quot;quoted&quot;</t></root>";
+        let text = xml_to_text(xml).unwrap();
+        assert_eq!(text, "R&D <2> AB \"quoted\"");
     }
 }

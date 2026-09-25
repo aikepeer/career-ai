@@ -51,12 +51,12 @@ fn parse_archive<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Pro
         summary: profile_row.summary.unwrap_or_default(),
         skills: Skills {
             languages: skills,
-            frameworks: Vec::new(),
-            tools: Vec::new(),
+            ..Default::default()
         },
         experience: positions,
         education,
         projects,
+        ..Default::default()
     })
 }
 
@@ -69,17 +69,34 @@ fn optional_csv<T>(result: Result<Vec<T>>) -> Result<Vec<T>> {
     }
 }
 
+fn find_zip_index<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    target_name: &str,
+) -> Option<usize> {
+    let lower_target = target_name.to_lowercase();
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name();
+            let lower_name = name.to_lowercase();
+            if lower_name == lower_target
+                || lower_name.ends_with(&format!("/{lower_target}"))
+                || lower_name.ends_with(&format!("\\{lower_target}"))
+            {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
 fn read_csv<R: Read + Seek, T: for<'de> Deserialize<'de>>(
     archive: &mut zip::ZipArchive<R>,
     name: &str,
 ) -> Result<Vec<T>> {
-    let entry = match archive.by_name(name) {
-        Ok(entry) => entry,
-        Err(zip::result::ZipError::FileNotFound) => {
-            return Err(ProfileError::LinkedInMissingFile(name.to_string()));
-        }
-        Err(e) => return Err(ProfileError::Zip(e)),
+    let Some(idx) = find_zip_index(archive, name) else {
+        return Err(ProfileError::LinkedInMissingFile(name.to_string()));
     };
+    let entry = archive.by_index(idx).map_err(ProfileError::Zip)?;
     let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(entry);
     let mut out = Vec::new();
     for row in rdr.deserialize() {
@@ -188,6 +205,7 @@ fn read_education<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Result<Ve
             institution: r.school_name,
             start: dates::normalize(&r.start_date),
             end: dates::normalize(&r.end_date),
+            ..Default::default()
         })
         .collect())
 }

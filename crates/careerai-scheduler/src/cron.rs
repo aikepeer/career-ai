@@ -129,6 +129,40 @@ pub(crate) fn build_submit_job(
     })
 }
 
+/// Build the follow-up cron job. Periodically calls
+/// `check_and_create_follow_ups` to create draft follow-up emails for
+/// submitted applications that haven't received a response. Mirrors the
+/// `build_submit_job` pattern — opens its own pool inside the closure.
+pub(crate) fn build_follow_up_job(
+    cron_expr: &str,
+    root: Arc<PathBuf>,
+    #[cfg(feature = "test-hooks")] tick_counter: Option<Arc<std::sync::atomic::AtomicUsize>>,
+) -> Result<Job, JobSchedulerError> {
+    Job::new_async(cron_expr, move |_uuid, _scheduler| {
+        let root = Arc::clone(&root);
+        #[cfg(feature = "test-hooks")]
+        let tick_counter = tick_counter.clone();
+        Box::pin(async move {
+            let pool = match careerai_pipeline::open_pool(root.as_path()).await {
+                Ok(p) => p,
+                Err(e) => {
+                    error!(error = %e, "follow-up tick: failed to open pool");
+                    return;
+                }
+            };
+            match crate::follow_ups::check_and_create_follow_ups(&pool).await {
+                Ok(created) => info!(created, "follow-up tick ok"),
+                Err(e) => error!(error = %e, "follow-up tick failed"),
+            }
+
+            #[cfg(feature = "test-hooks")]
+            if let Some(counter) = &tick_counter {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        })
+    })
+}
+
 /// Compose the effective per-source cron map from `cfg.scheduler.cadence`
 /// plus per-source overrides on enabled `sources.mcp[*]` entries.
 ///
@@ -137,22 +171,25 @@ pub(crate) fn build_submit_job(
 ///   2. `cfg.sources.mcp[name=<name>].cron` (when enabled and `Some`) —
 ///      per-source override.
 ///
-/// Disabled MCP sources (`enabled: false`) are ignored entirely **and any
-/// matching `scheduler.cadence` entry is removed** before per-source
-/// overrides are applied. That way flipping `enabled: false` on an MCP
-/// source can never accidentally leave a stale global cadence active —
-/// disabling an MCP cancels its cron unconditionally. ATS sources have no
-/// per-source `cron` field today; if that ever lands, extend this helper
-/// rather than the caller.
+/// Any cadence entry for a source that is currently disabled (MCP
+/// `enabled: false`, a built-in feed with `enabled: false`, or an ATS
+/// company list that is empty) is removed before per-source overrides are
+/// applied. Disabling a source therefore cancels its cron unconditionally.
 pub(crate) fn effective_cadence(cfg: &CoreConfig) -> std::collections::HashMap<String, String> {
     let mut cadence: std::collections::HashMap<String, String> = cfg.scheduler.cadence.clone();
-    // First pass: drop cadence entries for disabled MCP sources so a stale
-    // `scheduler.cadence` value cannot survive `enabled: false`.
-    for mcp in &cfg.sources.mcp {
-        if !mcp.enabled && cadence.remove(&mcp.name).is_some() {
+    // First pass: drop cadence entries for disabled sources so a stale
+    // `scheduler.cadence` value cannot survive `enabled: false` (or an
+    // emptied company list).
+    let disabled: Vec<String> = cadence
+        .keys()
+        .filter(|name| discovery_source_disabled(name, cfg))
+        .cloned()
+        .collect();
+    for name in disabled {
+        if cadence.remove(&name).is_some() {
             info!(
-                source = %mcp.name,
-                "disabled mcp source removed stale scheduler.cadence entry",
+                source = %name,
+                "disabled source removed stale scheduler.cadence entry",
             );
         }
     }
@@ -181,4 +218,27 @@ pub(crate) fn effective_cadence(cfg: &CoreConfig) -> std::collections::HashMap<S
         }
     }
     cadence
+}
+
+/// True when `name` resolves to a discovery source that is currently
+/// disabled. Unknown names return `false` so a cadence entry for a future
+/// or custom source is never silently pruned.
+fn discovery_source_disabled(name: &str, cfg: &CoreConfig) -> bool {
+    match name {
+        "greenhouse" => cfg.sources.greenhouse.companies.is_empty(),
+        "lever" => cfg.sources.lever.companies.is_empty(),
+        "ashby" => cfg.sources.ashby.companies.is_empty(),
+        "teamtailor" => cfg.sources.teamtailor.companies.is_empty(),
+        "remotive" => !cfg.sources.remotive.enabled,
+        "remoteok" => !cfg.sources.remoteok.enabled,
+        "naukri" => !cfg.sources.naukri.enabled,
+        "indeed_rss" => !cfg.sources.indeed_rss.enabled,
+        "linkedin-browser" => !cfg.sources.linkedin_browser.enabled,
+        // MCP sources are keyed by their configured name.
+        _ => cfg
+            .sources
+            .mcp
+            .iter()
+            .any(|mcp| mcp.name == name && !mcp.enabled),
+    }
 }

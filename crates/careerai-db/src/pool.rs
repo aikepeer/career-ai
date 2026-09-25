@@ -21,6 +21,8 @@ pub async fn pool_from_path(path: &Path) -> Result<SqlitePool> {
         .filename(path)
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+        .busy_timeout(std::time::Duration::from_secs(10))
         .foreign_keys(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(8)

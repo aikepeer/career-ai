@@ -23,6 +23,16 @@ pub struct AppliedOutcome {
     pub outcome: careerai_submit::SubmitOutcome,
 }
 
+/// A single failed application attempt. Kept separate from `AppliedOutcome`
+/// so `apply_all_detailed` can surface the failure list to `run_pipeline`
+/// without changing `apply_all`'s existing `Vec<AppliedOutcome>` contract.
+#[derive(Debug)]
+pub struct ApplyFailure {
+    pub application_id: String,
+    pub source: String,
+    pub error: String,
+}
+
 /// Build a per-call `SubmitConfig` honoring the optional CLI override.
 ///
 /// When `override_auto_submit` is `Some(true)` the call is forced live;
@@ -52,12 +62,16 @@ pub async fn apply_one(
 ) -> Result<AppliedOutcome> {
     let pool = open_pool(root).await?;
 
-    // Pre-fetch surfaces the typed errors from careerai-db; the CLI's
-    // exit-code mapper downcasts to `DbError::NotFound` directly. We do
-    // NOT bail!() into a stringly-typed error here — that was previously
-    // breaking exit-code classification once any `.context(...)` wrapper
-    // ran upstream.
-    let application = queries::find_application_by_id(&pool, application_id).await?;
+    let application = match queries::find_application_by_id(&pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            match queries::find_latest_application_for_listing(&pool, application_id).await {
+                Ok(Some(a)) => a,
+                _ => anyhow::bail!("application not found for id: {application_id}"),
+            }
+        }
+        Err(e) => return Err(e).context("fetch application"),
+    };
     let listing = queries::find_by_id(&pool, &application.listing_id).await?;
 
     // LinkedIn assist mode: when interactive_only is set (default true), the
@@ -72,6 +86,19 @@ pub async fn apply_one(
     // case-insensitively here so a "LinkedIn" or "LINKEDIN" row doesn't
     // silently bypass the assist-mode short-circuit.
     if listing.source.eq_ignore_ascii_case("linkedin") && cfg.submit.linkedin.interactive_only {
+        // R03: validate the application is in a state eligible for
+        // drafting (rendered or prepared) before transitioning. Without
+        // this guard, a re-entrant call (e.g. daemon tick while a prior
+        // apply is still settling, or a manual retry on an already-
+        // drafted row) would silently regress a submitted or failed
+        // application back to drafted.
+        if !matches!(application.state.as_str(), "rendered" | "prepared") {
+            anyhow::bail!(
+                "application {} is in state '{}'; cannot transition to drafted (expected 'rendered' or 'prepared')",
+                application.id,
+                application.state
+            );
+        }
         queries::transition_application_and_listing(
             &pool,
             &application.id,
@@ -92,9 +119,10 @@ pub async fn apply_one(
     }
 
     let submit_cfg = effective_submit_cfg(cfg, auto_submit_override);
-    let outcome = careerai_submit::submit_application(&pool, &submit_cfg, root, application_id)
-        .await
-        .context("submit_application")?;
+    let outcome =
+        careerai_submit::submit_application(&pool, &submit_cfg, &cfg.rates, root, &application.id)
+            .await
+            .context("submit_application")?;
 
     Ok(AppliedOutcome {
         application_id: application.id,
@@ -112,25 +140,27 @@ pub async fn apply_all(
     source_filter: Option<&str>,
     auto_submit_override: Option<bool>,
 ) -> Result<Vec<AppliedOutcome>> {
+    let (outcomes, _) = apply_all_detailed(root, cfg, source_filter, auto_submit_override).await?;
+    Ok(outcomes)
+}
+
+/// The same iteration as `apply_all`, but also returns the failed
+/// attempts so `run_pipeline` can include them in its report instead of
+/// silently dropping them.
+pub async fn apply_all_detailed(
+    root: &Path,
+    cfg: &CoreConfig,
+    source_filter: Option<&str>,
+    auto_submit_override: Option<bool>,
+) -> Result<(Vec<AppliedOutcome>, Vec<ApplyFailure>)> {
     let pool = open_pool(root).await?;
+    let eligible = eligible_applications(&pool, source_filter).await?;
 
-    // Both "rendered" and "prepared" are eligible per submit_application's
-    // BadState guard. Use the JOIN-based query so a `--source` filter is
-    // pushed into SQL — previously the CLI fetched every listing per row
-    // (O(N) round-trips) and filtered client-side.
-    let mut eligible: Vec<careerai_db::Application> = Vec::new();
-    for state in ["rendered", "prepared"] {
-        let rows =
-            queries::list_applications_by_state_and_source(&pool, state, source_filter, 1_000)
-                .await
-                .with_context(|| format!("list applications in state '{state}'"))?;
-        eligible.extend(rows);
-    }
-
-    let mut out = Vec::with_capacity(eligible.len());
+    let mut outcomes = Vec::with_capacity(eligible.len());
+    let mut failures = Vec::new();
     for app in eligible {
         match apply_one(root, cfg, &app.id, auto_submit_override).await {
-            Ok(o) => out.push(o),
+            Ok(o) => outcomes.push(o),
             Err(e) => {
                 // H4: don't silently retry forever. A single corrupt
                 // artifact, persistent HTTP 500, or unknown-source error
@@ -153,10 +183,99 @@ pub async fn apply_all(
                         "failed to transition application to failed state",
                     );
                 }
+                let source = queries::find_by_id(&pool, &app.listing_id)
+                    .await
+                    .map_or_else(|_| "unknown".to_string(), |listing| listing.source);
+                failures.push(ApplyFailure {
+                    application_id: app.id,
+                    source,
+                    error: format!("{e:#}"),
+                });
             }
         }
     }
-    Ok(out)
+    Ok((outcomes, failures))
+}
+
+/// Reset a `failed` application back to its pre-submit state and re-run
+/// `apply_one`. The pre-submit state is recovered from the listing's most
+/// recent `failed` event so retry mirrors exactly what was attempted
+/// before the failure.
+pub async fn retry_application(
+    root: &Path,
+    cfg: &CoreConfig,
+    application_id: &str,
+) -> Result<AppliedOutcome> {
+    let pool = open_pool(root).await?;
+
+    let application = queries::find_application_by_id(&pool, application_id).await?;
+    if application.state != "failed" {
+        anyhow::bail!(
+            "application {application_id} is in state '{}'; expected 'failed'",
+            application.state,
+        );
+    }
+    let listing = queries::find_by_id(&pool, &application.listing_id).await?;
+
+    let pre_submit = pre_submit_state(&pool, &listing.id).await?;
+    let listing_state: ListingState = pre_submit
+        .parse()
+        .with_context(|| format!("invalid pre-submit listing state '{pre_submit}'"))?;
+
+    queries::transition_application_and_listing(
+        &pool,
+        &application.id,
+        &listing.id,
+        &pre_submit,
+        listing_state,
+        Some(&format!("retry application {application_id}")),
+    )
+    .await
+    .context("reset failed application to pre-submit state")?;
+
+    apply_one(root, cfg, application_id, None).await
+}
+
+async fn pre_submit_state(pool: &careerai_db::SqlitePool, listing_id: &str) -> Result<String> {
+    let events = queries::events_for(pool, listing_id).await?;
+    // R04: find the most recent `failed` event and return its from_state.
+    // If no failed event exists (e.g. manual failure marking), fall back
+    // to the most recent `prepared` event, then to `rendered`. A `prepared`
+    // application that was manually failed would otherwise regress to
+    // `rendered` on retry, losing its prepared artifacts.
+    let pre_submit = events
+        .iter()
+        .rev()
+        .find(|event| event.to_state == "failed")
+        .and_then(|event| event.from_state.clone())
+        .or_else(|| {
+            events
+                .iter()
+                .rev()
+                .find(|event| event.to_state == "prepared")
+                .map(|event| event.to_state.clone())
+        })
+        .unwrap_or_else(|| ListingState::Rendered.as_str().to_string());
+    Ok(pre_submit)
+}
+
+async fn eligible_applications(
+    pool: &careerai_db::SqlitePool,
+    source_filter: Option<&str>,
+) -> Result<Vec<careerai_db::Application>> {
+    // Both "rendered" and "prepared" are eligible per submit_application's
+    // BadState guard. Use the JOIN-based query so a `--source` filter is
+    // pushed into SQL — previously the CLI fetched every listing per row
+    // (O(N) round-trips) and filtered client-side.
+    let mut eligible: Vec<careerai_db::Application> = Vec::new();
+    for state in ["rendered", "prepared"] {
+        let rows =
+            queries::list_applications_by_state_and_source(pool, state, source_filter, 1_000)
+                .await
+                .with_context(|| format!("list applications in state '{state}'"))?;
+        eligible.extend(rows);
+    }
+    Ok(eligible)
 }
 
 /// List applications already submitted, newest first. Optional `source`

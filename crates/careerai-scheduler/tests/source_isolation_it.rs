@@ -4,12 +4,12 @@
 //! cron jobs against the same `JobScheduler` actually wires both into the
 //! event loop and ticks them concurrently, neither starving the other.
 //!
-//! Stays fully offline by leaving all source companies empty — `discover_one`
-//! returns an empty `DiscoveryReport` quickly (the "no sources enabled"
-//! fall-through), `match_one` walks an empty `discovered` table. The closure
-//! body still completes, so the shared `tick_counter` increments per fired
-//! tick. With two jobs ticking once a second over a 3-second window we
-//! expect at least 4 increments.
+//! Stays fully offline by registering two *unknown* source names —
+//! `discover_one` returns an empty `DiscoveryReport` (no matching adapter)
+//! and `match_one` walks an empty `discovered` table, neither touching the
+//! network. The closure body still completes, so the shared `tick_counter`
+//! increments per fired tick. With two jobs ticking once a second over a
+//! 3-second window we expect at least 4 increments.
 //!
 //! What this DOESN'T cover: panic isolation between sibling cron jobs. That
 //! would require injecting a `panic!` into a source adapter or pipeline
@@ -33,24 +33,17 @@ async fn multiple_per_source_jobs_fire_independently() {
     let mut cfg = CoreConfig::load(tmp.path()).expect("load embedded defaults");
 
     // Wipe the embedded cadence and install two every-second per-source jobs.
-    // Six-field cron: sec min hour dom mon dow.
+    // Six-field cron: sec min hour dom mon dow. Unknown source names are
+    // deliberately used so `discover_one` finds no adapter and returns an
+    // empty report without any network I/O.
     cfg.scheduler.cadence.clear();
     cfg.scheduler
         .cadence
-        .insert("greenhouse".into(), "*/1 * * * * *".into());
+        .insert("job-a".into(), "*/1 * * * * *".into());
     cfg.scheduler
         .cadence
-        .insert("lever".into(), "*/1 * * * * *".into());
+        .insert("job-b".into(), "*/1 * * * * *".into());
     cfg.scheduler.submit_cadence = None;
-
-    // Disable the actual source adapters so neither tick hits the network.
-    // `discover_one` will fall through to the "no sources enabled" branch
-    // and return Ok(DiscoveryReport::default()).
-    cfg.sources.greenhouse.companies.clear();
-    cfg.sources.lever.companies.clear();
-    cfg.sources.remotive.enabled = false;
-    cfg.sources.remoteok.enabled = false;
-    cfg.sources.naukri.enabled = false;
 
     let counter = Arc::new(AtomicUsize::new(0));
     let mut sched = Scheduler::from_config_with_counter(tmp.path(), &cfg, Arc::clone(&counter))

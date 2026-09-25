@@ -9,26 +9,52 @@ use serde::{Deserialize, Serialize};
 /// 1. `claude` CLI on PATH and authed -> `ClaudeCli`
 /// 2. `ANTHROPIC_API_KEY` reachable (env or keyring) -> `Api`
 /// 3. Else error.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendChoice {
-    /// Detect at runtime; prefer `claude` CLI over API key.
+    /// Detect at runtime; prefer CLI over API key.
     #[default]
     Auto,
     /// Force the `claude` CLI subprocess backend.
     ClaudeCli,
-    /// Force the rig-core / Anthropic API backend (requires
-    /// `ANTHROPIC_API_KEY`).
+    /// Force the API backend (Anthropic / OpenAI / DeepSeek / compatible endpoint).
     Api,
+    /// Antigravity CLI agent (`agy`).
+    Agy,
+    /// OpenAI Codex / CLI.
+    Codex,
+    /// Pi Agent CLI (`pi`).
+    Pi,
+    /// Goose AI Agent CLI (`goose`).
+    Goose,
+    /// Grok / xAI CLI (`grok`).
+    Grok,
+    /// Aider AI Pair Programming CLI (`aider`).
+    Aider,
+    /// GitHub Copilot CLI (`copilot`).
+    Copilot,
+    /// Llama.cpp CLI (`llama-cpp` / `llama.cpp`).
+    LlamaCpp,
+    /// Custom CLI tool path or binary name (e.g. `~/.local/bin/agy`).
+    CustomCli(String),
 }
 
 impl BackendChoice {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Auto => "auto",
             Self::ClaudeCli => "claude-cli",
             Self::Api => "api",
+            Self::Agy => "agy",
+            Self::Codex => "codex",
+            Self::Pi => "pi",
+            Self::Goose => "goose",
+            Self::Grok => "grok",
+            Self::Aider => "aider",
+            Self::Copilot => "copilot",
+            Self::LlamaCpp => "llama-cpp",
+            Self::CustomCli(s) => s.as_str(),
         }
     }
 }
@@ -36,19 +62,33 @@ impl BackendChoice {
 impl std::str::FromStr for BackendChoice {
     type Err = String;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
+        let trimmed = s.trim();
+        match trimmed.to_ascii_lowercase().as_str() {
             "auto" => Ok(Self::Auto),
             "claude-cli" | "cli" | "claude" => Ok(Self::ClaudeCli),
-            "api" | "anthropic-api" | "rig" => Ok(Self::Api),
-            other => Err(format!(
-                "unknown backend choice `{other}`; expected one of: auto, claude-cli, api"
-            )),
+            "api" | "anthropic-api" | "openai-api" | "deepseek-api" | "rig" => Ok(Self::Api),
+            "agy" => Ok(Self::Agy),
+            "codex" => Ok(Self::Codex),
+            "pi" => Ok(Self::Pi),
+            "goose" => Ok(Self::Goose),
+            "grok" => Ok(Self::Grok),
+            "aider" => Ok(Self::Aider),
+            "copilot" => Ok(Self::Copilot),
+            "llama-cpp" | "llamacpp" | "llama.cpp" | "llama" => Ok(Self::LlamaCpp),
+            _ if !trimmed.is_empty() => Ok(Self::CustomCli(trimmed.to_string())),
+            _ => Err("backend choice cannot be empty".to_string()),
         }
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LlmConfig {
+    /// Generic provider identifier (e.g. "auto", "deepseek", "openai", "openrouter", "anthropic", "ollama")
+    #[serde(default)]
+    pub provider: String,
+    /// Generic model identifier (e.g. "deepseek-chat", "gpt-4o-mini", "claude-3-5-sonnet")
+    #[serde(default)]
+    pub model: String,
     #[serde(default)]
     pub tailor_model: String,
     #[serde(default)]
@@ -58,7 +98,7 @@ pub struct LlmConfig {
     #[serde(default)]
     pub parse_resume_model: String,
     /// Disk cache root for `careerai-llm::Cache`. Relative paths resolve
-    /// against the workspace root at call time.
+    /// against the resolved data root; empty uses the XDG cache directory.
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
     #[serde(default = "default_max_retries")]
@@ -80,20 +120,96 @@ pub struct LlmConfig {
     /// `--llm-backend=<choice>`.
     #[serde(default)]
     pub backend: BackendChoice,
+    /// Tailor strategy: "llm" | "local" | "hybrid" (Phase 1 LLM reduction).
+    #[serde(default = "default_tailor_strategy")]
+    pub strategy: String,
+    /// Bullet relevance threshold for local pruning [0.0, 1.0].
+    #[serde(default = "default_drop_threshold")]
+    pub drop_threshold: f32,
+    /// Minimum match score threshold (e.g. 0.03 for >=3% match) to trigger LLM tailoring.
+    #[serde(default = "default_llm_min_score")]
+    pub llm_min_score: f32,
+    /// Reasoning effort level for reasoning models (e.g. "low", "medium", "high").
+    #[serde(default = "default_effort")]
+    pub effort: String,
+    /// Custom API Base URL for OpenAI/Anthropic/DeepSeek compatible endpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
+    /// Custom API Key for API backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Optional daily spend cap (USD). When cumulative LLM cost for the
+    /// current UTC day exceeds this, the tailor falls back to local-only
+    /// mode for the rest of the day. `None` = unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_daily_cost_usd: Option<f64>,
+    /// Optional daily call cap. When cumulative LLM call count for the
+    /// current UTC day reaches this, the tailor falls back to local-only
+    /// mode. `None` = unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_daily_calls: Option<u64>,
+    /// Maximum number of generated variants kept for each profile bullet.
+    #[serde(default = "default_variant_count")]
+    pub variant_count: usize,
+    /// Number of cover-letter skeletons generated during profile compilation.
+    #[serde(default = "default_skeleton_count")]
+    pub skeleton_count: usize,
+    /// Minimum local skeleton confidence before the LLM fallback is required.
+    #[serde(default = "default_skeleton_confidence_threshold")]
+    pub skeleton_confidence_threshold: f32,
+    /// Number of fallback jobs included in one LLM request.
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+}
+
+fn default_tailor_strategy() -> String {
+    "local".to_string()
+}
+fn default_drop_threshold() -> f32 {
+    0.05
+}
+fn default_llm_min_score() -> f32 {
+    0.03
+}
+fn default_effort() -> String {
+    "low".to_string()
 }
 
 fn default_cache_dir() -> String {
-    "data/cache/llm".to_string()
+    String::new()
 }
 fn default_max_retries() -> u32 {
     3
 }
 fn default_timeout_seconds() -> u64 {
-    120
+    if let Ok(val) =
+        std::env::var("LLM_TIMEOUT_SECONDS").or_else(|_| std::env::var("CAREERAI_LLM_TIMEOUT"))
+    {
+        if let Ok(parsed) = val.parse::<u64>() {
+            return parsed;
+        }
+    }
+    300
 }
 fn default_prompt_version() -> String {
-    "tailor.v1".to_string()
+    "tailor.v2".to_string()
 }
 fn default_anthropic_prompt_cache() -> bool {
     true
+}
+
+fn default_variant_count() -> usize {
+    3
+}
+
+fn default_skeleton_count() -> usize {
+    5
+}
+
+fn default_skeleton_confidence_threshold() -> f32 {
+    0.6
+}
+
+fn default_batch_size() -> usize {
+    5
 }

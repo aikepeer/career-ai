@@ -33,16 +33,20 @@ const MAX_COVER_LETTER_CHARS: usize = 3500;
 ///
 /// Nine rules in order (see module docs). Token sets are built ONCE here
 /// and shared across every reword op.
+///
+/// `jd_text` is the job description text (title + company + description).
+/// Proper nouns and vocabulary from the JD are added to the allowed
+/// token set so rewords may legitimately align with JD terminology.
 #[allow(clippy::too_many_lines)]
-pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
+pub fn validate(doc: &DiffDoc, profile: &Profile, jd_text: &str) -> Result<()> {
     // Rule 9 first — cheap, independent of the ops list.
     // Enforce both a word cap and a char cap; the char cap closes a
     // word-only-counting bypass where an LLM could emit one huge
     // no-whitespace blob and pass as "1 word".
     let cl_chars = doc.cover_letter.chars().count();
     if cl_chars > MAX_COVER_LETTER_CHARS {
-        return Err(TailorError::CoverLetterTooLong {
-            words: cl_chars,
+        return Err(TailorError::CoverLetterCharsTooLong {
+            chars: cl_chars,
             cap: MAX_COVER_LETTER_CHARS,
         });
     }
@@ -162,7 +166,8 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
     // Rules 6 + 7 — reword length cap + empty-reword guard + entity
     // guardrails. Token sets are built ONCE here and shared across every
     // reword op (previously rebuilt per bullet, O(ops × profile_size)).
-    let token_sets = guardrails::build_token_sets(profile);
+    let mut token_sets = guardrails::build_token_sets(profile);
+    token_sets.jd_proper_nouns = guardrails::build_jd_token_sets(jd_text);
     for (bp, op) in &parsed_ops {
         if let OpKind::Reword { new_text } = &op.kind {
             if new_text.trim().is_empty() {
@@ -196,6 +201,174 @@ pub fn validate(doc: &DiffDoc, profile: &Profile) -> Result<()> {
         // and year tokens from anywhere in the profile are accepted.
         let combined = guardrails::flat_profile_text(profile);
         guardrails::forbid_invented_entities_with(new_text, &combined, &token_sets, "summary")?;
+    }
+
+    Ok(())
+}
+
+/// Validate a `DiffDoc` against a profile and safely sanitize any individual
+/// rewords or summary changes that violate entity guardrails by falling them
+/// back to `Keep` / `None`, ensuring 100% safety while preventing batch run failures.
+#[allow(clippy::too_many_lines)]
+pub fn validate_and_sanitize(doc: &mut DiffDoc, profile: &Profile, jd_text: &str) -> Result<()> {
+    let cl_chars = doc.cover_letter.chars().count();
+    if cl_chars > MAX_COVER_LETTER_CHARS {
+        return Err(TailorError::CoverLetterCharsTooLong {
+            chars: cl_chars,
+            cap: MAX_COVER_LETTER_CHARS,
+        });
+    }
+    let cl_words = doc.cover_letter.split_whitespace().count();
+    if cl_words > MAX_COVER_LETTER_WORDS {
+        return Err(TailorError::CoverLetterTooLong {
+            words: cl_words,
+            cap: MAX_COVER_LETTER_WORDS,
+        });
+    }
+
+    let mut parsed_ops: Vec<(BulletPath, usize)> = Vec::with_capacity(doc.ops.len());
+    for (i, op) in doc.ops.iter().enumerate() {
+        let bp = BulletPath::parse(&op.path)?;
+        parsed_ops.push((bp, i));
+        if let OpKind::MoveBefore { target_path } = &op.kind {
+            let _ = BulletPath::parse(target_path)?;
+        }
+    }
+
+    for (bp, i) in &parsed_ops {
+        let op = &doc.ops[*i];
+        let Some(count) = entry_bullet_count(profile, &bp.section, bp.entry_index) else {
+            return Err(TailorError::Schema(format!(
+                "path references missing entry: {}",
+                op.path
+            )));
+        };
+        if bp.bullet_index >= count {
+            return Err(TailorError::Schema(format!(
+                "path references missing bullet: {}",
+                op.path
+            )));
+        }
+        if let OpKind::MoveBefore { target_path } = &op.kind {
+            let tp = BulletPath::parse(target_path)?;
+            let Some(tcount) = entry_bullet_count(profile, &tp.section, tp.entry_index) else {
+                return Err(TailorError::Schema(format!(
+                    "move_before target missing entry: {target_path}"
+                )));
+            };
+            if tp.bullet_index >= tcount {
+                return Err(TailorError::Schema(format!(
+                    "move_before target missing bullet: {target_path}"
+                )));
+            }
+        }
+    }
+
+    let expected: HashSet<BulletPath> = profile_bullet_paths(profile).into_iter().collect();
+    let mut seen: HashSet<BulletPath> = HashSet::with_capacity(parsed_ops.len());
+    for (bp, i) in &parsed_ops {
+        let op = &doc.ops[*i];
+        if !seen.insert(bp.clone()) {
+            return Err(TailorError::Schema(format!(
+                "duplicate op path: {}",
+                op.path
+            )));
+        }
+    }
+    for want in &expected {
+        if !seen.contains(want) {
+            return Err(TailorError::Schema(format!(
+                "bullet not covered: {}",
+                want.format()
+            )));
+        }
+    }
+
+    for (bp, i) in &parsed_ops {
+        let op = &doc.ops[*i];
+        if let OpKind::MoveBefore { target_path } = &op.kind {
+            let tp = BulletPath::parse(target_path)?;
+            if tp.section != bp.section || tp.entry_index != bp.entry_index {
+                return Err(TailorError::Schema(format!(
+                    "move_before crosses entries: {} -> {}",
+                    op.path, target_path
+                )));
+            }
+            if tp == *bp {
+                return Err(TailorError::Schema(format!(
+                    "move_before target equals source: {}",
+                    op.path
+                )));
+            }
+        }
+    }
+
+    let mut drops_per_exp: HashMap<usize, usize> = HashMap::new();
+    for (bp, i) in &parsed_ops {
+        let op = &doc.ops[*i];
+        if matches!(op.kind, OpKind::Drop) && bp.section == Section::Experience {
+            *drops_per_exp.entry(bp.entry_index).or_insert(0) += 1;
+        }
+    }
+    for (idx, exp) in profile.experience.iter().enumerate() {
+        let drops = drops_per_exp.get(&idx).copied().unwrap_or(0);
+        if !exp.bullets.is_empty() && drops >= exp.bullets.len() {
+            return Err(TailorError::Schema(format!(
+                "section emptied by drops: experience[{idx}]"
+            )));
+        }
+    }
+
+    let mut token_sets = guardrails::build_token_sets(profile);
+    token_sets.jd_proper_nouns = guardrails::build_jd_token_sets(jd_text);
+    for (bp, i) in &parsed_ops {
+        let op = &mut doc.ops[*i];
+        if let OpKind::Reword { new_text } = &mut op.kind {
+            if new_text.trim().is_empty() {
+                op.kind = OpKind::Keep;
+                continue;
+            }
+            if new_text.chars().count() > MAX_BULLET_CHARS {
+                tracing::warn!(
+                    path = %op.path,
+                    chars = new_text.chars().count(),
+                    "reword bullet exceeded char cap; safely falling back to original bullet"
+                );
+                op.kind = OpKind::Keep;
+                continue;
+            }
+            let original = original_bullet_text(profile, bp).unwrap_or("");
+            if let Err(e) =
+                guardrails::forbid_invented_entities_with(new_text, original, &token_sets, &op.path)
+            {
+                tracing::warn!(
+                    path = %op.path,
+                    error = %e,
+                    "reword entity guardrail triggered; safely falling back to original bullet"
+                );
+                op.kind = OpKind::Keep;
+            }
+        }
+    }
+
+    if let Some(SummaryOp::Reword { new_text }) = &doc.summary {
+        if new_text.trim().is_empty() {
+            doc.summary = None;
+        } else {
+            let combined = guardrails::flat_profile_text(profile);
+            if let Err(e) = guardrails::forbid_invented_entities_with(
+                new_text,
+                &combined,
+                &token_sets,
+                "summary",
+            ) {
+                tracing::warn!(
+                    error = %e,
+                    "summary reword entity guardrail triggered; safely keeping original summary"
+                );
+                doc.summary = None;
+            }
+        }
     }
 
     Ok(())

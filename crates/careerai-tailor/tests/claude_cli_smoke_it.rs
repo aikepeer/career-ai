@@ -132,6 +132,8 @@ __P__
 
     fn fixture_cfg(cache_dir: String) -> LlmConfig {
         LlmConfig {
+            provider: String::new(),
+            model: String::new(),
             // The whole point of this assertion: `anthropic/` must be
             // stripped before reaching the stub binary's argv.
             tailor_model: "anthropic/claude-sonnet-4-6".into(),
@@ -139,6 +141,8 @@ __P__
             filter_model: String::new(),
             parse_resume_model: String::new(),
             cache_dir,
+            api_base_url: None,
+            api_key: None,
             max_retries: 1,
             timeout_seconds: 30,
             prompt_version: "tailor.v1".into(),
@@ -149,6 +153,7 @@ __P__
             // Field added by PR #21. On main the struct is missing this
             // field; see the gate at the top of this file.
             backend: BackendChoice::ClaudeCli,
+            ..Default::default()
         }
     }
 
@@ -199,7 +204,7 @@ __P__
         //    `Backend` implements `Llm`, so it satisfies the trait
         //    bound on the function.
         let profile = fixture_profile();
-        let outcome = tailor_for_listing(&pool, &backend, &listing_id, &profile, &cfg)
+        let outcome = tailor_for_listing(&pool, &backend, &listing_id, &profile, &cfg, dir.path())
             .await
             .expect("tailor against stub claude-cli");
 

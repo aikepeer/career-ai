@@ -14,6 +14,8 @@ pub mod base;
 pub mod browser_session;
 pub mod credentials;
 pub mod dry_run;
+pub mod email_finder;
+pub mod email_validator;
 pub mod error;
 #[cfg(feature = "browser")]
 pub mod linkedin;
@@ -22,14 +24,20 @@ pub mod linkedin_selectors;
 pub mod naukri;
 pub mod naukri_selectors;
 pub mod rate_limiter;
+pub mod rate_policy;
 mod submit;
 
-pub use ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
+pub use ats_http::{
+    AshbySubmitter, GreenhouseSubmitter, LeverSubmitter, SmartRecruitersSubmitter,
+    TeamtailorSubmitter,
+};
 pub use base::{SubmitContext, SubmitDecision, SubmitOutcome, Submitter, WouldSubmit};
 #[cfg(feature = "browser")]
 pub use browser_session::{stealth_script_sha256, BrowserSession, BrowserSessionConfig};
 pub use credentials::Credential;
 pub use dry_run::DryRunSubmitter;
+pub use email_finder::{EmailFinder, FoundEmail};
+pub use email_validator::{DnsResolver, EmailValidationError, EmailValidator, HickoryDnsResolver};
 pub use error::{Result, SubmitError};
 #[cfg(feature = "browser")]
 pub use linkedin::{LinkedinConfig, LinkedinSubmitter};

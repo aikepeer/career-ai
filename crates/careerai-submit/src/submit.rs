@@ -1,16 +1,21 @@
 use std::path::Path;
 
-use careerai_core::config::SubmitConfig;
+use careerai_core::config::{RatesConfig, SubmitConfig};
 use careerai_core::state::ListingState;
 use careerai_db::queries;
 use careerai_db::SqlitePool;
 use careerai_profile::Profile;
 use tracing::{info, warn};
 
-use crate::ats_http::{AshbySubmitter, GreenhouseSubmitter, LeverSubmitter};
+use crate::ats_http::{
+    AshbySubmitter, GreenhouseSubmitter, LeverSubmitter, SmartRecruitersSubmitter,
+    TeamtailorSubmitter,
+};
 use crate::base::{SubmitContext, SubmitDecision, SubmitOutcome, Submitter};
 use crate::dry_run::DryRunSubmitter;
 use crate::error::{Result, SubmitError};
+use crate::rate_limiter::RateLimiter;
+use crate::rate_policy::{is_ats_http_source, rate_policy_for, submit_source_rate};
 
 /// Process-wide rate limiter shared across every `submit_application`
 /// call. Per-source counters (day-cap, min-interval bucket) live here,
@@ -19,44 +24,79 @@ use crate::error::{Result, SubmitError};
 /// restarts (counters reset, which is the desired behavior at this
 /// scale).
 ///
-/// The function itself is `#[cfg(feature = "browser")]` because today
-/// only `LinkedinSubmitter` consumes it. The `rate_limiter` module is
-/// always-on (its deps are non-optional in `careerai-submit`); when
-/// the next browser submitter lands (Indeed in M5b), the gate stays
-/// in the same place.
-#[cfg(feature = "browser")]
-fn shared_rate_limiter() -> std::sync::Arc<crate::rate_limiter::RateLimiter> {
-    static RL: std::sync::OnceLock<std::sync::Arc<crate::rate_limiter::RateLimiter>> =
-        std::sync::OnceLock::new();
-    RL.get_or_init(|| std::sync::Arc::new(crate::rate_limiter::RateLimiter::new()))
+/// Browser submitters (LinkedIn/Naukri) consume this limiter directly
+/// through their own dedicated config blocks; the ATS HTTP submitters
+/// acquire a permit from it at the `submit_application` boundary.
+fn shared_rate_limiter() -> std::sync::Arc<RateLimiter> {
+    static RL: std::sync::OnceLock<std::sync::Arc<RateLimiter>> = std::sync::OnceLock::new();
+    RL.get_or_init(|| std::sync::Arc::new(RateLimiter::new()))
         .clone()
+}
+
+/// Result of dispatching a submitter from the source name.
+enum Dispatch {
+    Ready(Box<dyn Submitter>),
+    Skip(&'static str),
+    Unknown(String),
+}
+
+/// Build the per-source `Submitter` from the lowercased source name.
+/// Browser-based submitters (LinkedIn, Naukri) are gated behind the
+/// `browser` feature.
+fn dispatch_submitter(source_lc: &str, cfg: &SubmitConfig) -> Dispatch {
+    match source_lc {
+        "greenhouse" => Dispatch::Ready(Box::new(GreenhouseSubmitter::new())),
+        "lever" => Dispatch::Ready(Box::new(LeverSubmitter::new())),
+        "ashby" => Dispatch::Ready(Box::new(AshbySubmitter::new())),
+        "teamtailor" => Dispatch::Ready(Box::new(TeamtailorSubmitter::new())),
+        "smartrecruiters" => Dispatch::Ready(Box::new(SmartRecruitersSubmitter::new())),
+        #[cfg(feature = "browser")]
+        "linkedin" => Dispatch::Ready(Box::new(crate::linkedin::LinkedinSubmitter::new(
+            crate::linkedin::LinkedinConfig::from_core(cfg),
+            shared_rate_limiter(),
+        ))),
+        #[cfg(not(feature = "browser"))]
+        "linkedin" => Dispatch::Skip(
+            "linkedin requires --features browser; rebuild with `cargo build -p careerai-cli --features browser`",
+        ),
+        #[cfg(feature = "browser")]
+        "naukri" => Dispatch::Ready(Box::new(crate::naukri::NaukriSubmitter::new(
+            crate::naukri::NaukriConfig::from_core(cfg),
+            shared_rate_limiter(),
+        ))),
+        #[cfg(not(feature = "browser"))]
+        "naukri" => Dispatch::Skip(
+            "naukri requires --features browser; rebuild with `cargo build -p careerai-cli --features browser`",
+        ),
+        "remotive" | "remoteok" => Dispatch::Skip("feed-only source (no HTTP submitter available)"),
+        other => Dispatch::Unknown(other.to_owned()),
+    }
 }
 
 /// Submit a prepared application. Routes to the correct per-source
 /// `Submitter` based on the listing's `source` column. Honors dry-run
 /// and per-source `enabled` flags.
-///
-/// Transitions `applications.state` and the linked `listings.state`:
-/// - on real success: both → `submitted`; writes a `"submitted via {source}"`
-///   event on the listing.
-/// - on dry-run success: neither state changes; writes a `would_submit`
-///   tracing event (no listing event — the run never intended to advance).
-/// - on skip (source disabled / gated): application → `skipped`,
-///   listing → `skipped`; event note `"skipped: source disabled"`.
-/// - on failure: application → `failed`, listing → `failed`; event note
-///   carries the error.
-///
-/// `root` is the project root used to resolve `profile/profile.yaml`.
-/// Accepting it here (rather than wedging another field into
-/// `SubmitConfig`) mirrors `careerai-cli::pipeline::tailor_one` which
-/// already threads `root` through the same call sites.
 pub async fn submit_application(
     pool: &SqlitePool,
     cfg: &SubmitConfig,
+    rates: &RatesConfig,
     root: &Path,
     application_id: &str,
 ) -> Result<SubmitOutcome> {
-    let application = queries::find_application_by_id(pool, application_id).await?;
+    let application = match queries::find_application_by_id(pool, application_id).await {
+        Ok(a) => a,
+        Err(careerai_db::DbError::NotFound(_)) => {
+            match queries::find_latest_application_for_listing(pool, application_id).await {
+                Ok(Some(a)) => a,
+                _ => {
+                    return Err(SubmitError::Db(careerai_db::DbError::NotFound(format!(
+                        "application not found: {application_id}"
+                    ))))
+                }
+            }
+        }
+        Err(e) => return Err(SubmitError::Db(e)),
+    };
     let state_str = application.state.as_str();
     if state_str != ListingState::Rendered.as_str()
         && state_str != ListingState::Prepared.as_str()
@@ -92,52 +132,12 @@ pub async fn submit_application(
         return mark_skipped(pool, &application, &listing, "source disabled").await;
     }
 
-    let submitter: Box<dyn Submitter> = match source_lc.as_str() {
-        "greenhouse" => Box::new(GreenhouseSubmitter::new()),
-        "lever" => Box::new(LeverSubmitter::new()),
-        "ashby" => Box::new(AshbySubmitter::new()),
-        #[cfg(feature = "browser")]
-        "linkedin" => Box::new(crate::linkedin::LinkedinSubmitter::new(
-            crate::linkedin::LinkedinConfig::from_core(cfg),
-            shared_rate_limiter(),
-        )),
-        #[cfg(not(feature = "browser"))]
-        "linkedin" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "linkedin requires --features browser; rebuild with \
-                 `cargo build -p careerai-cli --features browser`",
-            )
-            .await;
+    let submitter: Box<dyn Submitter> = match dispatch_submitter(&source_lc, cfg) {
+        Dispatch::Ready(s) => s,
+        Dispatch::Skip(reason) => {
+            return mark_skipped(pool, &application, &listing, reason).await;
         }
-        #[cfg(feature = "browser")]
-        "naukri" => Box::new(crate::naukri::NaukriSubmitter::new(
-            crate::naukri::NaukriConfig::from_core(cfg),
-            shared_rate_limiter(),
-        )),
-        #[cfg(not(feature = "browser"))]
-        "naukri" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "naukri requires --features browser; rebuild with \
-                 `cargo build -p careerai-cli --features browser`",
-            )
-            .await;
-        }
-        "remotive" | "remoteok" => {
-            return mark_skipped(
-                pool,
-                &application,
-                &listing,
-                "feed-only source (no HTTP submitter available)",
-            )
-            .await;
-        }
-        other => return Err(SubmitError::UnknownSource(other.to_owned())),
+        Dispatch::Unknown(other) => return Err(SubmitError::UnknownSource(other)),
     };
 
     let decision = if cfg.auto_submit {
@@ -147,7 +147,17 @@ pub async fn submit_application(
     };
 
     match decision {
-        SubmitDecision::Live => run_live(pool, submitter.as_ref(), &ctx).await,
+        SubmitDecision::Live => {
+            run_live_with_boundary_rate_limit(
+                pool,
+                submitter.as_ref(),
+                &ctx,
+                source_lc.as_str(),
+                cfg,
+                rates,
+            )
+            .await
+        }
         SubmitDecision::DryRun => {
             let wrapper = DryRunSubmitter::new(submitter);
             run_dry_run(&wrapper, &ctx)
@@ -183,59 +193,241 @@ async fn mark_skipped(
     })
 }
 
+/// Run a live submission, acquiring a rate-limit permit first for the
+/// non-browser ATS HTTP submitters. Also queries SQLite to enforce day caps
+/// and minimum intervals across process boundaries.
+async fn run_live_with_boundary_rate_limit(
+    pool: &SqlitePool,
+    submitter: &dyn Submitter,
+    ctx: &SubmitContext<'_>,
+    source: &str,
+    submit_cfg: &SubmitConfig,
+    rates: &RatesConfig,
+) -> Result<SubmitOutcome> {
+    let limiter = shared_rate_limiter();
+    let permit = if is_ats_http_source(source) {
+        let policy = submit_source_rate(submit_cfg, source)
+            .unwrap_or_else(|| rate_policy_for(rates, source));
+
+        // Enforce day cap using SQLite history (cross-process safety).
+        // Fail closed: if the count query errors, we block the submission
+        // rather than letting it through without checking the cap.
+        let today_utc = chrono::Utc::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .map_or_else(chrono::Utc::now, |dt| {
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc)
+            });
+        let count = queries::count_submissions_since(pool, source, today_utc)
+            .await
+            .map_err(|e| {
+                SubmitError::RateLimited(format!("daily cap check failed for {source}: {e}"))
+            })?;
+        if count >= policy.max_per_day {
+            return Err(SubmitError::RateLimited(format!(
+                "daily submission cap ({}) reached for {}",
+                policy.max_per_day, source
+            )));
+        }
+
+        // Enforce min_seconds_between using SQLite latest submission timestamp.
+        // Best-effort cross-process check — the in-process governor limiter
+        // provides precise enforcement. There is an inherent TOCTOU window
+        // between this read and the actual submission that cannot be closed
+        // without a distributed lock; this is acceptable for a single-user
+        // local daemon.
+        if let Ok(Some(last_sub)) = queries::latest_submission_time(pool, source).await {
+            let elapsed = chrono::Utc::now()
+                .signed_duration_since(last_sub)
+                .num_seconds();
+            let min_secs = u64::from(policy.min_seconds_between);
+            if elapsed >= 0 {
+                let elapsed_u64 = u64::try_from(elapsed).unwrap_or(0);
+                if elapsed_u64 < min_secs {
+                    let wait = min_secs.saturating_sub(elapsed_u64);
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                }
+            }
+        }
+
+        Some(
+            limiter
+                .acquire(source, &policy)
+                .await
+                .map_err(|e| SubmitError::RateLimited(e.to_string()))?,
+        )
+    } else {
+        None
+    };
+
+    let outcome = run_live(pool, submitter, ctx).await;
+    if let Some(permit) = permit {
+        permit.commit();
+    }
+    outcome
+}
+
 async fn run_live(
     pool: &SqlitePool,
     submitter: &dyn Submitter,
     ctx: &SubmitContext<'_>,
 ) -> Result<SubmitOutcome> {
+    // R01: claim a submission attempt row before any network I/O. This
+    // gives us a durable record of the attempt even if the process
+    // crashes mid-submit, and prevents concurrent workers from
+    // double-submitting.
+    let attempt = queries::claim_submission_attempt(pool, &ctx.application.id, None)
+        .await
+        .map_err(SubmitError::from)?;
+
     match submitter.submit(ctx).await {
-        Ok(remote_id) => {
-            info!(
-                target: "submit",
-                source = submitter.name(),
-                application_id = %ctx.application.id,
-                remote_id = %remote_id,
-                "submitted"
-            );
-            queries::transition_application_and_listing(
-                pool,
-                &ctx.application.id,
-                &ctx.listing.id,
-                ListingState::Submitted.as_str(),
-                ListingState::Submitted,
-                Some(&format!("submitted via {}", submitter.name())),
-            )
-            .await?;
-            Ok(SubmitOutcome::Submitted { remote_id })
-        }
-        Err(err) => {
+        Ok(remote_id) => handle_submit_success(pool, submitter, ctx, &attempt, remote_id).await,
+        Err(err) => handle_submit_failure(pool, submitter, ctx, &attempt, err).await,
+    }
+}
+
+async fn handle_submit_success(
+    pool: &SqlitePool,
+    submitter: &dyn Submitter,
+    ctx: &SubmitContext<'_>,
+    attempt: &queries::SubmissionAttempt,
+    remote_id: String,
+) -> Result<SubmitOutcome> {
+    info!(
+        target: "submit",
+        source = submitter.name(),
+        application_id = %ctx.application.id,
+        remote_id = %remote_id,
+        attempt_id = attempt.id,
+        "submitted"
+    );
+
+    // R01: record the successful outcome on the attempt row
+    // before transitioning state. Non-blocking — the state
+    // transition is the source of truth for pipeline flow.
+    if let Err(e) = queries::mark_attempt_submitted(pool, attempt.id, Some(&remote_id), None).await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            attempt_id = attempt.id,
+            error = %e,
+            "mark_attempt_submitted failed (non-blocking)",
+        );
+    }
+
+    queries::transition_application_and_listing(
+        pool,
+        &ctx.application.id,
+        &ctx.listing.id,
+        ListingState::Submitted.as_str(),
+        ListingState::Submitted,
+        Some(&format!("submitted via {}", submitter.name())),
+    )
+    .await?;
+
+    // Record A/B variant for this submission. The label is derived
+    // deterministically from the application ID.
+    let variant_label = if ctx.application.id.bytes().fold(0u8, u8::wrapping_add) % 2 == 0 {
+        "A"
+    } else {
+        "B"
+    };
+    let metadata = serde_json::json!({
+        "source": submitter.name(),
+        "listing_id": &ctx.listing.id,
+        "attempt_id": attempt.id,
+    })
+    .to_string();
+    if let Err(e) = queries::record_variant(
+        pool,
+        &ctx.application.id,
+        variant_label,
+        Some(&metadata),
+        Some(&ctx.application.profile_hash),
+    )
+    .await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            error = %e,
+            "record_variant failed (non-blocking)",
+        );
+    }
+
+    Ok(SubmitOutcome::Submitted { remote_id })
+}
+
+async fn handle_submit_failure(
+    pool: &SqlitePool,
+    submitter: &dyn Submitter,
+    ctx: &SubmitContext<'_>,
+    attempt: &queries::SubmissionAttempt,
+    err: SubmitError,
+) -> Result<SubmitOutcome> {
+    warn!(
+        target: "submit",
+        source = submitter.name(),
+        application_id = %ctx.application.id,
+        attempt_id = attempt.id,
+        error = %err,
+        "submission failed"
+    );
+
+    // R01: classify the failure. Network/timeout errors after the
+    // request was sent are "uncertain" — the remote may have received
+    // it. Structural/policy errors are "failed".
+    let is_uncertain = is_uncertain_error(&err);
+    if is_uncertain {
+        if let Err(e) = queries::mark_attempt_uncertain(pool, attempt.id, &err.to_string()).await {
             warn!(
                 target: "submit",
-                source = submitter.name(),
                 application_id = %ctx.application.id,
-                error = %err,
-                "submission failed"
+                attempt_id = attempt.id,
+                error = %e,
+                "mark_attempt_uncertain failed (non-blocking)",
             );
-            let note = format!("failed: {err}");
-            if let Err(transition_err) = queries::transition_application_and_listing(
-                pool,
-                &ctx.application.id,
-                &ctx.listing.id,
-                ListingState::Failed.as_str(),
-                ListingState::Failed,
-                Some(&note),
-            )
-            .await
-            {
-                warn!(
-                    target: "submit",
-                    application_id = %ctx.application.id,
-                    error = %transition_err,
-                    "failed to transition application to failed state after submission error"
-                );
-            }
-            Err(err)
         }
+    } else if let Err(e) = queries::mark_attempt_failed(pool, attempt.id, &err.to_string()).await {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            attempt_id = attempt.id,
+            error = %e,
+            "mark_attempt_failed failed (non-blocking)",
+        );
+    }
+
+    let note = format!("failed: {err}");
+    if let Err(transition_err) = queries::transition_application_and_listing(
+        pool,
+        &ctx.application.id,
+        &ctx.listing.id,
+        ListingState::Failed.as_str(),
+        ListingState::Failed,
+        Some(&note),
+    )
+    .await
+    {
+        warn!(
+            target: "submit",
+            application_id = %ctx.application.id,
+            error = %transition_err,
+            "failed to transition application to failed state after submission error"
+        );
+    }
+    Err(err)
+}
+
+/// R01: classify whether a submit error means the remote may have
+/// received the request despite the error. HTTP status errors and
+/// structural/policy errors are definitive failures. Network/timeout
+/// errors are uncertain — the request may have reached the server.
+fn is_uncertain_error(err: &SubmitError) -> bool {
+    match err {
+        SubmitError::Http(e) => e.is_timeout() || e.is_connect(),
+        _ => false,
     }
 }
 
@@ -254,7 +446,7 @@ fn run_dry_run(wrapper: &DryRunSubmitter, ctx: &SubmitContext<'_>) -> Result<Sub
 }
 
 fn load_profile(root: &Path) -> Result<Profile> {
-    let path = root.join("profile").join("profile.yaml");
+    let path = careerai_core::paths::profile_path(root);
     let text = std::fs::read_to_string(&path).map_err(SubmitError::Io)?;
     Profile::from_yaml(&text).map_err(|e| {
         SubmitError::Io(std::io::Error::new(

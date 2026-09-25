@@ -11,10 +11,32 @@ use serde::{Deserialize, Serialize};
 pub enum SourceError {
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("http {status}: {body}")]
+    #[error("http {status}: {}", sanitize_error_body(.body))]
     HttpStatus { status: u16, body: String },
     #[error("parse: {0}")]
     Parse(String),
+}
+
+pub fn sanitize_error_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "empty response".to_string();
+    }
+    if trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with("<html") || trimmed.contains("<body")
+    {
+        let clean = crate::util::html_to_text(trimmed);
+        if clean.len() > 140 {
+            format!("{}...", &clean[..137])
+        } else if clean.is_empty() {
+            "HTML error response".to_string()
+        } else {
+            clean
+        }
+    } else if trimmed.len() > 200 {
+        format!("{}...", &trimmed[..197])
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// A raw listing as returned by an adapter — pre-filter, pre-dedupe,

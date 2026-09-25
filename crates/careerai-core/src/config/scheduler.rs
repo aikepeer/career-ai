@@ -18,4 +18,10 @@ pub struct SchedulerConfig {
     /// `careerai-scheduler::Scheduler::from_config`.
     #[serde(default)]
     pub submit_cadence: Option<String>,
+    /// Optional cron schedule for periodic follow-up checking. When set,
+    /// the daemon periodically calls `check_and_create_follow_ups` to
+    /// create draft follow-up emails for submitted applications that
+    /// haven't received a response. Mirrors the `submit_cadence` pattern.
+    #[serde(default)]
+    pub follow_up_cadence: Option<String>,
 }

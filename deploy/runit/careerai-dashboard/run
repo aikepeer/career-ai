@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep the service independent of runit's working directory and PATH.
+# Prefer values in the service envdir, then accept an explicitly inherited environment.
+SERVICE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ "${CAREERAI_ENVDIR_LOADED:-}" != "1" ] && [ -d "${SERVICE_DIR}/env" ]; then
+  export CAREERAI_ENVDIR_LOADED=1
+  exec chpst -e "${SERVICE_DIR}/env" "$0" "$@"
+fi
+APP_ROOT="${CAREERAI_ROOT:?CAREERAI_ROOT must be set}"
+CAREERAI_BIN="${CAREERAI_BIN:-careerai}"
+CAREERAI_USER="${CAREERAI_USER:?CAREERAI_USER must be set}"
+CAREERAI_PORT="${CAREERAI_DASHBOARD_PORT:-8787}"
+
+cd "${APP_ROOT}"
+export CAREERAI_ROOT="${APP_ROOT}"
+exec chpst -u "${CAREERAI_USER}" "${CAREERAI_BIN}" status serve --port "${CAREERAI_PORT}"

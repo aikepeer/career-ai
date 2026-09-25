@@ -13,6 +13,7 @@ mod commands;
 mod cookies;
 mod digest;
 mod review;
+mod salary;
 mod service;
 mod sources_sync;
 mod status;
@@ -40,7 +41,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log.as_deref());
 
-    let cwd = std::env::current_dir()?;
+    // `CAREERAI_ROOT` keeps an explicit project layout; otherwise runtime
+    // data and profiles resolve below XDG_DATA_HOME/career-ai.
+    let cwd = careerai_core::paths::resolve_root_env();
 
     // Parse the global `--llm-backend` flag once so subcommands can
     // forward it down without re-parsing.
@@ -51,50 +54,98 @@ async fn main() -> Result<()> {
         };
 
     match cli.command {
+        Command::Config { command } => match command {
+            commands::ConfigSubcommand::Generate { force } => {
+                commands::config_cmd::run_generate(force)?;
+            }
+        },
         Command::Init { force } => {
-            careerai_core::init::scaffold(&cwd, force)?;
+            careerai_core::init::scaffold_env(force)?;
         }
-        Command::Profile { command } => commands::profile::run(command, backend_override)?,
+        Command::Profile { command } => match command {
+            ProfileCommand::CompileVariants { force } => {
+                let cfg = load_cfg(&cwd)?;
+                commands::profile_compile::run(&cwd, &cfg, force, backend_override).await?;
+            }
+            other => commands::profile::run(other, backend_override)?,
+        },
         Command::Discover { sources } => commands::discover::run(&cwd, &sources).await?,
-        Command::Match { tune } => commands::match_::run(&cwd, tune).await?,
+        Command::Match {
+            tune,
+            rematch_shortlisted,
+        } => commands::match_::run(&cwd, tune, rematch_shortlisted).await?,
+        Command::Run { auto_submit } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::run::run(&cwd, &cfg, auto_submit).await?;
+        }
         Command::Shortlist { command } => match command {
             ShortlistCommand::Show { limit } => commands::shortlist::run_show(&cwd, limit).await?,
         },
-        Command::Tailor { listing_id } => {
+        Command::Tailor {
+            listing_id,
+            all,
+            limit,
+            strategy,
+        } => {
             let mut cfg = load_cfg(&cwd)?;
             if let Some(b) = backend_override {
                 cfg.llm.backend = b;
             }
-            match pipeline::tailor_one(&cwd, &cfg, &listing_id).await {
-                Ok(outcome) => {
-                    println!(
-                        "tailored: application_id={} ({} @ {})",
-                        outcome.application_id, outcome.listing_title, outcome.company,
-                    );
-                    println!(
-                        "run `careerai render {}` to emit DOCX/PDF artifacts",
-                        outcome.application_id,
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(error = %format_args!("{e:#}"), "tailor failed");
-                    std::process::exit(commands::tailor::map_tailor_error_to_exit_code(&e));
-                }
+            if let Some(strategy) = strategy {
+                cfg.llm.strategy = strategy;
             }
-        }
-        Command::Render { application_id } => {
-            let cfg = load_cfg(&cwd)?;
-            match pipeline::render_one(&cwd, &cfg, &application_id).await {
-                Ok(outcome) => {
-                    println!("rendered: application_id={}", outcome.application_id);
-                    for (path, size) in &outcome.bytes {
-                        println!("  {} ({} bytes)", path.display(), size);
+            if all || limit.is_some() {
+                let outcomes = pipeline::tailor_all(&cwd, &cfg, limit).await?;
+                if outcomes.is_empty() {
+                    tracing::error!("tailor_all: 0 shortlisted listings tailored");
+                    std::process::exit(1);
+                }
+                println!("tailored: {} shortlisted listings", outcomes.len());
+                println!("run `careerai render --all` to emit DOCX/PDF artifacts");
+            } else if let Some(id) = listing_id {
+                match pipeline::tailor_one(&cwd, &cfg, &id).await {
+                    Ok(outcome) => {
+                        println!(
+                            "tailored: application_id={} ({} @ {})",
+                            outcome.application_id, outcome.listing_title, outcome.company,
+                        );
+                        println!(
+                            "run `careerai render {}` to emit DOCX/PDF artifacts",
+                            outcome.application_id,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %format_args!("{e:#}"), "tailor failed");
+                        std::process::exit(commands::tailor::map_tailor_error_to_exit_code(&e));
                     }
                 }
-                Err(e) => {
-                    tracing::error!(error = %format_args!("{e:#}"), "render failed");
-                    std::process::exit(commands::render::map_render_error_to_exit_code(&e));
+            } else {
+                anyhow::bail!("provide listing_id or pass --all or --limit <n>");
+            }
+        }
+        Command::Render {
+            application_id,
+            all,
+        } => {
+            let cfg = load_cfg(&cwd)?;
+            if all {
+                let outcomes = pipeline::render_all(&cwd, &cfg).await?;
+                println!("rendered: {} tailored applications", outcomes.len());
+            } else if let Some(id) = application_id {
+                match pipeline::render_one(&cwd, &cfg, &id).await {
+                    Ok(outcome) => {
+                        println!("rendered: application_id={}", outcome.application_id);
+                        for (path, size) in &outcome.bytes {
+                            println!("  {} ({} bytes)", path.display(), size);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %format_args!("{e:#}"), "render failed");
+                        std::process::exit(commands::render::map_render_error_to_exit_code(&e));
+                    }
                 }
+            } else {
+                anyhow::bail!("provide application_id or pass --all");
             }
         }
         Command::Apply {
@@ -130,6 +181,50 @@ async fn main() -> Result<()> {
             let cfg = load_cfg(&cwd)?;
             digest::run_digest(&cwd, &cfg, &since).await?;
         }
+        Command::Followups { days } => {
+            commands::followups::run(&cwd, days).await?;
+        }
+        Command::Liveness { source } => {
+            commands::liveness::run(&cwd, source.as_deref()).await?;
+        }
+        Command::Patterns => {
+            commands::patterns::run_patterns(&cwd).await?;
+        }
+        Command::Email { listing_id } => {
+            commands::email::run_email(&cwd, &listing_id).await?;
+        }
+        Command::Interview { listing_id } => {
+            commands::interview::run_interview(&cwd, &listing_id).await?;
+        }
+        Command::MarkResponded {
+            application_id,
+            note,
+            no_prep,
+        } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::mark_responded::run(&cwd, &cfg, &application_id, note.as_deref(), no_prep)
+                .await?;
+        }
+        Command::Prep {
+            application_id,
+            news_urls,
+            news_domains,
+        } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::prep::run(&cwd, &cfg, &application_id, &news_urls, &news_domains).await?;
+        }
+        Command::Upskill => {
+            commands::upskill::run_upskill(&cwd).await?;
+        }
+        Command::AnalyzeProfile => {
+            commands::analyze_profile::run_analyze_profile(&cwd)?;
+        }
+        Command::Negotiate {
+            listing_id,
+            benchmark,
+        } => {
+            commands::negotiate::run_negotiate(&cwd, &listing_id, benchmark.as_deref()).await?;
+        }
         Command::Mcp { command } => match command {
             McpCommand::Probe => {
                 let cfg = load_cfg(&cwd)?;
@@ -154,9 +249,91 @@ async fn main() -> Result<()> {
             SourcesCommand::Sync { apply } => {
                 sources_sync::run(&cwd, apply).await?;
             }
+            SourcesCommand::DiscoverWeb { apply } => {
+                let agent = careerai_sources::WebSearchDiscoveryAgent::default();
+                let portals = agent.discover_portals();
+                println!("🌐 Web Search Discovery Agent — Discovered Job & Freelance Portals:");
+                println!(
+                    "{:<22} {:<15} {:<32} {:<30}",
+                    "NAME", "CATEGORY", "BASE URL", "DESCRIPTION"
+                );
+                println!("{}", "-".repeat(100));
+                for p in &portals {
+                    println!(
+                        "{:<22} {:<15} {:<32} {:<30}",
+                        p.name, p.category, p.base_url, p.description
+                    );
+                }
+
+                if apply {
+                    let config_path =
+                        careerai_core::paths::config_dir_for_root(&cwd).join("local.yaml");
+                    let added = agent.apply_to_config(&config_path, &portals)?;
+                    println!(
+                        "\n✅ Successfully updated {} with {} newly discovered portals!",
+                        config_path.display(),
+                        added
+                    );
+                } else {
+                    println!(
+                        "\n💡 Run `careerai sources discover-web --apply` to append these portals directly into the resolved XDG config directory."
+                    );
+                }
+            }
         },
+        Command::Salary {
+            company,
+            city,
+            json,
+            list_all,
+            validate,
+            gap,
+        } => {
+            salary::run(
+                &cwd,
+                &salary::SalaryArgs {
+                    company,
+                    city,
+                    flags: salary::SalaryFlags {
+                        json,
+                        list_all,
+                        validate,
+                        gap,
+                    },
+                },
+            )?;
+        }
         Command::Inspect { application_id } => {
             commands::inspect::run(&cwd, &application_id).await?;
+        }
+        Command::Retry { application_id } => {
+            let cfg = load_cfg(&cwd)?;
+            commands::retry::run(&cwd, &cfg, &application_id).await?;
+        }
+        Command::Rollback {
+            id,
+            to,
+            all,
+            from_state,
+        } => {
+            if all {
+                let from = from_state.as_deref().unwrap_or("rendered");
+                let outcomes = pipeline::rollback_all(&cwd, from, to.as_deref()).await?;
+                println!(
+                    "rolled back {} items from `{}` to `{}`",
+                    outcomes.len(),
+                    from,
+                    to.as_deref().unwrap_or("previous")
+                );
+            } else if let Some(target_id) = id {
+                let outcome = pipeline::rollback_one(&cwd, &target_id, to.as_deref()).await?;
+                println!(
+                    "rolled back {} from `{}` to `{}`",
+                    outcome.id, outcome.from_state, outcome.to_state
+                );
+            } else {
+                anyhow::bail!("provide id or pass --all");
+            }
         }
         Command::Daemon => {
             let cfg = load_cfg(&cwd)?;
@@ -179,6 +356,48 @@ async fn main() -> Result<()> {
             ServiceCommand::Status => service::run_status()?,
             ServiceCommand::Uninstall => service::run_uninstall()?,
         },
+        Command::Export { output } => {
+            let db_path = careerai_core::paths::database_path(&cwd);
+            let pool = careerai_db::pool::pool_from_path(&db_path)
+                .await
+                .with_context(|| format!("open db at {}", db_path.display()))?;
+            let export = careerai_db::queries::workspace_io::export_workspace(&pool)
+                .await
+                .context("export workspace")?;
+            let path = output
+                .as_deref()
+                .unwrap_or("careerai-workspace-export.json");
+            let json = serde_json::to_string_pretty(&export).context("serialize export")?;
+            std::fs::write(path, json).context("write export file")?;
+            println!(
+                "exported {} listings, {} applications, {} events → {path}",
+                export.tables.listings.len(),
+                export.tables.applications.len(),
+                export.tables.events.len(),
+            );
+        }
+        Command::Restore { input, yes } => {
+            if !yes {
+                anyhow::bail!("restore overwrites the database — pass --yes to confirm");
+            }
+            let json = std::fs::read_to_string(&input)
+                .with_context(|| format!("read export file {input}"))?;
+            let export: careerai_db::queries::workspace_io::WorkspaceExport =
+                serde_json::from_str(&json).context("parse export file")?;
+            let db_path = careerai_core::paths::database_path(&cwd);
+            let pool = careerai_db::pool::pool_from_path(&db_path)
+                .await
+                .with_context(|| format!("open db at {}", db_path.display()))?;
+            careerai_db::queries::workspace_io::restore_workspace(&pool, &export)
+                .await
+                .context("restore workspace")?;
+            println!(
+                "restored {} listings, {} applications, {} events from {input}",
+                export.tables.listings.len(),
+                export.tables.applications.len(),
+                export.tables.events.len(),
+            );
+        }
     }
     Ok(())
 }

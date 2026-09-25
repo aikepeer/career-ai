@@ -29,13 +29,19 @@ const COVER_LETTER_TEMPLATE_NAME: &str = "cover_letter";
 
 /// Build the tailor-resume `LlmRequest` from fresh inputs. Temperature is
 /// held low (0.1) because we want structured JSON, not creative prose.
-pub fn tailor_prompt(profile: &Profile, listing: &Listing, cfg: &LlmConfig) -> Result<LlmRequest> {
+pub fn tailor_prompt(
+    profile: &Profile,
+    listing: &Listing,
+    cfg: &LlmConfig,
+    feedback_context: Option<&str>,
+) -> Result<LlmRequest> {
     let rendered = render(
         TAILOR_TEMPLATE_NAME,
         TAILOR_PROMPT_TEMPLATE,
         profile,
         listing,
         cfg,
+        feedback_context,
     )?;
     let (system, profile_block, user) = split_segments(&rendered)?;
     Ok(LlmRequest {
@@ -45,7 +51,7 @@ pub fn tailor_prompt(profile: &Profile, listing: &Listing, cfg: &LlmConfig) -> R
         prompt_version: cfg.prompt_version.clone(),
         model: cfg.tailor_model.clone(),
         temperature: 0.1,
-        max_tokens: 4096,
+        max_tokens: 4_096,
         cache_profile: cfg.anthropic_prompt_cache,
     })
 }
@@ -64,6 +70,7 @@ pub fn cover_letter_prompt(
         profile,
         listing,
         cfg,
+        None,
     )?;
     let (system, profile_block, user) = split_segments(&rendered)?;
     // Version suffix keeps the cover-letter cache key distinct from the
@@ -81,7 +88,7 @@ pub fn cover_letter_prompt(
             cfg.cover_letter_model.clone()
         },
         temperature: 0.4,
-        max_tokens: 1500,
+        max_tokens: 2_048,
         cache_profile: cfg.anthropic_prompt_cache,
     })
 }
@@ -92,8 +99,14 @@ fn render(
     profile: &Profile,
     listing: &Listing,
     cfg: &LlmConfig,
+    feedback_context: Option<&str>,
 ) -> Result<String> {
-    let profile_yaml = serde_yaml::to_string(profile)?;
+    let cleaned_jd = clean_job_description(&listing.description);
+    // Pre-filter the profile to drop zero-relevance entries, reducing
+    // token usage by 40–60% for users with long careers.
+    let jd_text = format!("{} {} {}", listing.title, listing.company, cleaned_jd);
+    let trimmed_profile = crate::reduce::reduce_profile_for_prompt(profile, &jd_text);
+    let profile_yaml = serde_yaml::to_string(&trimmed_profile)?;
     let mut tera = Tera::default();
     tera.add_raw_template(name, template)?;
     let mut ctx = Context::new();
@@ -105,9 +118,47 @@ fn render(
         "listing_location",
         listing.location.as_deref().unwrap_or(""),
     );
-    ctx.insert("listing_description", &listing.description);
+    ctx.insert("listing_description", &cleaned_jd);
+    ctx.insert("feedback_context", &feedback_context);
     let rendered = tera.render(name, &ctx)?;
     Ok(rendered)
+}
+
+/// Clean non-technical boilerplate (EEO statements, benefits, legal notices) from JD.
+/// Only drops the boilerplate paragraph itself — content after it is preserved.
+pub fn clean_job_description(raw: &str) -> String {
+    let mut lines = Vec::new();
+    let mut skipping = false;
+    for line in raw.lines() {
+        let lc = line.to_ascii_lowercase();
+        let matches_boilerplate = lc.contains("equal opportunity")
+            || lc.contains("eeo employer")
+            || lc.contains("affirmative action")
+            || lc.contains("privacy policy")
+            || lc.contains("we do not discriminate")
+            || lc.contains("benefits and perks")
+            || lc.contains("compensation package");
+
+        if matches_boilerplate {
+            skipping = true;
+            continue;
+        }
+        // A blank line ends a boilerplate paragraph — resume capturing.
+        if line.trim().is_empty() {
+            skipping = false;
+        }
+        if !skipping {
+            lines.push(line);
+        }
+    }
+    let res = lines.join("\n").trim().to_string();
+    if res.len() > 6000 {
+        res.chars().take(6000).collect()
+    } else if res.is_empty() {
+        raw.to_string()
+    } else {
+        res
+    }
 }
 
 fn split_segments(rendered: &str) -> Result<(String, String, String)> {
@@ -158,16 +209,21 @@ mod tests {
 
     fn fixture_cfg() -> LlmConfig {
         LlmConfig {
+            provider: String::new(),
+            model: String::new(),
             tailor_model: "claude-3-5-sonnet".into(),
             cover_letter_model: "claude-3-5-sonnet".into(),
             filter_model: String::new(),
             parse_resume_model: String::new(),
             cache_dir: "data/cache/llm".into(),
+            api_base_url: None,
+            api_key: None,
             max_retries: 3,
             timeout_seconds: 120,
             prompt_version: "tailor.v1".into(),
             anthropic_prompt_cache: true,
             backend: careerai_core::config::BackendChoice::default(),
+            ..Default::default()
         }
     }
 
@@ -189,6 +245,7 @@ mod tests {
             }],
             education: vec![],
             projects: vec![],
+            ..Default::default()
         }
     }
 
@@ -212,7 +269,8 @@ mod tests {
 
     #[test]
     fn tailor_prompt_splits_all_three_segments() {
-        let req = tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg()).unwrap();
+        let req =
+            tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg(), None).unwrap();
         assert!(!req.system.is_empty());
         assert!(!req.profile_block.is_empty());
         assert!(!req.user.is_empty());
@@ -233,13 +291,79 @@ mod tests {
     /// actionable signal.
     #[test]
     fn tailor_prompt_documents_projects_path_shape() {
-        let req = tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg()).unwrap();
+        let req =
+            tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg(), None).unwrap();
         assert!(
             req.system.contains("projects[<i>].bullets[<j>]")
                 || req.system.contains("projects[<i>]"),
             "tailor prompt must teach the LLM the projects path shape; \
              system block was: {sys}",
             sys = req.system
+        );
+    }
+    /// F08: When feedback context is provided, the tailor prompt must
+    /// include it in the user segment so the LLM can adjust emphasis
+    /// based on what the candidate learned in prior interviews.
+    #[test]
+    fn tailor_prompt_includes_feedback_context_when_provided() {
+        let req = tailor_prompt(
+            &fixture_profile(),
+            &fixture_listing(),
+            &fixture_cfg(),
+            Some("\n- Rating: 3/5 | Went well: system design | Could improve: conciseness"),
+        )
+        .unwrap();
+        assert!(
+            req.user
+                .contains("Interview feedback from prior applications"),
+            "feedback section missing from user block: {user}",
+            user = req.user
+        );
+        assert!(
+            req.user.contains("Could improve: conciseness"),
+            "feedback content missing from user block: {user}",
+            user = req.user
+        );
+    }
+
+    /// F08: When no feedback context is provided, the prompt must omit
+    /// the feedback section entirely (Tera `{% if feedback_context %}`).
+    #[test]
+    fn tailor_prompt_omits_feedback_section_when_none() {
+        let req =
+            tailor_prompt(&fixture_profile(), &fixture_listing(), &fixture_cfg(), None).unwrap();
+        assert!(
+            !req.user
+                .contains("Interview feedback from prior applications"),
+            "feedback section present without context: {user}",
+            user = req.user
+        );
+    }
+
+    #[test]
+    fn clean_jd_preserves_content_after_boilerplate() {
+        let jd = "We are hiring a Rust engineer.\n\n\
+                  You will build distributed systems.\n\n\
+                  Equal opportunity employer.\n\
+                  We do not discriminate.\n\n\
+                  Apply now with your portfolio.";
+        let cleaned = clean_job_description(jd);
+        assert!(
+            cleaned.contains("Apply now with your portfolio"),
+            "content after boilerplate was dropped: {cleaned}"
+        );
+        assert!(!cleaned.contains("Equal opportunity employer"));
+        assert!(cleaned.contains("distributed systems"));
+    }
+
+    #[test]
+    fn clean_jd_preserves_accommodations_in_technical_context() {
+        let jd = "Build hardware accommodations for edge devices.\n\n\
+                  Equal opportunity employer.";
+        let cleaned = clean_job_description(jd);
+        assert!(
+            cleaned.contains("hardware accommodations"),
+            "legitimate 'accommodations' usage was dropped: {cleaned}"
         );
     }
 

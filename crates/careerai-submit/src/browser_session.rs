@@ -23,7 +23,7 @@
 
 #![cfg(feature = "browser")]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -59,6 +59,42 @@ pub fn stealth_script_sha256() -> &'static str {
 /// both changes together.
 pub const EXPECTED_STEALTH_SHA: &str =
     "a3bbcc79d80f77099f4aa21611124653da6b9eecfc1c79fabedc76049a103c2f";
+
+fn detect_chrome_executable() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("CHROME_BIN").or_else(|_| std::env::var("CHROMIUM_PATH")) {
+        let path = PathBuf::from(p);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    for candidate in [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/brave-browser",
+        "/snap/bin/chromium",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let pup_dir = PathBuf::from(home)
+            .join(".cache")
+            .join("puppeteer")
+            .join("chrome");
+        if let Ok(entries) = std::fs::read_dir(&pup_dir) {
+            for entry in entries.flatten() {
+                let candidate = entry.path().join("chrome-linux64").join("chrome");
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
 
 /// Configuration for a `BrowserSession`.
 #[derive(Debug, Clone)]
@@ -128,6 +164,9 @@ impl BrowserSession {
             .window_size(cfg.window_width, cfg.window_height)
             .request_timeout(Duration::from_secs(cfg.request_timeout_seconds))
             .arg(format!("--user-agent={}", cfg.user_agent));
+        if let Some(chrome_path) = detect_chrome_executable() {
+            builder = builder.chrome_executable(chrome_path);
+        }
         builder = if cfg.headless {
             builder.headless_mode(HeadlessMode::True)
         } else {
@@ -239,7 +278,7 @@ impl BrowserSession {
             .path("/".to_string())
             .secure(true)
             .http_only(true)
-            .same_site(CookieSameSite::None)
+            .same_site(CookieSameSite::Lax)
             .build()
             .map_err(|e| SubmitError::Io(std::io::Error::other(format!("cookie params: {e}"))))?;
         self.page

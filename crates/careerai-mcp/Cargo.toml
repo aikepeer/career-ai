@@ -38,7 +38,7 @@ tempfile.workspace = true
 rmcp = { workspace = true, features = ["client"] }
 
 [features]
-default = ["live-llm-cli"]
+default = ["live-llm-cli", "browser"]
 # Mirror careerai-cli feature gates so the MCP binary can be built with the
 # same backends.
 live-llm-cli = ["careerai-pipeline/live-llm-cli"]

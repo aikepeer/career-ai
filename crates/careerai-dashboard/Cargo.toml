@@ -10,6 +10,13 @@ description = "Read-only HTTP dashboard for the career-ai pipeline (KPI strip, k
 [dependencies]
 careerai-core = { path = "../careerai-core" }
 careerai-db = { path = "../careerai-db" }
+careerai-llm = { path = "../careerai-llm" }
+careerai-match = { path = "../careerai-match" }
+careerai-pipeline = { path = "../careerai-pipeline" }
+careerai-profile = { path = "../careerai-profile" }
+careerai-scheduler = { path = "../careerai-scheduler" }
+careerai-sources = { path = "../careerai-sources" }
+serde_yaml.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -19,13 +26,17 @@ tokio = { workspace = true }
 chrono.workspace = true
 sqlx.workspace = true
 tera = { workspace = true }
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace"] }
+bytes = "1"
+which = "7"
+tempfile.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
-tempfile.workspace = true
+chromiumoxide = { workspace = true }
+futures.workspace = true
 
 [lints]
 workspace = true

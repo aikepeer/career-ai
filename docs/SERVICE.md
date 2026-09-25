@@ -42,7 +42,7 @@ ExecStart=/home/kk/toolchains/cargo/bin/careerai daemon
 WorkingDirectory=/home/kk/projects/career-ai/career-ai-data
 Restart=on-failure
 RestartSec=10s
-EnvironmentFile=-%h/.config/careerai/env
+EnvironmentFile=-%h/.config/career-ai/env
 MemoryMax=2G
 CPUQuota=80%
 
@@ -52,14 +52,17 @@ WantedBy=default.target
 
 Things to know:
 
-- **`WorkingDirectory` is pinned to your `current_dir()` at install
-  time.** career-ai resolves `config/`, `data/`, and `profile/` from
-  the daemon's cwd; without `WorkingDirectory` set, `systemd --user`
-  would start the daemon in the manager's default directory and read
-  the wrong tree. Run `service install` from the project root.
+- **`WorkingDirectory` is pinned to the resolved data root at install time.**
+  Unless `CAREERAI_ROOT` is set, career-ai uses
+  `XDG_CONFIG_HOME/career-ai` for configuration,
+  `XDG_DATA_HOME/career-ai` for profiles, SQLite, and artifacts, and
+  `XDG_STATE_HOME/career-ai` for logs and runtime metadata. Logs and runtime
+  metadata therefore stay separate from the repository. Run `service install`
+  from any directory; set `CAREERAI_ROOT` only for an intentional project
+  layout.
 - **The unit does NOT contain secrets.** If you want to set
   `ANTHROPIC_API_KEY`, `CAREERAI_ROOT`, or any other env var, drop a
-  file at `~/.config/careerai/env`:
+  file at `~/.config/career-ai/env`:
 
   ```ini
   ANTHROPIC_API_KEY=sk-ant-...
@@ -149,8 +152,8 @@ Common causes:
 | Symptom                                                       | Likely cause                                                             | Fix                                                                |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------ |
 | `failed to load config: ...config/default.yaml: No such file` | `WorkingDirectory` points at a directory without `careerai init` results | Re-run `service install` from the right project root               |
-| `database error: failed to open ...data/careerai.sqlite`      | Same as above, or wrong `CAREERAI_ROOT` in env file                      | Check `WorkingDirectory` in the unit + `~/.config/careerai/env`    |
-| `LLM backend unavailable`                                     | `claude` CLI isn't reachable, no `ANTHROPIC_API_KEY` set                 | Either `claude login`, or add the key to `~/.config/careerai/env`  |
+| `database error: failed to open ...data/careerai.sqlite`      | Same as above, or wrong `CAREERAI_ROOT` in env file                      | Check `WorkingDirectory` in the unit + `~/.config/career-ai/env`    |
+| `LLM backend unavailable`                                     | `claude` CLI isn't reachable, no `ANTHROPIC_API_KEY` set                 | Either `claude login`, or add the key to `~/.config/career-ai/env`  |
 | Daemon runs but nothing happens after logout                  | Linger isn't enabled                                                     | `loginctl enable-linger $USER`                                     |
 | `MemoryMax=2G` killed the process                             | Long-running scoring or render exceeded the cap                          | Edit the unit to raise `MemoryMax`, then `daemon-reload` + restart |
 

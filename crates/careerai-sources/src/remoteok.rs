@@ -4,6 +4,8 @@
 //! The first array element is a legal notice, NOT a listing. We skip
 //! entries that lack an `id` field to filter it out defensively.
 
+use std::time::Duration;
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
@@ -59,7 +61,12 @@ impl Source for RemoteOkSource {
 
     async fn discover(&self) -> Result<Vec<RawListing>, SourceError> {
         let url = format!("{}/api", self.base_url.trim_end_matches('/'));
-        let resp = self.http.get(&url).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await?;
         if !resp.status().is_success() {
             return Err(SourceError::HttpStatus {
                 status: resp.status().as_u16(),
@@ -71,13 +78,20 @@ impl Source for RemoteOkSource {
             .into_iter()
             .filter_map(|i| {
                 let id = i.id?;
+                let title = i.position?;
+                let url = i.url?;
+                // Skip ghost rows that have an id but no usable title/url
+                // (e.g. the legal-notice element or malformed entries).
+                if title.trim().is_empty() || url.trim().is_empty() {
+                    return None;
+                }
                 Some(RawListing {
                     source: "remoteok".to_string(),
                     external_id: id,
-                    title: i.position.unwrap_or_default(),
+                    title,
                     company: i.company.unwrap_or_default(),
                     location: i.location,
-                    url: i.url.unwrap_or_default(),
+                    url,
                     description: i.description.map(|d| html_to_text(&d)).unwrap_or_default(),
                     raw_json: None,
                 })

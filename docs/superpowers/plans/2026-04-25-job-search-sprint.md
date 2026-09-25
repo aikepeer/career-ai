@@ -10,6 +10,21 @@
 
 **Spec amendment from execution-realism:** the spec says daemon "form-fills + screenshots" LinkedIn drafts. That's not feasible cheaply — chromiumoxide sessions can't be persisted across daemon-and-CLI process boundaries, so the daemon would have to keep a long-lived browser open per-draft (impractical). **Refined:** `drafted` means resume + cover-letter rendered and ready, NO LinkedIn browser interaction yet. `careerai review` opens a fresh browser session per drafted application, walks the form, screenshots, prompts y/N/skip, and clicks. Naukri stays full-auto in the daemon. This refinement is also documented at the top of Phase 2 below.
 
+## Reconciliation status — 2026-09-22
+
+The checkbox procedure below is a historical implementation plan, not a
+completion record. Current source status:
+
+- Implemented: `must_include_skills`, the `Drafted` state, LinkedIn
+  `interactive_only` guards, `careerai review`, Naukri submission support,
+  cookie refresh, `careerai digest`, `CookieExpiringSoon` notifications,
+  the `careerai-prep` crate, `careerai mark-responded`, and the `careerai
+  prep` command with explicit allowlisted research sources.
+- The prep command remains a remote-LLM workflow by configuration; local
+  tests use a deterministic fixture backend only.
+- Not locally verified: live ATS submissions, credential availability, and
+  operator-side host deployment. Those remain external acceptance gates.
+
 ---
 
 ## Phase 1 — W1: ATS submitters live mode + matcher tightening
@@ -227,10 +242,10 @@ git commit -s -m "feat(match): apply must_include_skills filter before scoring"
 
 **Files:** none (operator-side validation against real ATS endpoints)
 
-- [ ] **Step 1:** Operator picks 3 real job listings — one from each of {Greenhouse, Lever, Ashby}. Adds the company slugs to `~/.config/careerai/config/local.yaml` under `sources.greenhouse.companies` etc.
+- [ ] **Step 1:** Operator picks 3 real job listings — one from each of {Greenhouse, Lever, Ashby}. Adds the company slugs to `$XDG_CONFIG_HOME/career-ai/config/local.yaml` under `sources.greenhouse.companies` etc.
 - [ ] **Step 2:** Operator runs `careerai discover --source greenhouse` (and lever, ashby). Confirms 3 new listings landed in DB.
 - [ ] **Step 3:** Operator runs `careerai match` with a tuned `must_include_skills`. Confirms one of the 3 reaches `shortlisted`.
-- [ ] **Step 4:** Operator runs `careerai tailor <listing_id>` then `careerai render <application_id>`. Confirms artifacts appear in `artifacts/<application_id>/`.
+- [ ] **Step 4:** Operator runs `careerai tailor <listing_id>` then `careerai render <application_id>`. Confirms artifacts appear in `$XDG_DATA_HOME/career-ai/artifacts/<application_id>/`.
 - [ ] **Step 5:** Operator runs `careerai apply --auto-submit <application_id>` against ONE Greenhouse listing first. Captures the remote application ID from the log line. Repeats for Lever + Ashby.
 - [ ] **Step 6:** Operator verifies application receipt email arrived from each ATS. If any failed, surfaces the failure for engineer triage.
 
@@ -1121,7 +1136,7 @@ cargo deny check
 | Spec section | Plan task | Status |
 |---|---|---|
 | W1 — ATS live mode + matcher tightening | Phase 1 (1.1–1.4) | covered |
-| W1 DoD — 3 live ATS submits, no junk in tailored queue | Task 1.4 (operator) | covered |
+| W1 DoD — 3 live ATS submits, no junk in tailored queue | Task 1.4 (operator) | not verified locally |
 | W2 — drafted state variant | Task 2.1 | covered |
 | W2 — interactive_only flag | Task 2.2 | covered |
 | W2 — pipeline short-circuit to drafted | Task 2.3 | covered |
@@ -1130,15 +1145,17 @@ cargo deny check
 | W2 — cookie refresh helper | Task 2.5 step 7 | covered |
 | W3 — `careerai digest` | Task 3.1 | covered |
 | W3 — cookie-expiry warnings | Task 3.2 | covered |
-| W4 — `careerai-prep` crate | Tasks 4.1 + 4.2 | covered |
-| W4 — `mark-responded` CLI | Task 4.3 | covered |
-| W4 — `prep` CLI manual mode | Task 4.4 | covered |
+| W4 — `careerai-prep` crate | Tasks 4.1 + 4.2 | implemented |
+| W4 — `mark-responded` CLI | Task 4.3 | implemented |
+| W4 — `prep` CLI manual mode | Task 4.4 | implemented with allowlisted research inputs |
 | Risks — LinkedIn account flag | covered by interactive_only=true default + Task 2.3 short-circuit | covered |
 | Risks — Naukri rate-limit | covered by reusing M5a governor + RatePolicy | covered |
 | Risks — operator forgets cookie refresh | Task 3.2 (digest warnings) | covered |
-| Operator-side runbook | Task 5.2 | covered |
+| Operator-side runbook | Task 5.2 | local instructions documented; live host not verified |
 
-No gaps detected. No placeholders in steps that need code (all `unimplemented!()` are explicit M5c-implementation gates with the full surface specified in the surrounding code).
+The table above is a scope reconciliation, not evidence that every historical
+checkbox was executed. Live ATS operation, credential provisioning, and host
+deployment remain operator acceptance gates.
 
 ---
 

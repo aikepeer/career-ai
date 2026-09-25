@@ -14,6 +14,7 @@ pub fn parse(text: &str) -> Profile {
         experience: parse_experience(&sections.experience),
         education: parse_education(&sections.education),
         projects: parse_projects(&sections.projects),
+        ..Default::default()
     }
 }
 
@@ -126,8 +127,7 @@ fn parse_skills(text: &str) -> Skills {
     }
     Skills {
         languages,
-        frameworks: Vec::new(),
-        tools: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -182,6 +182,7 @@ fn parse_education(text: &str) -> Vec<Education> {
             institution,
             start,
             end,
+            ..Default::default()
         });
     }
     out

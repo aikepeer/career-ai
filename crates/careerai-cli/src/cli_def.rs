@@ -3,11 +3,10 @@
 //! under the project's 300-LOC cap.
 
 use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    CookiesCommand, LlmCommand, McpCommand, NotifyCommand, ProfileCommand, ServiceCommand,
-    ShortlistCommand, SourcesCommand, StatusCommand,
+    ConfigSubcommand, CookiesCommand, LlmCommand, McpCommand, NotifyCommand, ProfileCommand,
+    ServiceCommand, ShortlistCommand, SourcesCommand, StatusCommand,
 };
 
 #[derive(Debug, Parser)]
@@ -25,25 +24,31 @@ pub(crate) struct Cli {
     #[arg(long, global = true, value_name = "LEVEL")]
     pub log: Option<String>,
 
-    /// Override the LLM backend selection. `auto` (default) prefers the
-    /// `claude` CLI when reachable, else falls back to the rig-core
-    /// Anthropic API. Force `claude-cli` or `api` to skip detection.
+    /// Override the LLM backend selection (`auto`, `claude-cli`, `api`, `agy`,
+    /// `codex`, `pi`, `goose`, `grok`, `aider`, `copilot`, `llama-cpp`, or
+    /// custom binary path like `~/.local/bin/agy`).
     #[arg(
         long = "llm-backend",
         global = true,
-        value_name = "auto|claude-cli|api"
+        value_name = "auto|claude-cli|api|agy|codex|pi|goose|grok|aider|copilot|<path>"
     )]
     pub llm_backend: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Generate or update `local.yaml` in the resolved XDG config directory.
+    Config {
+        #[command(subcommand)]
+        command: ConfigSubcommand,
+    },
     /// Scaffold `config/`, `profile/`, and `.env` in the current directory.
     Init {
         #[arg(long)]
         force: bool,
     },
-    /// Pull new listings from configured sources.
+    /// Pull new listings from configured sources. Prints the id of each
+    /// new listing for use with `careerai tailor <id>`.
     Discover {
         #[arg(long = "source", value_delimiter = ',')]
         sources: Vec<String>,
@@ -52,14 +57,33 @@ pub(crate) enum Command {
     Match {
         #[arg(long)]
         tune: bool,
+        /// Re-score already-shortlisted listings and demote any that fall
+        /// below the current threshold back to filtered_out. Useful after
+        /// raising score_threshold in local.yaml.
+        #[arg(long = "rematch-shortlisted")]
+        rematch_shortlisted: bool,
+    },
+    /// Run the full pipeline (match → tailor → render → apply) in one shot.
+    Run {
+        #[arg(long = "auto-submit")]
+        auto_submit: bool,
     },
     /// Tailor the master resume to a shortlisted listing.
     Tailor {
-        listing_id: String,
+        listing_id: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Override the configured strategy for this invocation: local, llm, or hybrid.
+        #[arg(long, value_parser = ["local", "llm", "hybrid"])]
+        strategy: Option<String>,
     },
     /// Render a tailored application to DOCX + PDF via pandoc.
     Render {
-        application_id: String,
+        application_id: Option<String>,
+        #[arg(long)]
+        all: bool,
     },
     /// Submit prepared applications. Defaults to dry-run.
     Apply {
@@ -76,6 +100,20 @@ pub(crate) enum Command {
     /// Inspect an application's row, state history, and artifacts.
     Inspect {
         application_id: String,
+    },
+    /// Reset a failed application to its pre-submit state and retry apply.
+    Retry {
+        application_id: String,
+    },
+    /// Rollback a listing/application state (e.g. rendered -> tailored, tailored -> shortlisted).
+    Rollback {
+        id: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long = "from")]
+        from_state: Option<String>,
     },
     /// Profile ingestion + validation subcommands.
     Profile {
@@ -104,6 +142,64 @@ pub(crate) enum Command {
         #[arg(long, default_value = "24h")]
         since: String,
     },
+    /// List submitted applications that have gone quiet (no response
+    /// for N days) — follow-up candidates.
+    Followups {
+        /// Minimum quiet days before an application is listed.
+        #[arg(long, default_value_t = 10)]
+        days: u32,
+    },
+    /// Analyze pipeline patterns: reposts/ghost-jobs, funnel velocity,
+    /// advance rates, and rejection latency.
+    Patterns,
+    /// Draft a cold application email for a listing (draft-only, never sends).
+    Email {
+        /// Listing ID to draft an email for.
+        listing_id: String,
+    },
+    /// Generate an interview prep pack (STAR stories + likely questions)
+    /// for a listing.
+    Interview {
+        /// Listing ID to prep for.
+        listing_id: String,
+    },
+    /// Mark an application as responded and generate its interview prep sheet.
+    MarkResponded {
+        application_id: String,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        no_prep: bool,
+    },
+    /// Generate an interview prep sheet for an application.
+    Prep {
+        application_id: String,
+        /// Explicit HTTPS employer/news URLs to read (never crawls broadly).
+        #[arg(long = "news-url")]
+        news_urls: Vec<String>,
+        /// Allowlisted non-employer domains for the supplied news URLs.
+        #[arg(long = "news-domain")]
+        news_domains: Vec<String>,
+    },
+    /// Analyse skill gaps between your profile and shortlisted JDs.
+    Upskill,
+    /// Audit your profile for ATS readiness, quantification, and completeness.
+    AnalyzeProfile,
+    /// Generate a salary negotiation script (counter-offer email + talking points).
+    Negotiate {
+        /// Listing ID to negotiate for.
+        listing_id: String,
+        /// Optional market benchmark string (e.g. "$180K base, 15% equity").
+        #[arg(long)]
+        benchmark: Option<String>,
+    },
+    /// Verify shortlisted listings are still open on their source board
+    /// before spending LLM tokens tailoring them.
+    Liveness {
+        /// Restrict the check to one source (e.g. `greenhouse`).
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Tools for MCP-server discovery sources.
     Mcp {
         #[command(subcommand)]
@@ -124,10 +220,45 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: SourcesCommand,
     },
+    /// Benchmark a company's salary against your own `salary_data.json`.
+    Salary {
+        /// Company name to look up (fuzzy-matched).
+        company: Option<String>,
+        /// Narrow the lookup to a city.
+        #[arg(long)]
+        city: Option<String>,
+        /// Emit raw JSON instead of the table.
+        #[arg(long)]
+        json: bool,
+        /// List every company in the data file.
+        #[arg(long = "list-all")]
+        list_all: bool,
+        /// Validate the data file's shape and report duplicates.
+        #[arg(long)]
+        validate: bool,
+        /// Compare your profile's compensation target against the market
+        /// index for the matched company.
+        #[arg(long)]
+        gap: bool,
+    },
     /// Show the pipeline dashboard.
     Status {
         #[command(subcommand)]
         command: StatusCommand,
+    },
+    /// Export the workspace database to a JSON snapshot file.
+    Export {
+        /// Output file path (default: careerai-workspace-export.json).
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Restore workspace data from a JSON snapshot file.
+    Restore {
+        /// Input file path.
+        input: String,
+        /// Confirm restore — required to avoid accidental overwrites.
+        #[arg(long)]
+        yes: bool,
     },
     /// Manage the systemd user service.
     Service {
@@ -137,9 +268,61 @@ pub(crate) enum Command {
 }
 
 pub(crate) fn init_tracing(log_flag: Option<&str>) {
+    use std::fs::OpenOptions;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{fmt, EnvFilter, Layer};
+
     let filter = match log_flag {
         Some(level) => EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info")),
         None => EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
     };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    // Logs and runtime metadata belong in the XDG state directory, separate
+    // from project data. If no user state directory is available, retain
+    // stderr-only logging rather than creating project-local state.
+    let file_layer = careerai_core::paths::log_dir_env().and_then(|log_dir| {
+        std::fs::create_dir_all(&log_dir).ok()?;
+        let log_file_path = log_dir.join("careerai.log");
+
+        // The log may capture listing text and LLM output; keep it owner-only
+        // like the credentials file (mode 0600 from creation, no umask window).
+        let file = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .mode(0o600)
+                    .open(&log_file_path)
+            }
+            #[cfg(not(unix))]
+            {
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_file_path)
+            }
+        }
+        .ok()?;
+
+        Some(
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(true)
+                .with_filter(filter.clone()),
+        )
+    });
+
+    let stderr_layer = fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .with_filter(filter);
+
+    tracing_subscriber::registry()
+        .with(stderr_layer)
+        .with(file_layer)
+        .init();
 }

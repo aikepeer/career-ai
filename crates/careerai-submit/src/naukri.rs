@@ -159,7 +159,7 @@ impl NaukriSubmitter {
     ///   8. Screenshot pre-submit state → `<screenshots_dir>/<id>-pre-submit.png`
     ///   9. Wait for APPLIED_SUCCESS_SELECTOR.
     ///  10. Return `ctx.listing.external_id` as the remote submission ID.
-    #[allow(clippy::unused_async, dead_code)]
+    #[allow(clippy::unused_async, clippy::unused_async_trait_impl, dead_code)]
     async fn run_session(
         &self,
         session: &BrowserSession,
@@ -185,6 +185,7 @@ impl NaukriSubmitter {
 }
 
 #[async_trait]
+#[allow(clippy::unused_async, clippy::unused_async_trait_impl)]
 impl Submitter for NaukriSubmitter {
     fn name(&self) -> &'static str {
         "naukri"

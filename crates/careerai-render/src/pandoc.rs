@@ -25,6 +25,7 @@ const STDERR_TAIL_BYTES: usize = 2 * 1024;
 /// an unexpected binary.
 const ALLOWED_PDF_ENGINES: &[&str] = &[
     "weasyprint",
+    "typst",
     "wkhtmltopdf",
     "tectonic",
     "xelatex",
@@ -171,13 +172,41 @@ pub async fn md_to_pdf_with_bin(
     cfg: &RenderConfig,
 ) -> Result<()> {
     check_pdf_engine(&cfg.pdf_engine)?;
-    let args = vec![
+    let mut args = vec![
         md_path.to_string_lossy().into_owned(),
+        "-M".to_string(),
+        "title=Resume".to_string(),
         format!("--pdf-engine={}", cfg.pdf_engine),
-        "-o".to_string(),
-        out_path.to_string_lossy().into_owned(),
     ];
+    if cfg.pdf_engine == "typst" {
+        args.push("-V".to_string());
+        args.push("mainfont=Liberation Sans".to_string());
+    }
+    args.push("-o".to_string());
+    args.push(out_path.to_string_lossy().into_owned());
     spawn_and_wait(bin, &args, cfg.timeout_seconds).await
+}
+
+/// Convert an HTML document directly to PDF via `weasyprint` (fast-path)
+/// or via `pandoc` with configured engine. If the engine is `weasyprint`
+/// but the binary is not installed, returns an explicit error rather than
+/// falling back to a Markdown→PDF pipeline that would fail confusingly.
+pub async fn html_to_pdf(html_path: &Path, out_path: &Path, cfg: &RenderConfig) -> Result<()> {
+    check_pdf_engine(&cfg.pdf_engine)?;
+    if cfg.pdf_engine == "weasyprint" {
+        if let Ok(weasy_bin) = which::which("weasyprint") {
+            let args = vec![
+                html_path.to_string_lossy().into_owned(),
+                out_path.to_string_lossy().into_owned(),
+            ];
+            return spawn_and_wait(&weasy_bin, &args, cfg.timeout_seconds).await;
+        }
+        // weasyprint configured but not installed — fail explicitly.
+        return Err(RenderError::PandocMissing);
+    }
+    // For non-weasyprint engines, pandoc can consume HTML directly.
+    let bin = resolve_pandoc_bin(cfg)?;
+    md_to_pdf_with_bin(&bin, html_path, out_path, cfg).await
 }
 
 #[cfg(test)]

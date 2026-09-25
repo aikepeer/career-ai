@@ -52,6 +52,21 @@ impl Cache {
         &self.root
     }
 
+    /// Keys must be exactly 64 ASCII hex digits (the shape produced by
+    /// `hashing::compose_key`). Rejecting anything else keeps `../`,
+    /// absolute paths, and other traversal strings out of the
+    /// `root.join(...)` in [`Cache::path_for`].
+    fn validate(key: &CacheKey) -> Result<()> {
+        let hex = key.as_str();
+        if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Ok(())
+        } else {
+            Err(LlmError::Schema(
+                "invalid cache key: expected 64 hex characters".into(),
+            ))
+        }
+    }
+
     fn path_for(&self, key: &CacheKey) -> PathBuf {
         self.root.join(format!("{}.json", key.as_str()))
     }
@@ -59,6 +74,7 @@ impl Cache {
     /// Read a cached response. Returns `Ok(None)` if the file does not
     /// exist; any other I/O or parse error surfaces as `LlmError`.
     pub async fn get(&self, key: &CacheKey) -> Result<Option<LlmResponse>> {
+        Self::validate(key)?;
         let path = self.path_for(key);
         let bytes = match fs::read(&path).await {
             Ok(b) => b,
@@ -78,6 +94,7 @@ impl Cache {
     /// and renames to `<hex>.json`. The persisted form has
     /// `cache_hit = false` so a subsequent `get()` flips it to true.
     pub async fn put(&self, key: &CacheKey, value: &LlmResponse) -> Result<()> {
+        Self::validate(key)?;
         fs::create_dir_all(&self.root).await?;
         let mut to_persist = value.clone();
         to_persist.cache_hit = false;
@@ -141,5 +158,13 @@ mod tests {
         let cache = Cache::new(dir.path());
         let key = CacheKey::new("b".repeat(64));
         assert!(cache.get(&key).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn rejects_non_hex_traversal_key() {
+        let dir = tempdir().unwrap();
+        let cache = Cache::new(dir.path());
+        let key = CacheKey::new("../outside".into());
+        assert!(cache.put(&key, &sample_response()).await.is_err());
     }
 }

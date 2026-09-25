@@ -21,12 +21,13 @@ pub struct FilterRules {
 }
 
 impl FilterRules {
-    /// Load from `<root>/config/rules.yaml`, falling back to
-    /// `config/rules.example.yaml`. Returns a default (no-op) rule set if
-    /// neither exists.
+    /// Load from the resolved config directory, falling back to
+    /// `rules.example.yaml`. Returns a default (no-op) rule set if neither
+    /// exists.
     pub fn load(root: &Path) -> Result<Self> {
-        let primary = root.join("config").join("rules.yaml");
-        let fallback = root.join("config").join("rules.example.yaml");
+        let config_dir = careerai_core::paths::config_dir_for_root(root);
+        let primary = config_dir.join("rules.yaml");
+        let fallback = config_dir.join("rules.example.yaml");
         let path = if primary.exists() {
             primary
         } else if fallback.exists() {

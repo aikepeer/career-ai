@@ -22,8 +22,16 @@ pub enum SubmitError {
     BadState { state: String },
     #[error("unknown source: {0}")]
     UnknownSource(String),
+    #[error("missing required submission data: {0}")]
+    MissingData(String),
     #[error("source '{0}' is disabled in submit.per_source config")]
     SourceDisabled(String),
+    /// The per-source rate policy refused a live submission attempt
+    /// (day cap or quiet hours). Distinct from `SourceDisabled` (a
+    /// config `enabled: false`) so audit logs can tell "operator turned
+    /// this off" from "rate limiter held it back".
+    #[error("rate-limited: {0}")]
+    RateLimited(String),
     /// The submitter exists but its click/network flow has not been
     /// built yet. Distinct from `SourceDisabled` (config) so audit logs
     /// can tell "operator turned this off" from "engineer hasn't

@@ -4,7 +4,7 @@ expression: md
 ---
 # Jane Doe
 
-jane@example.com · +1-555-0100 · Remote · [GitHub](https://github.com/jane) · [LinkedIn](https://linkedin.com/in/jane)
+[jane@example.com](mailto:jane@example.com) · +1-555-0100 · Remote · [GitHub](https://github.com/jane) · [LinkedIn](https://linkedin.com/in/jane)
 
 ## Summary
 
@@ -14,19 +14,18 @@ Backend engineer focused on distributed systems.
 
 ### Senior Engineer — Acme Corp
 
-*2022-01 – present · Remote*
+**2022-01 – present** · Remote
 
 - Shipped production pipelines
 - Owned core infra
 
 ### Engineer — Globex
 
-*2019-06 – 2021-12*
+**2019-06 – 2021-12**
 
 - Reduced latency by 40%
 - Led migration to Rust
 - Mentored three engineers
-
 
 ## Education
 
@@ -39,7 +38,6 @@ Backend engineer focused on distributed systems.
 ### careerai · [link](https://example.com/careerai)
 
 - Open-source job automation in Rust
-
 
 ## Skills
 

@@ -24,9 +24,9 @@ pub fn build_schema_preamble() -> String {
     "phone": "string",
     "location": "string",
     "links": {
-      "github": "string (URL)",
-      "linkedin": "string (URL)",
-      "portfolio": "string (URL)"
+      "github": "string (valid URL)",
+      "linkedin": "string (valid URL)",
+      "portfolio": "string (valid URL)"
     }
   },
   "summary": "string",
@@ -37,8 +37,8 @@ pub fn build_schema_preamble() -> String {
   },
   "experience": [
     {
-      "title": "string",
-      "company": "string",
+      "title": "string (Job Title only, e.g. Senior Embedded System Engineer)",
+      "company": "string (Company Name only, e.g. SYMX.AI)",
       "location": "string",
       "start": "YYYY-MM | YYYY | empty",
       "end":   "YYYY-MM | YYYY | Present | empty",
@@ -47,8 +47,8 @@ pub fn build_schema_preamble() -> String {
   ],
   "education": [
     {
-      "degree": "string",
-      "institution": "string",
+      "degree": "string (Qualification, e.g. B.E. Electronics & Telecommunications)",
+      "institution": "string (University / School Name)",
       "start": "YYYY | YYYY-MM | empty",
       "end":   "YYYY | YYYY-MM | empty"
     }
@@ -63,13 +63,13 @@ pub fn build_schema_preamble() -> String {
 }
 
 RULES:
-- Output a single JSON object matching the schema. No prose, no markdown.
-- Never invent. Use "" for unknown scalars, [] for unknown lists.
-- Each experience entry's `title` must be a job title, not a date.
-  If the resume only shows a date and no title, leave `title` empty.
-- Each education entry's `institution` must be the school name; the
-  `degree` is the qualification (e.g. "B.Tech Computer Science").
-- Bullets are individual achievement lines; do not concatenate.
+- Output ONLY a single JSON object matching the schema. No prose, no markdown code blocks.
+- Never place dates or bullet text into `title` or `company`.
+- `title` must be the actual position title (e.g., "Senior Embedded Developer").
+- `company` must be the employer name (e.g., "SYMX.AI", "Capgemini", "Dozee").
+- All bullet points under a single job role MUST be aggregated into the `bullets` array of THAT job role. Do not create separate experience entries for individual bullet points.
+- `portfolio`, `github`, and `linkedin` links must be clean URLs starting with http:// or https:// (strip any prefix tags like [PORTFOLIO:...]).
+- Categorize skills logically into `languages` (C, C++, Python, Bash), `frameworks` (Yocto, Kernel Drivers, RTOS, ROS), and `tools` (Lauterbach, JTAG, gdb, Docker, Jenkins). Do not dump everything into `languages`.
 "#
     .to_string()
 }
@@ -91,7 +91,7 @@ pub fn build_request(resume_text: &str, opts: &ExtractOptions) -> ExtractRequest
         prompt_version: opts.prompt_version.clone(),
         model: opts.model.clone(),
         temperature: opts.temperature,
-        max_tokens: opts.max_tokens,
+        max_tokens: opts.max_tokens.max(16384),
         cache_schema: opts.cache_schema,
     }
 }
