@@ -73,6 +73,7 @@ jobs:
           DIFF_LINES: ${{ steps.diff_size.outputs.lines }}
         run: |
           set -euo pipefail
+          DIFF_LINES="${DIFF_LINES:-unknown}"
 
           DIFF_FILE=$(mktemp)
           REVIEW_FILE=$(mktemp)
