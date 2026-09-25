@@ -62,7 +62,7 @@ tokio-cron-scheduler = "0.13"
 futures = "0.3"
 scraper = "0.26"
 base64 = "0.22"
-rmcp = { version = "1.5", default-features = false, features = ["server", "macros", "transport-io", "schemars", "client", "transport-child-process"] }
+rmcp = { version = "2.1", default-features = false, features = ["server", "macros", "transport-io", "schemars", "client", "transport-child-process"] }
 schemars = "1"
 quick-xml = { version = "0.41", features = ["serialize"] }
 
