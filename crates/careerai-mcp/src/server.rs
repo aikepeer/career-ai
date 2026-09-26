@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::{tool, tool_router, ErrorData as McpError};
 use serde_json::Value;
 
@@ -230,7 +230,7 @@ impl CareerAiServer {
 fn json_content<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let body = serde_json::to_string(value)
         .map_err(|e| McpServerError::Pipeline(format!("serialize result: {e}")))?;
-    Ok(CallToolResult::success(vec![Content::text(body)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(body)]))
 }
 
 // Keep the unused `Value` import suppressed when we expand handlers later.

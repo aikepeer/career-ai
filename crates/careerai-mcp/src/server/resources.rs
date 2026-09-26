@@ -1,10 +1,7 @@
 //! Resource listing and reading logic — `resources/list`, `resources/templates/list`,
 //! and `resources/read` dispatching. Kept separate so `server.rs` stays under 300 LOC.
 
-use rmcp::model::{
-    AnnotateAble, RawResource, RawResourceTemplate, ReadResourceResult, Resource, ResourceContents,
-    ResourceTemplate,
-};
+use rmcp::model::{ReadResourceResult, Resource, ResourceContents, ResourceTemplate};
 use serde_json::json;
 
 use careerai_pipeline as pipeline;
@@ -29,7 +26,7 @@ impl CareerAiServer {
         // `careerai://shortlist/today` is still accepted by
         // `read_resource` for backwards compat — it just isn't
         // duplicated in the discovery surface.
-        vec![RawResource::new("careerai://profile", "profile.yaml").no_annotation()]
+        vec![Resource::new("careerai://profile", "profile.yaml")]
     }
 
     /// Resource templates (URI patterns) advertised via
@@ -39,13 +36,11 @@ impl CareerAiServer {
     #[allow(clippy::unused_self)]
     pub(crate) fn list_resource_templates_static(&self) -> Vec<ResourceTemplate> {
         vec![
-            RawResourceTemplate::new("careerai://shortlist/{date}", "shortlist by date")
-                .no_annotation(),
-            RawResourceTemplate::new(
+            ResourceTemplate::new("careerai://shortlist/{date}", "shortlist by date"),
+            ResourceTemplate::new(
                 "careerai://artifacts/{application_id}",
                 "artifacts for an application",
-            )
-            .no_annotation(),
+            ),
         ]
     }
 
