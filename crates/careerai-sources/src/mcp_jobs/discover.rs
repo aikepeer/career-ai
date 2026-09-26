@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use careerai_core::config::{McpSourceConfig, McpTransportConfig};
-use rmcp::model::{CallToolRequestParams, Content as McpContent, RawContent};
+use rmcp::model::{CallToolRequestParams, ContentBlock};
 use rmcp::service::{RoleClient, RunningService, ServiceExt};
 use rmcp::transport::TokioChildProcess;
 use serde_json::{Map, Value};
@@ -119,9 +119,9 @@ async fn pick_tool(
 
 /// Extract the first text-content block from a `tools/call` result, if
 /// any. Most servers emit `{ "content": [{ "type": "text", "text": "..." }] }`.
-fn first_text_content(content: &[McpContent]) -> Option<String> {
-    content.iter().find_map(|c| match &c.raw {
-        RawContent::Text(t) => Some(t.text.clone()),
+fn first_text_content(content: &[ContentBlock]) -> Option<String> {
+    content.iter().find_map(|c| match c {
+        ContentBlock::Text(t) => Some(t.text.clone()),
         _ => None,
     })
 }

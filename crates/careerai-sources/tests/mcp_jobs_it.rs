@@ -28,7 +28,7 @@ use careerai_sources::{McpJobsSource, Source};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, Content, Implementation, InitializeResult, ProtocolVersion, ServerCapabilities,
+    CallToolResult, ContentBlock, Implementation, InitializeResult, ProtocolVersion, ServerCapabilities,
     ServerInfo,
 };
 use rmcp::service::ServiceExt;
@@ -70,7 +70,7 @@ impl FakeJobsServer {
         &self,
         Parameters(_args): Parameters<SearchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text(FIXTURE_JSON)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(FIXTURE_JSON)]))
     }
 }
 

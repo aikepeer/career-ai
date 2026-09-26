@@ -256,9 +256,9 @@ async fn apply_without_confirm_token_is_rejected() {
     client.cancel().await.expect("cancel");
 }
 
-fn first_text(content: &[rmcp::model::Content]) -> Option<&str> {
-    content.iter().find_map(|c| match &c.raw {
-        rmcp::model::RawContent::Text(t) => Some(t.text.as_str()),
+fn first_text(content: &[rmcp::model::ContentBlock]) -> Option<&str> {
+    content.iter().find_map(|c| match c {
+        rmcp::model::ContentBlock::Text(t) => Some(t.text.as_str()),
         _ => None,
     })
 }
